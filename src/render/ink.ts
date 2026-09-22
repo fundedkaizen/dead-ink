@@ -316,3 +316,39 @@ export class Draft extends THREE.Group {
     return this
   }
 }
+
+// ---- Loot rarity beams --------------------------------------------------------------------------
+// The one deliberate break from black-on-white: colour appears only where it MEANS something. A
+// beam marks loot worth walking to, fading upward so it reads at distance without a hard edge.
+// Normal alpha blending, never additive: additive colour on white paper would wash out to white.
+// ShaderMaterial is skipped by collision extraction, and callers parent the beam under a
+// noCollision object, so a beam can never block movement or stop a bullet.
+const beamMaterials = new Map<number, THREE.ShaderMaterial>()
+function beamMaterial(color: number) {
+  let material = beamMaterials.get(color)
+  if (!material) {
+    material = new THREE.ShaderMaterial({
+      uniforms: { color: { value: new THREE.Color(color) } },
+      vertexShader: 'varying float vHeight; void main() { vHeight = uv.y; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+      fragmentShader: 'uniform vec3 color; varying float vHeight; void main() { gl_FragColor = vec4(color, 0.55 * pow(1.0 - vHeight, 1.6)); }',
+      transparent: true, depthWrite: false, side: THREE.DoubleSide,
+    })
+    beamMaterials.set(color, material)
+  }
+  return material
+}
+
+export function createRarityBeam(color: number, height = 7) {
+  const beam = new THREE.Group()
+  beam.name = 'Rarity beam'
+  beam.userData.noCollision = true
+  const column = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.16, height, 12, 1, true), beamMaterial(color))
+  column.position.y = height / 2
+  column.renderOrder = 10
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.22, 0.42, 28), beamMaterial(color))
+  ring.rotation.x = -Math.PI / 2
+  ring.position.y = 0.02
+  ring.renderOrder = 10
+  beam.add(column, ring)
+  return beam
+}

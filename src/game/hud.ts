@@ -1,12 +1,12 @@
 import * as THREE from 'three'
 import { type MissionState, SIGNALS_COMPUTER_ID } from './mission'
-import { WEAPON_RULES } from './balance'
 import type { MissionWorld, WeaponItem } from './types'
 import './game.css'
 import { IncomingFire } from './incoming-fire'
 import { MissionMenu } from './menu'
 import type { PlayerDeathSequence } from './player-death'
 import type { EscapeCinematic } from './escape-cinematic'
+import { RARITY_INFO, weaponRules } from './loot'
 
 const icons: Record<string, string> = {
   door: '<path d="M5 21V3h14v18M9 21V5l8 2v14M13 13h1"/>',
@@ -218,7 +218,10 @@ export class MissionHUD {
     this.ammo.hidden = !data.weapon
     this.reloadIcon.toggleAttribute('hidden', !data.reloading)
     if (data.weapon) {
-      const rule = WEAPON_RULES[data.weapon.name]
+      const rule = weaponRules(data.weapon)
+      // Rarity tints the magazine icon; grey and unrated weapons keep the plain ink colour.
+      const tint = data.weapon.rarity && data.weapon.rarity !== 'common' ? RARITY_INFO[data.weapon.rarity].css : ''
+      if (this.ammo.style.color !== tint) this.ammo.style.color = tint
       const rounds = Math.max(0, Math.min(rule.capacity, data.weapon.magazine))
       const magazines = (rounds > 0 ? 1 : 0) + Math.ceil(Math.max(0, data.weapon.reserve) / rule.capacity)
       this.magazineCount.textContent = `${magazines} ×`

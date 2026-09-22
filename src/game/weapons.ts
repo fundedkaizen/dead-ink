@@ -4,6 +4,8 @@ import { disposeGun, type Gun } from '../lab/weapons/models'
 import type { WeaponContext, WeaponFrame, WeaponItem, WeaponSnapshot } from './types'
 import { WEAPON_RULES, WEAPON_SLOTS, SHOTGUN_PELLETS, SHOTGUN_BALLISTICS, SNIPER_ZOOM, startingLoadout } from './balance'
 import { createMissionGun } from './weapon-models'
+import { RARITY_INFO, weaponRules } from './loot'
+import { createRarityBeam } from '../render/ink'
 export { WEAPON_RULES } from './balance'
 
 const up = new THREE.Vector3(0, 1, 0)
@@ -85,7 +87,7 @@ export class FirstPersonWeapons {
     this.setHeldModel()
   }
 
-  get label() { return this.current ? WEAPON_RULES[this.current.name].label : 'Empty hands' }
+  get label() { return this.current ? weaponRules(this.current).label : 'Empty hands' }
   get ammo() { return this.current ? `${this.current.magazine} / ${this.current.reserve}` : '—' }
   get reloading() { return this.reloadElapsed !== null }
   get blocked() { return this.obstructed }
@@ -303,13 +305,13 @@ export class FirstPersonWeapons {
     this.reducedMotion = frame.reducedMotion
     if (this.reloadElapsed !== null && this.current) {
       this.reloadElapsed += delta
-      if (this.reloadElapsed >= WEAPON_RULES[this.current.name].reload) {
+      if (this.reloadElapsed >= weaponRules(this.current).reload) {
         const shellReload = this.current.name === 'shotgun'
         const amount = Math.min(WEAPON_RULES[this.current.name].capacity - this.current.magazine, this.current.reserve, shellReload ? 1 : Infinity)
         this.current.magazine += amount
         this.current.reserve -= amount
         if (shellReload) this.context.emit({ kind: 'shell-load', radius: 2, position: this.feet.clone() })
-        if (shellReload && this.current.magazine < WEAPON_RULES.shotgun.capacity && this.current.reserve > 0) this.reloadElapsed -= WEAPON_RULES.shotgun.reload
+        if (shellReload && this.current.magazine < WEAPON_RULES.shotgun.capacity && this.current.reserve > 0) this.reloadElapsed -= weaponRules(this.current).reload
         else {
           this.reloadElapsed = null
           this.context.emit({ kind: 'reload-ready', weapon: this.current.name, radius: 2, position: this.feet.clone(), text: 'Weapon ready' })
@@ -364,7 +366,7 @@ export class FirstPersonWeapons {
   private pose(_dt: number) {
     if (!this.model || !this.current) return
     const motion = !this.frame.reducedMotion
-    const progress = this.reloadElapsed === null ? 0 : Math.max(0, this.reloadElapsed) / WEAPON_RULES[this.current.name].reload
+    const progress = this.reloadElapsed === null ? 0 : Math.max(0, this.reloadElapsed) / weaponRules(this.current).reload
     const working = this.reloading ? Math.sin(Math.PI * progress) : 0
     const position = this.gripPosition()
     const bob = motion ? Math.min(1, this.frame.moving) * (1 - this.aim) : 0
@@ -450,7 +452,7 @@ export class FirstPersonWeapons {
   }
 
   private shoot(item: WeaponItem) {
-    const rules = WEAPON_RULES[item.name]
+    const rules = weaponRules(item)
     this.cooldown = rules.interval
     if (item.magazine === 0) {
       this.held = false
@@ -523,7 +525,7 @@ export class FirstPersonWeapons {
     this.cancel()
     this.addPickup(item)
     this.setHeldModel()
-    this.context.emit({ kind: 'drop', position: new THREE.Vector3(...item.position), radius: 3, text: `${WEAPON_RULES[item.name].label} dropped` })
+    this.context.emit({ kind: 'drop', position: new THREE.Vector3(...item.position), radius: 3, text: `${weaponRules(item).label} dropped` })
     return true
   }
 
@@ -535,12 +537,19 @@ export class FirstPersonWeapons {
     item.reserve = Math.max(0, Math.floor(item.reserve))
     item.position ??= this.feet.toArray() as [number, number, number]
     const model = createMissionGun(item.name)
-    model.name = `Dropped ${WEAPON_RULES[item.name].label}: ${item.id}`
+    model.name = `Dropped ${weaponRules(item).label}: ${item.id}`
     model.userData.noCollision = true
     model.rotation.set(0, 0.6, Math.PI / 2)
     model.position.set(...item.position)
     const bounds = new THREE.Box3().setFromObject(model)
     model.position.y += item.position[1] + 0.012 - bounds.min.y
+    if (item.rarity && RARITY_INFO[item.rarity].beam) {
+      // Parent under the gun so the beam moves, disposes and ignores collision with it.
+      // The gun lies on its side, so undo its rotation to keep the beam vertical.
+      const beam = createRarityBeam(RARITY_INFO[item.rarity].color)
+      beam.quaternion.copy(model.quaternion).invert()
+      model.add(beam)
+    }
     this.context.scene.add(model)
     this.loose.set(item.id, { item, model })
   }
@@ -548,7 +557,7 @@ export class FirstPersonWeapons {
   pickupTargets() {
     return [...this.loose.values()].map(({ item, model }) => ({
       object: model as THREE.Object3D, point: model.position.clone().add(new THREE.Vector3(0, 0.10, 0)),
-      label: `${this.inventory.every(Boolean) ? 'Swap' : 'Take'} ${WEAPON_RULES[item.name].label}`, id: item.id,
+      label: `${this.inventory.every(Boolean) ? 'Swap' : 'Take'} ${weaponRules(item).label}`, id: item.id,
     }))
   }
 
