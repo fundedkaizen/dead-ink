@@ -28,7 +28,7 @@ export const newGame = (): RoundState => ({ round: 0, phase: 'break', timer: FIR
  * many are playing. Returns how many zombies to spawn this step, and any round change. The caller
  * must hand back any spawn it could not place (`returnSpawns`), so a round never ends short.
  */
-export function stepRounds(state: RoundState, dt: number, alive: number, players: number): RoundEvents {
+export function stepRounds(state: RoundState, dt: number, alive: number, players: number, delayScale = 1): RoundEvents {
   const events: RoundEvents = { spawn: 0 }
   if (!(dt > 0)) return events
   if (state.phase === 'break') {
@@ -44,7 +44,7 @@ export function stepRounds(state: RoundState, dt: number, alive: number, players
   while (state.spawnTimer <= 0 && state.toSpawn > 0 && alive + events.spawn < MAX_ALIVE) {
     events.spawn++
     state.toSpawn--
-    state.spawnTimer += spawnDelay(state.round)
+    state.spawnTimer += spawnDelay(state.round) * delayScale
   }
   // Nothing more due while the crowd is full: do not bank spawns into a burst for later.
   if (state.spawnTimer < 0) state.spawnTimer = 0

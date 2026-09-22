@@ -59,3 +59,7 @@ body[data-reduced-motion="true"][data-dead-ink-nuke="true"] #world { animation: 
   .dead-ink-points { right: 18px; bottom: 96px; }
   .dead-ink-banner { font-size: 34px; }
 }
+
+/* Difficulty on the Settings page. */
+.dead-ink-difficulty { display: grid; gap: 6px; }
+.dead-ink-difficulty select { font: inherit; max-width: 100%; padding: 6px 8px; border: 1px solid var(--ink-rule); border-radius: 4px 6px 3px 5px; background: var(--paper, #fbfaf5); color: var(--ink); }

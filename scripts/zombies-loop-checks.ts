@@ -78,6 +78,17 @@ function playRound(players: number, killRate = 3, fps = 30) {
   assert(counts.every(c => c === zombiesInRound(1, 1)), `every frame rate spawns the same round (${counts})`)
 }
 
+// Difficulty's spawn speed: a faster setting feeds the same round in sooner.
+{
+  const spawnedAfter = (scale: number) => {
+    const state = newGame()
+    let spawned = 0
+    for (let t = 0; t < FIRST_ROUND_DELAY + 6; t += 1 / 30) spawned += stepRounds(state, 1 / 30, 0, 1, scale).spawn
+    return spawned
+  }
+  assert(spawnedAfter(0.5) > spawnedAfter(1) && spawnedAfter(1) >= spawnedAfter(1.5), 'a faster difficulty spawns sooner')
+}
+
 // ---- 2. Points and the wall ----------------------------------------------------------------------
 assert.equal(pointsForHit({ lethal: false, zone: 'torso' }), 10)
 assert.equal(pointsForHit({ lethal: false, zone: 'head' }), 10, 'a headshot that does not kill is still a hit')

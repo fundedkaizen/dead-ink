@@ -123,3 +123,15 @@ export const BOSS = {
   slam: { every: 10, windup: 1.0, radius: 6.5, damage: 70 },
 } as const
 export const isBossRound = (round: number) => round > 0 && round % BOSS.every === 0
+
+/**
+ * Difficulty, our own: health and damage multipliers on Call of Duty's numbers, how many rounds earlier
+ * (or later) sprinters take over, and how fast zombies come. Normal is Call of Duty as it is.
+ */
+export type Difficulty = 'casual' | 'normal' | 'hardcore' | 'realistic'
+export const DIFFICULTY: Record<Difficulty, { label: string; health: number; damage: number; sprintShift: number; spawnDelay: number; blurb: string }> = {
+  casual: { label: 'Casual', health: 0.7, damage: 0.68, sprintShift: -4, spawnDelay: 1.15, blurb: 'Weaker zombies; three hits to go down.' },
+  normal: { label: 'Normal', health: 1, damage: 1, sprintShift: 0, spawnDelay: 1, blurb: 'Call of Duty as it is.' },
+  hardcore: { label: 'Hardcore', health: 1.25, damage: 1, sprintShift: 3, spawnDelay: 0.8, blurb: 'Tougher, faster, sooner.' },
+  realistic: { label: 'Realistic', health: 1.5, damage: 2, sprintShift: 5, spawnDelay: 0.7, blurb: 'One hit downs you without Thick Ink.' },
+}

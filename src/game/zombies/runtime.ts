@@ -24,7 +24,7 @@ import { NavGraph, geometryHash, type NavData } from './navgraph'
 import { pickSpawn } from './spawn'
 import { findWallSpots } from './placement'
 import { newGame, returnSpawns, stepRounds, type RoundState } from './rounds'
-import { BOSS, MAX_ALIVE, PLAYER_HEALTH, POWERUPS, PRICES, STARTING_POINTS, ZOMBIE_DAMAGE_SCALE, isBossRound, movementMix, zombieHealth, type PowerupKind } from './rules'
+import { BOSS, DIFFICULTY, MAX_ALIVE, PLAYER_HEALTH, POWERUPS, PRICES, STARTING_POINTS, ZOMBIE_DAMAGE_SCALE, isBossRound, movementMix, zombieHealth, type Difficulty, type PowerupKind } from './rules'
 import { BOX_WEIGHTS, WALL_WEAPONS, ZOMBIE_SLOTS, freshWeapon, pointsForHit, rollBox, startingPistol, wallOffer, RESERVE_MAGAZINES } from './economy'
 import { MysteryBox, WallBuy } from './stations'
 import { ZombieHud } from './hud'
@@ -47,6 +47,12 @@ export const KNIFE = { damage: 150, range: 2.1, cooldown: 0.55 } as const
 export const POOL_SIZE = MAX_ALIVE + 8
 type TimedPowerup = 'instaKill' | 'doublePoints' | 'deathMachine'
 
+/** The chosen difficulty is remembered in this browser; storage can be missing or blocked. */
+const DIFFICULTY_KEY = 'dead-ink-difficulty'
+function savedDifficulty(): Difficulty {
+  try { const value = localStorage.getItem(DIFFICULTY_KEY); if (value && value in DIFFICULTY) return value as Difficulty } catch { /* storage unavailable */ }
+  return 'normal'
+}
 /** The Death Machine never runs dry: its drum is topped up every frame while it lasts. */
 const DEATH_MACHINE_ROUNDS = 999
 
@@ -108,6 +114,7 @@ export class ZombiesRuntime {
   wallBuys: WallBuy[] = []
   box: MysteryBox | null = null
   zones: ZoneGates | null = null
+  difficulty: Difficulty = savedDifficulty()
   perkMachines: PerkMachine[] = []
   pack: PackAPunch | null = null
   readonly perks = new Set<PerkKind>()
@@ -170,6 +177,7 @@ export class ZombiesRuntime {
     this.indicator = new DamageIndicator(hudRoot)
     // One more cell than you start with, for Spare Nib's third gun; the hotbar hides cells you do not have.
     this.hotbar = new Hotbar(hudRoot, ZOMBIE_SLOTS + 1)
+    this.addDifficultySetting()
     player.onPlayingChange = playing => this.hud.setPlaying(playing)
     player.actions.extraTargets = () => this.targets()
     player.actions.onAction = target => {
@@ -178,6 +186,31 @@ export class ZombiesRuntime {
     }
     this.bindInput()
     this.initialized = this.initialize()
+  }
+
+  /** Difficulty on the Settings page, under the volume; it applies to every zombie from the next one on. */
+  private addDifficultySetting() {
+    const settings = document.querySelector('.mission-settings')
+    if (!settings) return
+    const label = document.createElement('label')
+    label.className = 'dead-ink-difficulty'
+    label.htmlFor = 'dead-ink-difficulty'
+    label.textContent = 'Difficulty '
+    const select = document.createElement('select')
+    select.id = 'dead-ink-difficulty'
+    for (const [value, info] of Object.entries(DIFFICULTY)) {
+      const option = document.createElement('option')
+      option.value = value; option.textContent = `${info.label}: ${info.blurb}`
+      select.append(option)
+    }
+    select.value = this.difficulty
+    select.addEventListener('change', () => {
+      this.difficulty = select.value as Difficulty
+      try { localStorage.setItem(DIFFICULTY_KEY, this.difficulty) } catch { /* storage unavailable */ }
+    }, { signal: this.abort.signal })
+    label.append(select)
+    settings.append(label)
+    this.abort.signal.addEventListener('abort', () => label.remove())
   }
 
   private async initialize() {
@@ -197,7 +230,7 @@ export class ZombiesRuntime {
       if (graph.geometry && graph.geometry !== hash) console.warn(`Dead Ink: navigation graph was baked for geometry ${graph.geometry}, map is ${hash}. Rebake with scripts/build-navgraph.ts.`)
       this.graph = graph
       this.director = new ZombieDirector({ scene: this.scene, world: this.player.world, doors: doors.filter(door => !door.userData.missionLocked), graph, emit: event => this.emit(event),
-        damagePlayer: (_id, amount, source) => this.damage(amount, 'zombie', source),
+        damagePlayer: (_id, amount, source) => this.damage(Math.round(amount * DIFFICULTY[this.difficulty].damage), 'zombie', source),
         onHit: hit => { this.impactPoint = hit.point.clone(); this.blood.emitHit(hit); this.audio.confirmHit(hit) },
         onRise: position => { this.riseMarks.emit(position); this.emit({ kind: 'zombie-rise', position, radius: 30 }) },
         onSlam: (position, radius) => { this.shockwaves.emit(position, radius); this.riseMarks.emit(position) } })
@@ -695,7 +728,7 @@ export class ZombiesRuntime {
   // ---------------------------------------------------------------- zombies
 
   private gait(): ZombieGait {
-    const mix = movementMix(this.rounds.round)
+    const mix = movementMix(Math.max(1, this.rounds.round + DIFFICULTY[this.difficulty].sprintShift))
     return weighted(this.random, { walk: mix.walk, run: mix.run, sprint: mix.sprint })
   }
 
@@ -716,7 +749,8 @@ export class ZombiesRuntime {
     const spot = pickSpawn(graph, this.player.world, { near: 14, far: 42, eyes: [] }, this.random)
     if (!spot) return false
     const feet = this.player.body.position
-    return !!director.spawn(spot, zombieHealth(this.rounds.round), this.gait(), Math.atan2(feet.x - spot.x, feet.z - spot.z), true)
+    const health = Math.round(zombieHealth(this.rounds.round) * DIFFICULTY[this.difficulty].health)
+    return !!director.spawn(spot, health, this.gait(), Math.atan2(feet.x - spot.x, feet.z - spot.z), true)
   }
 
   /** The Brute climbs out of the ground somewhere it can walk to you from, and roars. */
@@ -725,7 +759,8 @@ export class ZombiesRuntime {
     if (!director || !graph) return
     const spot = pickSpawn(graph, this.player.world, { near: 16, far: 40, eyes: [] }, this.random)
     const feet = this.player.body.position
-    const brute = spot && director.spawn(spot, BOSS.health(this.rounds.round), 'run', Math.atan2(feet.x - spot.x, feet.z - spot.z), true, true)
+    const health = Math.round(BOSS.health(this.rounds.round) * DIFFICULTY[this.difficulty].health)
+    const brute = spot && director.spawn(spot, health, 'run', Math.atan2(feet.x - spot.x, feet.z - spot.z), true, true)
     // Nowhere to stand, or every body in use: try again in a moment.
     if (!brute) { this.bruteTimer = 1; return }
     this.brute = brute
@@ -788,7 +823,7 @@ export class ZombiesRuntime {
         this.hud.notify('That is the edge of the map.', 3)
       } else if (!this.player.actions.traversing) this.damage(fallDamage(landingSpeed), 'fall')
       // Rounds: announce, feed zombies in, and hand back any that found nowhere to stand.
-      const events = stepRounds(this.rounds, dt, this.director.aliveCount, 1)
+      const events = stepRounds(this.rounds, dt, this.director.aliveCount, 1, DIFFICULTY[this.difficulty].spawnDelay)
       this.state.round = this.rounds.round
       if (events.roundStarted) {
         this.zombieHud.announce(`Round ${events.roundStarted}`); this.dropper.newRound(); this.emit({ kind: 'round-start' })
