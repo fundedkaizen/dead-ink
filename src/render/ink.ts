@@ -404,3 +404,12 @@ export function createDangerStreak() {
   line.renderOrder = 12
   return { line, material, dispose() { trackedLines.delete(material); material.dispose(); line.geometry.dispose(); line.removeFromParent() } }
 }
+
+// ---- Dead Ink zombie eyes -----------------------------------------------------------------------
+// Zombies are solid black like every character; their eyes are the only colour on them, and it is
+// red because red means danger. One shared material for every eye.
+let eyeMaterial: THREE.MeshBasicMaterial | null = null
+export function zombieEyeMaterial() {
+  eyeMaterial ??= new THREE.MeshBasicMaterial({ color: 0xd4332a, toneMapped: false })
+  return eyeMaterial
+}
