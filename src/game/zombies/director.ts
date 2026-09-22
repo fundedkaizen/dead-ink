@@ -95,6 +95,9 @@ export type Zombie = {
   voice: number
   /** How this one carries itself: its hunch, its lolling head, its drooping arm, its limp. */
   carriage: Carriage
+  /** Whether it can walk straight at its target, and seconds until that is checked again. */
+  direct: boolean
+  directTimer: number
   /** The Brute: bigger, slower, harder hitting, and it slams the ground. */
   boss: boolean
   /** Seconds left winding up a ground slam (0: not slamming), and until it may slam again. */
@@ -183,7 +186,7 @@ export class ZombieDirector {
         state: 'idle', stuck: 0, unreachable: 0, swing: 0, swingLanded: false,
         recover: 0, stagger: 0, deadFor: 0, stranded: false, footstep: 0, route: [], routeTimer: 0, routeNode: -1, routeFrom: -1, blocked: -1, avoidTimer: 0, edgeFail: 0, probeFail: -1, probeFails: 0, bestDistance: Infinity, noProgress: 0,
         rise: 0, climb: null, voice: 0, carriage: randomCarriage('walk'), flinch: 0, flinchBack: 0, flinchSide: 0,
-        boss: false, slam: 0, slamTimer: 0,
+        boss: false, slam: 0, slamTimer: 0, direct: false, directTimer: 0,
       })
     }
   }
@@ -215,6 +218,7 @@ export class ZombieDirector {
     zombie.voice = 1 + Math.random() * 3
     zombie.carriage = randomCarriage(gait); zombie.flinch = 0
     zombie.boss = boss; zombie.slam = 0; zombie.slamTimer = BOSS.slam.every * 0.6
+    zombie.direct = false; zombie.directTimer = 0
     if (boss) zombie.carriage.lean += 0.15
     this.plans.delete(zombie)
     const { actor } = zombie
@@ -494,7 +498,16 @@ export class ZombieDirector {
     const graph = this.context.graph
     let waypoint: THREE.Vector3 | undefined
     let stopShort = 0
-    if (flat < 12 && Math.abs(goal.y - zombie.position.y) < 1.2 && this.navigation.segment(zombie.position, goal)) {
+    // The straight-line test sweeps a body every 16 cm: the costliest thing a zombie does. A few times a
+    // second is enough, spread across the crowd; a step into a wall is still refused, frame by frame.
+    zombie.directTimer -= dt
+    const near = flat < 12 && Math.abs(goal.y - zombie.position.y) < 1.2
+    if (!near) zombie.direct = false
+    else if (zombie.directTimer <= 0) {
+      zombie.direct = this.navigation.segment(zombie.position, goal)
+      zombie.directTimer = (flat < 3 ? 0.1 : 0.22) + Math.random() * 0.1
+    }
+    if (near && zombie.direct) {
       waypoint = goal
       stopShort = 0.8
       zombie.route.length = 0
