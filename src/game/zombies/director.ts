@@ -48,6 +48,8 @@ export const CLIMB_SPEED = { up: 1.8, down: 3, across: 2.2 } as const
  * moving zombies that cannot path to you back into play near you.
  */
 export const STRANDED = { seconds: 7, distance: 75, noProgressSeconds: 6, progressMetres: 1.5 } as const
+/** How long a bullet's jolt lasts. */
+const FLINCH_SECONDS = 0.22
 /** How often the shared flow field is recomputed. */
 export const FLOW_INTERVAL = 0.35
 
@@ -91,6 +93,34 @@ export type Zombie = {
   climb: Climb | null
   /** Seconds until it next groans (or screams, if it sprints). */
   voice: number
+  /** How this one carries itself: its hunch, its lolling head, its drooping arm, its limp. */
+  carriage: Carriage
+  /** Seconds left of the jolt from the last bullet, and where it came from (back, side: -1..1). */
+  flinch: number
+  flinchBack: number
+  flinchSide: number
+}
+
+type Carriage = { lean: number; nod: number; tilt: number; droopL: number; droopR: number; limp: number; phase: number }
+
+/** No two zombies walk alike: a hunch, a head lolled to one side, one arm hanging lower, maybe a limp. */
+function randomCarriage(gait: ZombieGait): Carriage {
+  const r = Math.random, side = r() < 0.5 ? -1 : 1
+  return {
+    lean: 0.32 + r() * 0.3 + (gait === 'sprint' ? 0.15 : 0),
+    nod: 0.08 + r() * 0.22,
+    tilt: side * (0.08 + r() * 0.3),
+    droopL: r() < 0.5 ? r() * 0.55 : 0,
+    droopR: r() < 0.5 ? r() * 0.55 : 0,
+    limp: gait === 'walk' && r() < 0.6 ? 0.05 + r() * 0.08 : 0,
+    phase: r() * Math.PI * 2,
+  }
+}
+
+const bendEuler = new THREE.Euler(), bendQuaternion = new THREE.Quaternion()
+/** Add a rotation in the bone's rest frame (the rig's own convention: +X leans forward, +Z tips right). */
+function bend(bone: THREE.Object3D, x: number, y: number, z: number) {
+  bone.quaternion.multiply(bendQuaternion.setFromEuler(bendEuler.set(x, y, z, 'ZYX')))
 }
 
 type Climb = { points: THREE.Vector3[]; index: number; key: string; travelled: number; wall: THREE.Vector3 }
@@ -124,6 +154,7 @@ export class ZombieDirector {
   readonly navigation: EnemyNavigation
   private disposed = false
   private flowTimer = 0
+  private time = 0
   /** Fine route plans, for the rare zombie the flow field cannot step along (a narrow gate, a doorway edge). */
   private plans = new Map<Zombie, Generator<void, THREE.Vector3[]>>()
 
@@ -144,7 +175,7 @@ export class ZombieDirector {
         id: `zombie-${i + 1}`, actor, position: new THREE.Vector3(), yaw: 0, health: 0, maxHealth: 0, gait: 'walk',
         state: 'idle', stuck: 0, unreachable: 0, swing: 0, swingLanded: false,
         recover: 0, stagger: 0, deadFor: 0, stranded: false, footstep: 0, route: [], routeTimer: 0, routeNode: -1, routeFrom: -1, blocked: -1, avoidTimer: 0, edgeFail: 0, probeFail: -1, probeFails: 0, bestDistance: Infinity, noProgress: 0,
-        rise: 0, climb: null, voice: 0,
+        rise: 0, climb: null, voice: 0, carriage: randomCarriage('walk'), flinch: 0, flinchBack: 0, flinchSide: 0,
       })
     }
   }
@@ -174,6 +205,7 @@ export class ZombieDirector {
     zombie.bestDistance = Infinity; zombie.noProgress = 0
     zombie.rise = rise ? RISE.seconds : 0; zombie.climb = null
     zombie.voice = 1 + Math.random() * 3
+    zombie.carriage = randomCarriage(gait); zombie.flinch = 0
     this.plans.delete(zombie)
     const { actor } = zombie
     actor.root.position.copy(zombie.position)
@@ -203,6 +235,7 @@ export class ZombieDirector {
   }
 
   update(dt: number, targets: readonly ZombieTarget[]) {
+    this.time += dt
     // One flow field for the whole crowd, a few times a second: walking distance from everywhere to
     // the nearest player. Every zombie then just walks downhill on it.
     this.flowTimer -= dt
@@ -269,11 +302,15 @@ export class ZombieDirector {
         zombie.stranded = zombie.unreachable > STRANDED.seconds || flat > STRANDED.distance
           || (flat > 4 && zombie.noProgress > STRANDED.noProgressSeconds)
       }
+      zombie.flinch = Math.max(0, zombie.flinch - dt)
       zombie.actor.root.position.copy(zombie.position)
-      zombie.actor.root.rotation.set(0, zombie.yaw, 0)
+      // A limp rocks the whole body in step with the walk.
+      const roll = moving ? zombie.carriage.limp * Math.sin(this.time * 5.2 + zombie.carriage.phase) : 0
+      zombie.actor.root.rotation.set(0, zombie.yaw, roll, 'YXZ')
       zombie.actor.update(dt, 'patrol', moving, undefined, moving ? ZOMBIE_SPEED[zombie.gait] : 0)
       zombie.actor.gun.visible = false
-      reachArms(zombie)
+      this.carry(zombie, moving)
+      reachArms(zombie, moving ? this.time : -1)
     }
   }
 
@@ -374,6 +411,23 @@ export class ZombieDirector {
       const phase = climb.travelled * 4.2
       poseArms(zombie, 2.2 + 1.4 * Math.sin(phase), 2.2 + 1.4 * Math.sin(phase + Math.PI))
     } else reachArms(zombie)
+  }
+
+  /**
+   * The zombie posture over the walk cycle: hunched and head lolling, thrown forward into a swipe, and
+   * jolted back by a bullet.
+   */
+  private carry(zombie: Zombie, moving: boolean) {
+    const c = zombie.carriage, bones = zombie.actor.rig.bones
+    const swingPhase = zombie.swing > 0 ? 1 - zombie.swing / ATTACK.swing : -1
+    // The lunge peaks as the claw comes down.
+    const lunge = swingPhase >= 0 ? Math.sin(Math.PI * Math.min(1, swingPhase / 0.75)) : 0
+    const jolt = zombie.flinch > 0 ? Math.sin(Math.PI * zombie.flinch / FLINCH_SECONDS) : 0
+    const sway = moving ? Math.sin(this.time * 2.6 + c.phase) * 0.06 : Math.sin(this.time * 1.3 + c.phase) * 0.04
+    bend(bones.spine, c.lean * 0.5 + lunge * 0.13 - jolt * zombie.flinchBack * 0.28, 0, sway - jolt * zombie.flinchSide * 0.2)
+    bend(bones.chest, c.lean * 0.5 + lunge * 0.15 - jolt * zombie.flinchBack * 0.22, lunge * 0.3, 0)
+    bend(bones.head, c.nod - lunge * 0.45 - jolt * zombie.flinchBack * 0.4, sway * 1.5, c.tilt + sway)
+    if (lunge > 0) zombie.actor.root.position.addScaledVector(scratch.v.set(Math.sin(zombie.yaw), 0, Math.cos(zombie.yaw)), lunge * 0.3)
   }
 
   private nearest(zombie: Zombie, targets: readonly ZombieTarget[]) {
@@ -650,8 +704,12 @@ export class ZombieDirector {
       zombie.actor.react(reactionClipName(reaction, fromBehind), true, direction)
       this.kill(zombie)
     } else {
-      // Call of Duty zombies barely flinch: a short stagger, no full reaction pause.
+      // Call of Duty zombies barely flinch: a short stagger, no full reaction pause, and a jolt of the
+      // upper body away from the bullet.
       zombie.stagger = Math.max(zombie.stagger, 0.12)
+      zombie.flinch = FLINCH_SECONDS
+      zombie.flinchBack = direction.x * Math.sin(zombie.yaw) + direction.z * Math.cos(zombie.yaw) < 0 ? 1 : -1
+      zombie.flinchSide = direction.x * Math.cos(zombie.yaw) - direction.z * Math.sin(zombie.yaw)
     }
     this.context.onHit?.(reaction)
     this.context.emit({ kind: 'enemy-hit', position: point.clone(), radius: 14, zone })
@@ -730,12 +788,21 @@ export function aimBone(bone: THREE.Object3D, direction: THREE.Vector3) {
   bone.updateMatrixWorld(true)
 }
 
-/** Arms out in front, slightly down; the right arm chops down through a swipe. */
-function reachArms(zombie: Zombie) {
+/**
+ * Arms out in front, one often hanging lower; bouncing with the stride while it moves. Through a swipe
+ * the right arm goes up high and chops down past horizontal, the left comes up with it.
+ */
+function reachArms(zombie: Zombie, time = -1) {
+  const c = zombie.carriage
   const swingPhase = zombie.swing > 0 ? 1 - zombie.swing / ATTACK.swing : -1
-  // Raise, then chop down past horizontal as the swipe lands.
-  const right = swingPhase >= 0 ? (swingPhase < ATTACK.windup / ATTACK.swing ? 0.9 : -1.1) : -0.28
-  poseArms(zombie, -0.28, right)
+  const bounce = time >= 0 ? Math.sin(time * (zombie.gait === 'walk' ? 5.2 : 10.5) + c.phase) * (zombie.gait === 'walk' ? 0.08 : 0.22) : 0
+  let left = -0.28 - c.droopL + bounce, right = -0.28 - c.droopR - bounce
+  if (swingPhase >= 0) {
+    const windup = ATTACK.windup / ATTACK.swing
+    right = swingPhase < windup ? THREE.MathUtils.lerp(right, 1.6, swingPhase / windup) : THREE.MathUtils.lerp(1.6, -1.2, Math.min(1, (swingPhase - windup) / 0.25))
+    left = Math.max(left, swingPhase < windup ? 0.3 : -0.1)
+  }
+  poseArms(zombie, left, right)
 }
 
 /** Both arms toward the facing direction, each lifted by its own amount (0 level, positive up). */

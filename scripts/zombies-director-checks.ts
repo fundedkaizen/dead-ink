@@ -57,7 +57,8 @@ const run = (seconds: number, targets: ZombieTarget[], fps = 60) => {
   const head = z.actor.rig.bones.head.getWorldPosition(v())
   for (const eye of eyes) {
     const p = eye.getWorldPosition(v())
-    assert(p.y > 1.45 && p.y < 1.8, `eye at head height (${p.y.toFixed(2)} m)`)
+    // Hunched and head lolling, a zombie's eyes sit lower than a standing man's.
+    assert(p.y > 1.2 && p.y < 1.8, `eye at head height (${p.y.toFixed(2)} m)`)
     assert(p.clone().sub(head).setY(0).dot(forward) > 0.03, 'eyes are on the front of the face, not the back')
   }
   const [a, b] = eyes.map(e => e.getWorldPosition(v()))

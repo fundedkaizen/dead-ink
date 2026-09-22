@@ -15,6 +15,9 @@ const AIM_LOWER_TIME = 0.18
 const copyItem = (item: WeaponItem): WeaponItem => ({ ...item, ...(item.position ? { position: [...item.position] } : {}) })
 const smooth = (value: number, a: number, b: number) => THREE.MathUtils.smoothstep(value, a, b)
 type LooseWeapon = { item: WeaponItem; model: Gun }
+/** A spent magazine dropped during a reload: it falls, lands, and is gone a few seconds later. */
+type FallingMagazine = { object: THREE.Object3D; velocity: THREE.Vector3; spin: THREE.Vector3; age: number; floor: number }
+const MAGAZINE_LIFE = 5, MAGAZINES_ON_FLOOR = 6
 type Arm = { shoulder: THREE.Vector3; pole: THREE.Vector3; upper: THREE.Mesh; fore: THREE.Mesh; elbow: THREE.Mesh }
 
 /** Gameplay weapons deliberately have no lab action timers or animation-mixer dependencies. */
@@ -44,6 +47,9 @@ export class FirstPersonWeapons {
   private model: Gun | null = null
   private partRest = new Map<THREE.Object3D, THREE.Vector3>()
   private partRotation = new Map<THREE.Object3D, THREE.Euler>()
+  private falling: FallingMagazine[] = []
+  /** This reload's old magazine has already fallen. */
+  private magazineDropped = false
   /** Perks: reload time and time between shots are multiplied by these (1 = as the weapon is). */
   reloadScale = 1
   fireScale = 1
@@ -214,6 +220,7 @@ export class FirstPersonWeapons {
     this.held = false
     this.pendingShot = false
     this.reloadAim = this.aim
+    this.magazineDropped = false
     // Negative time lowers from the current pose; magazine/bolt motion starts at zero.
     this.reloadElapsed = this.aim > 0.001 ? -AIM_LOWER_TIME : 0
     this.setScope(false)
@@ -380,6 +387,7 @@ export class FirstPersonWeapons {
     this.root.visible = !!this.current && !this.scopeActive
     this.lower += ((this.obstructed ? 1 : 0) - this.lower) * Math.min(1, delta * 15)
     this.pose(delta)
+    this.updateFalling(delta)
     const item = this.current
     if (item && this.cooldown <= 0 && !this.reloading && this.switchTime <= 0 && !this.obstructed &&
         (this.pendingShot || (this.held && WEAPON_RULES[item.name].automatic))) this.shoot(item)
@@ -428,9 +436,14 @@ export class FirstPersonWeapons {
     position.y += Math.cos(this.time * 14) * 0.003 * bob - this.lower * 0.20 - (motion ? this.switchTime * 0.7 : 0)
     position.z += (motion ? this.recoil * 0.028 : 0) + this.lower * 0.12
     position.x -= working * 0.025
+    // A magazine change: the gun rolls toward you and tips up while the magazine comes out, then the new
+    // one is seated with a small upward jolt.
+    const tilt = this.reloading && motion ? smooth(progress, 0.05, 0.25) * (1 - smooth(progress, 0.7, 0.9)) : 0
+    const seat = this.reloading && motion ? smooth(progress, 0.6, 0.66) * (1 - smooth(progress, 0.66, 0.76)) : 0
+    position.y += seat * 0.014 - tilt * 0.018
     this.mount.position.copy(position)
-    this.mount.rotation.set(AIM_PITCH * this.aim + (motion ? this.recoil * 0.035 : 0) + this.lower * 0.5,
-      Math.PI + working * 0.18, -working * 0.23, 'YXZ')
+    this.mount.rotation.set(AIM_PITCH * this.aim + (motion ? this.recoil * 0.035 : 0) + this.lower * 0.5 + tilt * 0.12 - seat * 0.06,
+      Math.PI + working * 0.18, -working * 0.23 - tilt * 0.32, 'YXZ')
     const hit = motion ? this.frame.hitPose : undefined
     if (hit) {
       this.mount.position.add(hit.weaponPosition)
@@ -448,6 +461,8 @@ export class FirstPersonWeapons {
       magazine.position.z -= withdrawal * 0.045
       magazine.rotation.z += withdrawal * 0.28
       magazine.rotation.x -= withdrawal * 0.18
+      // Fully out, the old one falls away; what comes back up reads as a fresh magazine.
+      if (!this.magazineDropped && progress >= 0.38 && motion) { this.magazineDropped = true; this.dropMagazine(magazine) }
     }
     const action = this.model.userData.parts.slide ?? this.model.userData.parts.bolt
     if (action) action.position.z -= this.reloading
@@ -645,7 +660,42 @@ export class FirstPersonWeapons {
       pickups: [...this.loose.values()].map(({ item }) => copyItem(item)), nextId: this.nextId }
   }
 
+  private dropMagazine(magazine: THREE.Object3D) {
+    magazine.updateWorldMatrix(true, false)
+    const copy = magazine.clone(true)
+    magazine.matrixWorld.decompose(copy.position, copy.quaternion, copy.scale)
+    copy.name = 'Dropped magazine'
+    copy.userData.noCollision = true
+    this.context.scene.add(copy)
+    const floor = this.context.world.floor(copy.position.clone(), 0.1, 3)
+    const side = new THREE.Vector3(-0.35, 0, 0).applyQuaternion(this.context.camera.quaternion).setY(0)
+    this.falling.push({ object: copy, age: 0, floor: Number.isFinite(floor) ? floor + 0.02 : copy.position.y - 1.5,
+      velocity: side.add(new THREE.Vector3(0, -0.6, 0)),
+      spin: new THREE.Vector3(Math.random() * 8 - 4, Math.random() * 4 - 2, Math.random() * 8 - 4) })
+    while (this.falling.length > MAGAZINES_ON_FLOOR) this.falling.shift()!.object.removeFromParent()
+  }
+
+  private updateFalling(delta: number) {
+    for (const mag of this.falling) {
+      mag.age += delta
+      if (mag.object.position.y > mag.floor) {
+        mag.velocity.y -= 9.8 * delta
+        mag.object.position.addScaledVector(mag.velocity, delta)
+        mag.object.rotation.x += mag.spin.x * delta; mag.object.rotation.y += mag.spin.y * delta; mag.object.rotation.z += mag.spin.z * delta
+        if (mag.object.position.y <= mag.floor) mag.object.position.y = mag.floor
+      }
+    }
+    for (const mag of this.falling.filter(m => m.age > MAGAZINE_LIFE)) mag.object.removeFromParent()
+    this.falling = this.falling.filter(m => m.age <= MAGAZINE_LIFE)
+  }
+
+  private clearFalling() {
+    for (const mag of this.falling) mag.object.removeFromParent()
+    this.falling = []
+  }
+
   restore(snapshot: WeaponSnapshot) {
+    this.clearFalling()
     this.cancel()
     this.cooldown = 0
     this.aim = 0
@@ -665,6 +715,7 @@ export class FirstPersonWeapons {
     if (this.disposed) return
     this.cancel()
     this.disposed = true
+    this.clearFalling()
     if (this.model) disposeGun(this.model)
     for (const { model } of this.loose.values()) disposeGun(model)
     this.loose.clear()
