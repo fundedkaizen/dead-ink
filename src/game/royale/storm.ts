@@ -12,18 +12,38 @@ export type Arena = { minX: number; maxX: number; minZ: number; maxZ: number }
 export type StormPlan = { circles: Circle[]; phases: StormPhase[] }
 
 /**
- * Tuned for the ~290 m x 155 m compound and a match of roughly seven minutes. `ratio` is the next
- * circle's radius as a fraction of the current one; the last phase closes to nothing, so a match
- * always ends. The first hold is the grace period to land and loot.
+ * Fortnite's storm, Chapter 7 Season 4, from the community zone timer at fortnitetools.com
+ * (not official Epic data; Epic retunes it most seasons). `wait` and `shrink` in seconds,
+ * `damage` in health per second while outside. Kept verbatim so the reference can be checked.
  */
-export const DEFAULT_PHASES: StormPhase[] = [
-  { hold: 60, shrink: 45, damage: 1, ratio: 0.62 },
-  { hold: 45, shrink: 35, damage: 2, ratio: 0.62 },
-  { hold: 40, shrink: 30, damage: 5, ratio: 0.58 },
-  { hold: 30, shrink: 25, damage: 8, ratio: 0.52 },
-  { hold: 25, shrink: 20, damage: 10, ratio: 0.4 },
-  { hold: 20, shrink: 30, damage: 15, ratio: 0 },
-]
+export const FORTNITE_STORM = [
+  { wait: 150, shrink: 90, damage: 1 },
+  { wait: 110, shrink: 75, damage: 2 },
+  { wait: 90, shrink: 60, damage: 5 },
+  { wait: 60, shrink: 50, damage: 7 },
+  { wait: 45, shrink: 40, damage: 10 },
+  { wait: 30, shrink: 30, damage: 12 },
+  { wait: 20, shrink: 25, damage: 15 },
+  { wait: 10, shrink: 20, damage: 20 },
+] as const
+
+/**
+ * Fortnite's storm runs about 15 minutes for 100 players on a map roughly eight times this
+ * compound. Every wait and shrink is multiplied by the same factor, so the rhythm is Fortnite's
+ * exactly (each phase shorter than the last in the same proportion) and a match lasts about 7 minutes.
+ * Damage is Fortnite's, unscaled.
+ */
+export const STORM_TIME_SCALE = 0.46
+
+/**
+ * Each circle's radius as a fraction of the previous one. The source does not give circle sizes,
+ * so these are ours: tighter as the match goes on, and the last closes completely so a match always ends.
+ */
+export const STORM_RATIOS = [0.65, 0.62, 0.6, 0.58, 0.55, 0.5, 0.45, 0] as const
+
+export const DEFAULT_PHASES: StormPhase[] = FORTNITE_STORM.map((phase, i) => ({
+  hold: phase.wait * STORM_TIME_SCALE, shrink: phase.shrink * STORM_TIME_SCALE, damage: phase.damage, ratio: STORM_RATIOS[i],
+}))
 
 export function planStorm(arena: Arena, random: Random, phases: StormPhase[] = DEFAULT_PHASES): StormPlan {
   const cx = (arena.minX + arena.maxX) / 2, cz = (arena.minZ + arena.maxZ) / 2
@@ -89,3 +109,14 @@ export function stormAt(plan: StormPlan, elapsed: number): StormNow {
 export const outsideBy = (circle: Circle, x: number, z: number) => Math.hypot(x - circle.x, z - circle.z) - circle.r
 
 export const stormDuration = (plan: StormPlan) => plan.phases.reduce((sum, phase) => sum + phase.hold + phase.shrink, 0)
+
+/**
+ * Storm damage lands once per full second spent outside. Time outside accumulates across brief trips
+ * back inside, so strafing across the edge cannot dodge it; it only stops growing while you are safe.
+ * Returns the whole ticks due now and the carried remainder.
+ */
+export function advanceStormTimer(timer: number, dt: number, outside: boolean) {
+  if (!outside || !(dt > 0)) return { timer, ticks: 0 }
+  const total = timer + dt, ticks = Math.floor(total)
+  return { timer: total - ticks, ticks }
+}

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { DEFAULT_PHASES, outsideBy, planStorm, stormAt, stormDuration, type Arena } from '../src/game/royale/storm'
+import { DEFAULT_PHASES, FORTNITE_STORM, STORM_TIME_SCALE, advanceStormTimer, outsideBy, planStorm, stormAt, stormDuration, type Arena } from '../src/game/royale/storm'
 import { seeded } from '../src/game/royale/random'
 
 // The compound's real bounds (createMissionWorld).
@@ -53,5 +53,36 @@ for (let seed = 1; seed <= 500; seed++) {
 // Same seed, same storm: a match can be reproduced exactly.
 assert.deepEqual(planStorm(ARENA, seeded(42)), planStorm(ARENA, seeded(42)))
 assert.notDeepEqual(planStorm(ARENA, seeded(42)), planStorm(ARENA, seeded(43)))
+
+// Fortnite accuracy. The reference is the Chapter 7 Season 4 table from the community zone timer:
+// damage copied exactly, every wait and shrink scaled by one factor so the rhythm is Fortnite's.
+assert.deepEqual(FORTNITE_STORM.map(p => p.damage), [1, 2, 5, 7, 10, 12, 15, 20], 'reference table is the current-season one')
+assert.deepEqual(DEFAULT_PHASES.map(p => p.damage), FORTNITE_STORM.map(p => p.damage), "storm damage is Fortnite's, unscaled")
+assert.equal(DEFAULT_PHASES.length, FORTNITE_STORM.length, 'same number of phases as Fortnite')
+for (let i = 0; i < FORTNITE_STORM.length; i++) {
+  assert(Math.abs(DEFAULT_PHASES[i].hold - FORTNITE_STORM[i].wait * STORM_TIME_SCALE) < 1e-9, `phase ${i + 1} wait is Fortnite's, scaled`)
+  assert(Math.abs(DEFAULT_PHASES[i].shrink - FORTNITE_STORM[i].shrink * STORM_TIME_SCALE) < 1e-9, `phase ${i + 1} shrink is Fortnite's, scaled`)
+}
+
+// Storm damage timer: once per full second outside, and it cannot be dodged by stepping in and out.
+{
+  // The exploit the critic found: 0.6 s outside, 0.1 s inside, repeated. It used to deal nothing.
+  let timer = 0, ticks = 0
+  for (let i = 0; i < 70; i++) {
+    let r = advanceStormTimer(timer, 0.6, true); timer = r.timer; ticks += r.ticks
+    r = advanceStormTimer(timer, 0.1, false); timer = r.timer; ticks += r.ticks
+  }
+  assert(ticks >= 41 && ticks <= 42, `strafing the edge still takes a tick per second outside (${ticks} of ~42)`)
+  // Never ticks while safe, however long you stay.
+  assert.equal(advanceStormTimer(0.99, 1000, false).ticks, 0, 'no damage while inside the circle')
+  // Frame-rate independent: 1/144 s frames for 10 s outside is 10 ticks, same as 1/30 s frames.
+  for (const fps of [30, 60, 144]) {
+    let t = 0, n = 0
+    for (let f = 0; f < 10 * fps; f++) { const r = advanceStormTimer(t, 1 / fps, true); t = r.timer; n += r.ticks }
+    assert(n >= 9 && n <= 10, `${fps} fps: ${n} ticks in 10 s outside`)
+  }
+  // A long frame (the physics step is capped at 50 ms, but be safe) catches up rather than losing ticks.
+  assert.equal(advanceStormTimer(0, 3.5, true).ticks, 3)
+}
 
 console.log('royale storm checks passed')

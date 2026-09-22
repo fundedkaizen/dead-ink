@@ -29,6 +29,7 @@ export class MissionHUD {
   private reloadIcon: SVGElement
   private caption: HTMLElement
   private menu: MissionMenu
+  private ammoTint = ''
   private mapDot: SVGElement
   private icon: HTMLElement
   private captionTimer = 0
@@ -221,7 +222,8 @@ export class MissionHUD {
       const rule = weaponRules(data.weapon)
       // Rarity tints the magazine icon; grey and unrated weapons keep the plain ink colour.
       const tint = data.weapon.rarity && data.weapon.rarity !== 'common' ? RARITY_INFO[data.weapon.rarity].css : ''
-      if (this.ammo.style.color !== tint) this.ammo.style.color = tint
+      // Compare against our own last value: style.color reads back as rgb(), never as the hex we set.
+      if (this.ammoTint !== tint) { this.ammoTint = tint; this.ammo.style.color = tint }
       const rounds = Math.max(0, Math.min(rule.capacity, data.weapon.magazine))
       const magazines = (rounds > 0 ? 1 : 0) + Math.ceil(Math.max(0, data.weapon.reserve) / rule.capacity)
       this.magazineCount.textContent = `${magazines} ×`

@@ -20,6 +20,10 @@ export type MenuCopy = {
   missionPage?: boolean
   /** A menu button that switches to the other game mode. */
   modeLink?: { label: string; href: string }
+  /** A line shown on the death screen (the mission shows none). */
+  deadPremise?: (state: MenuState) => string
+  /** The warning on the restart confirmation page. */
+  restartWarning?: string
 }
 export const MISSION_COPY: MenuCopy = {
   title: 'Operation Safe Return', premise: 'Find the hostage. Get out together.',
@@ -29,6 +33,7 @@ export const MISSION_COPY: MenuCopy = {
   objective: state => missionObjective(state as MissionState),
   missionPage: true,
   modeLink: { label: 'Battle royale', href: '?mode=royale' },
+  restartWarning: 'Your current mission progress will be reset.',
 }
 
 /** One decision at a time; reference material never blocks entering the game. */
@@ -65,9 +70,9 @@ export class MissionMenu {
         </div>
         <nav class="mission-menu-links" aria-label="Mission menu">
           ${copy.missionPage === false ? '' : '<button data-menu-open="mission">Mission</button>'}
+          ${copy.modeLink ? `<button data-mode-href="${copy.modeLink.href}">${copy.modeLink.label}</button>` : ''}
           <button data-menu-open="controls">Controls</button>
           <button data-menu-open="settings">Settings</button>
-          ${copy.modeLink ? `<button data-mode-href="${copy.modeLink.href}">${copy.modeLink.label}</button>` : ''}
         </nav>
       </section>
       <section data-menu-page="mission" hidden>
@@ -120,7 +125,7 @@ export class MissionMenu {
       <section data-menu-page="restart" hidden>
         <button class="menu-back" data-menu-back><span aria-hidden="true">←</span> Back <kbd>Esc</kbd></button>
         <h2 id="restart-page-title">Start over?</h2>
-        <p>Your current mission progress will be reset.</p>
+        <p>${copy.restartWarning ?? 'Your current mission progress will be reset.'}</p>
         <div class="mission-actions">
           <button id="mission-cancel-restart" class="menu-primary">Cancel</button>
           <button id="mission-confirm-restart" class="menu-secondary">${copy.restart}</button>
@@ -215,8 +220,8 @@ export class MissionMenu {
     }
     const dead = state.phase === 'dead', complete = state.phase === 'complete'
     this.title.textContent = dead ? this.copy.deadTitle : complete ? this.copy.completeTitle : this.hasPlayed ? 'Paused.' : this.copy.title
-    this.premise.hidden = dead
-    this.premise.textContent = complete ? this.copy.completePremise : this.hasPlayed ? this.copy.objective(state) : this.copy.premise
+    this.premise.hidden = dead && !this.copy.deadPremise
+    this.premise.textContent = dead && this.copy.deadPremise ? this.copy.deadPremise(state) : complete ? this.copy.completePremise : this.hasPlayed ? this.copy.objective(state) : this.copy.premise
     this.start.hidden = dead || complete
     this.start.disabled = !data.ready || !this.loaded
     if (!this.loadError && this.loaded) this.start.textContent = this.hasPlayed ? this.copy.resume : this.copy.begin

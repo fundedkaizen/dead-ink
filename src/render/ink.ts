@@ -87,9 +87,15 @@ const silhouette = new THREE.ShaderMaterial({
   side: THREE.BackSide, depthWrite: false,
 })
 
+// Fat-line materials created after startup (enemy fire streaks) must follow the viewport too.
+const trackedLines = new Set<LineMaterial>()
+const viewport = new THREE.Vector2(1, 1)
+
 export function resizeInk(width: number, height: number) {
+  viewport.set(width, height)
   strokeMaterial.resolution.set(width, height)
   silhouette.uniforms.resolution.value.set(width, height)
+  for (const material of trackedLines) material.resolution.set(width, height)
 }
 
 /** Single-sided ink lettering, placed just outside a wall with no backing board. */
@@ -380,4 +386,21 @@ export function createStormWall(height = 60) {
   wall.renderOrder = 11
   wall.frustumCulled = false
   return { wall, material }
+}
+
+// ---- Enemy fire streaks -------------------------------------------------------------------------
+// Red means danger. A bot's shot at you leaves a short-lived red ink streak from its muzzle, so a
+// distant shooter can be found by eye. Each streak owns its material so it can fade on its own.
+export const DANGER_COLOR = 0xd4332a
+export function createDangerStreak() {
+  const material = new LineMaterial({ color: DANGER_COLOR, linewidth: 2.6, transparent: true, opacity: 1 })
+  material.depthWrite = false
+  material.resolution.copy(viewport)
+  trackedLines.add(material)
+  const line = new LineSegments2(new LineSegmentsGeometry(), material)
+  line.name = 'Enemy fire streak'
+  line.userData.noCollision = true
+  line.frustumCulled = false
+  line.renderOrder = 12
+  return { line, material, dispose() { trackedLines.delete(material); material.dispose(); line.geometry.dispose(); line.removeFromParent() } }
 }

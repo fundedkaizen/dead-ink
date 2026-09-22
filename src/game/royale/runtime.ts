@@ -20,8 +20,11 @@ import type { EnemySpec, MissionWorld, Shot, SoundEvent } from '../types'
 import { createStormWall } from '../../render/ink'
 import { findLootSpots, rollMatchLoot } from './loot-spawn'
 import { HitMarkers } from './hitmarkers'
+import { DamageIndicator } from './damage-indicator'
+import { EnemyTracers } from './tracers'
+import { Hotbar } from './hotbar'
 import { seeded, shuffled, type Random } from './random'
-import { outsideBy, planStorm, stormAt, type StormPlan } from './storm'
+import { advanceStormTimer, outsideBy, planStorm, stormAt, type StormPlan } from './storm'
 import './royale.css'
 
 export type RoyaleOptions = { bots: number; seed?: number; loot?: number }
@@ -47,6 +50,8 @@ export const ROYALE_COPY: MenuCopy = {
     const s = state as RoyaleState
     return [['Place', `#${s.placement ?? 1}`], ['Kills', String(s.kills)], ['Time', fmt(s.elapsed)]]
   },
+  deadPremise: state => { const s = state as RoyaleState; return `You placed #${s.placement} of ${s.bots + 1}.` },
+  restartWarning: 'This match ends and a new one starts.',
   missionPage: false,
   modeLink: { label: 'Hostage mission', href: './' },
 }
@@ -68,6 +73,9 @@ export class RoyaleRuntime {
   readonly death = new PlayerDeathSequence()
   readonly hud: MissionHUD
   readonly hits: HitMarkers
+  readonly indicator: DamageIndicator
+  readonly tracers: EnemyTracers
+  readonly hotbar: Hotbar
   ready = false
   readonly initialized: Promise<void>
   deaths = 0
@@ -77,6 +85,10 @@ export class RoyaleRuntime {
   private stormWall = createStormWall()
   private status = document.createElement('div')
   private vignette = document.createElement('div')
+  private aliveEl!: HTMLElement
+  private stormEl!: HTMLElement
+  private weaponEl!: HTMLElement
+  private weaponTint = ''
   private specs: EnemySpec[]
   private initialAI: ReturnType<EnemyDirector['snapshot']> | null = null
   private abort = new AbortController()
@@ -93,6 +105,9 @@ export class RoyaleRuntime {
   private lastCaption = ''
   private lastCaptionAt = -100
   private disposed = false
+  // Mouse-wheel weapon switching: accumulate small trackpad deltas, then switch at most once per notch.
+  private wheelAmount = 0
+  private wheelAt = 0
 
   constructor(scene: THREE.Scene, private camera: EnvironmentCamera, readonly player: FirstPersonController,
     readonly world: MissionWorld, private invalidate: () => void, private options: RoyaleOptions) {
@@ -131,12 +146,19 @@ export class RoyaleRuntime {
       retry: () => { this.restart(); void this.audio.unlock(); this.player.requestControl() },
       restart: () => { this.restart(); void this.audio.unlock(); this.player.requestControl() },
       volume: value => this.audio.setVolume(value), mute: value => this.audio.setMuted(value) }, ROYALE_COPY)
+    document.querySelector('#world')?.setAttribute('aria-label', 'Ink Royale battle royale. Mouse to look, WASD move, left click fire, right click toggle aim, mouse wheel switch weapon, F pick up, R reload, Escape pause.')
     const hudRoot = document.querySelector<HTMLElement>('#mission-hud')!
     this.status.className = 'royale-status'
     this.status.innerHTML = '<div class="royale-alive"><strong>0</strong> left</div><div class="royale-storm"></div><div class="royale-weapon" hidden></div>'
+    this.aliveEl = this.status.querySelector('strong')!
+    this.stormEl = this.status.querySelector<HTMLElement>('.royale-storm')!
+    this.weaponEl = this.status.querySelector<HTMLElement>('.royale-weapon')!
     this.vignette.className = 'royale-outside'
     hudRoot.append(this.vignette, this.status)
     this.hits = new HitMarkers(hudRoot)
+    this.indicator = new DamageIndicator(hudRoot)
+    this.hotbar = new Hotbar(hudRoot)
+    this.tracers = new EnemyTracers(scene)
     scene.add(this.stormWall.wall)
     player.onPlayingChange = playing => this.hud.setPlaying(playing)
     player.actions.extraTargets = () => this.targets()
@@ -205,11 +227,12 @@ export class RoyaleRuntime {
     this.player.world.refresh()
     this.ai.restore(structuredClone(this.initialAI))
     this.blood.restore(undefined)
-    this.newMatchState(Math.floor(Math.random() * 2 ** 31))
+    this.newMatchState(this.options.seed ?? Math.floor(Math.random() * 2 ** 31))
     this.state.bots = this.specs.length; this.state.alive = this.specs.length + 1
     this.stepTime = 0; this.interactionTime = 0; this.hitFlash = 0; this.stormTick = 0; this.botStormTick = 0
     this.lastCaptionAt = -100; this.pendingHits = []
     this.bulletTrails.clear(); this.impacts.clear(); this.hits.clear(); this.hud.reset()
+    this.tracers.clear(); this.indicator.clear(); this.wheelAmount = 0
     this.startMatch()
     this.hud.notify('New match. Grab a weapon.', 3)
     this.invalidate()
@@ -223,9 +246,19 @@ export class RoyaleRuntime {
     window.addEventListener('keydown', this.keyDown, options)
     document.querySelector('#world')!.addEventListener('wheel', event => {
       const wheel = event as WheelEvent
-      if (!this.isActive() || !this.aiming || wheel.ctrlKey || wheel.metaKey || wheel.altKey) return
-      if (!this.weapons.adjustScopeZoom(-Math.sign(wheel.deltaY))) return
-      wheel.preventDefault(); this.invalidate()
+      if (!this.isActive() || wheel.ctrlKey || wheel.metaKey || wheel.altKey) return
+      wheel.preventDefault()
+      // Scoped with a sniper, the wheel zooms, as before. Otherwise it switches weapons.
+      if (this.aiming && this.weapons.adjustScopeZoom(-Math.sign(wheel.deltaY))) { this.invalidate(); return }
+      // A mouse notch is about 100 units; a trackpad sends many tiny ones. Switch once per notch's worth,
+      // and not faster than every 120 ms, so a flick cannot spin through all four slots.
+      const now = performance.now()
+      if (now - this.wheelAt > 400) this.wheelAmount = 0
+      this.wheelAmount += wheel.deltaMode === 1 ? wheel.deltaY * 40 : wheel.deltaY
+      if (Math.abs(this.wheelAmount) < 60 || now - this.wheelAt < 120) return
+      if (this.weapons.cycle(this.wheelAmount > 0 ? 1 : -1)) { if (!this.weapons.canAim) this.aiming = false }
+      this.wheelAmount = 0; this.wheelAt = now
+      this.invalidate()
     }, { ...options, passive: false })
     window.addEventListener('mousedown', event => {
       if (!this.isActive() || event.target !== document.querySelector('#world')) return
@@ -275,6 +308,10 @@ export class RoyaleRuntime {
 
   private emit(event: SoundEvent, audible: boolean) {
     if (this.death.active) return
+    // Every bot shot is aimed at you (bots do not fight each other yet), so draw it from the muzzle
+    // toward your chest.
+    if (event.kind.startsWith('enemy-shot-') && event.position && this.state.phase === 'active')
+      this.tracers.fire(event.position, this.player.body.position.clone().setY(this.player.body.position.y + 1.2))
     const eye = this.camera.perspective.position
     const distance = event.position ? eye.distanceTo(event.position) : 0
     const inRange = !event.position || distance <= (event.radius ?? 38)
@@ -332,6 +369,7 @@ export class RoyaleRuntime {
         amount, this.player.body.grounded && !this.player.actions.traversing)
     }
     this.hud.hurt(); this.audio.play({ kind: 'damage' })
+    if (cause === 'bullet' && source) this.indicator.hit(source, amount)
     if (cause !== 'storm') {
       this.audio.play({ kind: 'bullet-hit', intensity: Math.min(1, amount / 28) })
       this.hud.hitFrom(1, source ? this.soundDirection(source) : 'Below')
@@ -358,10 +396,7 @@ export class RoyaleRuntime {
   private updateStorm(dt: number) {
     const now = stormAt(this.storm, this.state.elapsed)
     this.state.stormPhase = now.phase; this.state.stormNextIn = now.nextIn; this.state.stormShrinking = now.shrinking
-    const body = this.player.body.position
-    this.state.outside = outsideBy(now.circle, body.x, body.z) > 0
-    this.stormTick = this.state.outside ? this.stormTick + dt : 0
-    while (this.stormTick >= 1 && this.state.phase === 'active') { this.stormTick -= 1; this.damage(now.damage, 'storm') }
+    // Bots first: if the storm takes the last bot on the same tick it would take you, you win.
     this.botStormTick += dt
     if (this.botStormTick >= 1) {
       this.botStormTick -= 1
@@ -370,6 +405,11 @@ export class RoyaleRuntime {
         if (outsideBy(now.circle, enemy.position.x, enemy.position.z) > 0) this.ai.applyDamage(enemy.spec.id, now.damage)
       }
     }
+    const body = this.player.body.position
+    this.state.outside = outsideBy(now.circle, body.x, body.z) > 0
+    const tick = advanceStormTimer(this.stormTick, dt, this.state.outside)
+    this.stormTick = tick.timer
+    for (let i = 0; i < tick.ticks && this.state.phase === 'active' && this.aliveBots() > 0; i++) this.damage(now.damage, 'storm')
     this.syncStorm()
   }
 
@@ -386,21 +426,21 @@ export class RoyaleRuntime {
   private updateStatus() {
     const alive = this.state.phase === 'dead' ? this.aliveBots() : this.aliveBots() + 1
     this.state.alive = alive
-    const aliveEl = this.status.querySelector('strong')!
-    if (aliveEl.textContent !== String(alive)) aliveEl.textContent = String(alive)
-    const storm = this.status.querySelector<HTMLElement>('.royale-storm')!
+    if (this.aliveEl.textContent !== String(alive)) this.aliveEl.textContent = String(alive)
+    const storm = this.stormEl
     const text = this.state.outside ? `In the storm · ${fmt(this.state.stormNextIn)}`
       : `${this.state.stormShrinking ? 'Storm closing' : 'Storm moves in'} ${fmt(this.state.stormNextIn)}`
     if (storm.textContent !== text) storm.textContent = text
-    storm.dataset.danger = String(this.state.outside)
+    const danger = String(this.state.outside)
+    if (storm.dataset.danger !== danger) storm.dataset.danger = danger
     this.vignette.classList.toggle('on', this.state.outside && this.state.phase === 'active')
-    const weapon = this.status.querySelector<HTMLElement>('.royale-weapon')!
-    const current = this.weapons.current
-    weapon.hidden = !current
+    const weapon = this.weaponEl, current = this.weapons.current
+    if (weapon.hidden !== !current) weapon.hidden = !current
     if (current) {
       const label = weaponRules(current).label
       if (weapon.textContent !== label) weapon.textContent = label
-      weapon.style.setProperty('--weapon', current.rarity ? RARITY_INFO[current.rarity].css : '')
+      const tint = current.rarity ? RARITY_INFO[current.rarity].css : ''
+      if (tint !== this.weaponTint) { this.weaponTint = tint; weapon.style.setProperty('--weapon', tint) }
     }
   }
 
@@ -475,6 +515,11 @@ export class RoyaleRuntime {
     if (active || deathPlaying) { this.bulletTrails.update(dt); this.hitFlash -= dt }
     document.querySelector<HTMLElement>('.crosshair')?.classList.toggle('confirmed-hit', this.hitFlash > 0)
     this.hits.update(active || deathPlaying ? dt : 0, this.camera.perspective, window.innerWidth, window.innerHeight)
+    const running = active || deathPlaying ? dt : 0
+    this.tracers.update(running)
+    this.indicator.update(running, this.camera.perspective.position,
+      new THREE.Euler().setFromQuaternion(this.camera.perspective.quaternion, 'YXZ').y)
+    this.hotbar.update(this.weapons.slots, this.weapons.selectedSlot)
     this.updateStatus()
     this.hud.update(dt, this.state, { playing: this.player.playing, enabled: this.player.enabled && !this.player.immersive,
       weapon: this.weapons.current, reloading: this.weapons.reloading, position: this.player.body.position,
@@ -488,6 +533,7 @@ export class RoyaleRuntime {
     this.playerHits.clear(); this.disposed = true; this.abort.abort()
     this.stormWall.wall.removeFromParent(); this.stormWall.wall.geometry.dispose(); this.stormWall.material.dispose()
     this.hits.dispose(); this.status.remove(); this.vignette.remove()
+    this.indicator.dispose(); this.hotbar.dispose(); this.tracers.dispose()
     this.bulletTrails.dispose(); this.weapons.dispose(); this.ai.dispose(); this.blood.dispose(); this.impacts.dispose()
     this.audio.dispose(); this.hud.dispose()
     this.player.movementLocked = false; this.player.onPlayingChange = () => {}; this.player.lookSensitivity = () => 1

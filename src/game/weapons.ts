@@ -213,6 +213,21 @@ export class FirstPersonWeapons {
     return true
   }
 
+  get selectedSlot() { return this.slot }
+
+  /**
+   * Switch to the next (1) or previous (-1) slot that holds a weapon, wrapping around and skipping
+   * empty slots. False when there is no other weapon to switch to.
+   */
+  cycle(direction: 1 | -1) {
+    const count = this.inventory.length
+    for (let step = 1; step < count; step++) {
+      const index = ((this.slot + direction * step) % count + count) % count
+      if (this.inventory[index]) return this.switchSlot(index)
+    }
+    return false
+  }
+
   switchSlot(index: number) {
     if (!this.enabled || !Number.isInteger(index) || index < 0 || index >= this.inventory.length || index === this.slot) return false
     this.cancel()
