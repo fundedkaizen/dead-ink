@@ -35,6 +35,10 @@ body[data-reduced-motion="true"] .dead-ink-banner { transition: none; transform:
 @keyframes dead-ink-blink { from { opacity: 1; } to { opacity: 0.25; } }
 body[data-reduced-motion="true"] .dead-ink-powerup.ending { animation: none; opacity: 0.6; }
 
+/* Perks, bottom left above the health heart. */
+.dead-ink-perks { position: absolute; left: 24px; bottom: 96px; display: flex; gap: 6px; }
+.dead-ink-perks img { width: 38px; height: 38px; display: block; }
+
 /* The Nuke: a flash to the negative, fading back. */
 body[data-dead-ink-nuke="true"] #world { animation: dead-ink-nuke 0.7s ease-out; }
 @keyframes dead-ink-nuke { 0% { filter: invert(1) contrast(1.4); } 35% { filter: invert(1); } 100% { filter: none; } }

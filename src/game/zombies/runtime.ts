@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { BulletTrails } from '../bullet-trails'
 import { WEAPON_RULES, fallDamage } from '../balance'
+import { PACKED_NAMES } from '../loot'
 import type { EnvironmentCamera } from '../../camera'
 import type { FirstPersonController } from '../../player/controller'
 import type { ActionTarget } from '../../player/actions'
@@ -30,6 +31,7 @@ import { ZombieHud } from './hud'
 import { MuzzleSparks, RiseMarks } from './effects'
 import { POWERUP_INFO, PowerupDrops, PowerupDropper } from './powerups'
 import { SEALED, ZoneGates, type ZoneGate } from './zones'
+import { MACHINE_PLACES, PACK, PERKS, PERK_EFFECT, PERK_LIMIT, PackAPunch, PackedLook, PerkBottle, PerkMachine, type PerkKind } from './perks'
 
 export type ZombieState = {
   phase: 'active' | 'dead' | 'complete'
@@ -44,6 +46,7 @@ export const KNIFE = { damage: 150, range: 2.1, cooldown: 0.55 } as const
 /** Bodies lie a few seconds before they sink; spare actors let new zombies rise meanwhile. */
 export const POOL_SIZE = MAX_ALIVE + 8
 type TimedPowerup = 'instaKill' | 'doublePoints' | 'deathMachine'
+
 /** The Death Machine never runs dry: its drum is topped up every frame while it lasts. */
 const DEATH_MACHINE_ROUNDS = 999
 
@@ -101,6 +104,15 @@ export class ZombiesRuntime {
   wallBuys: WallBuy[] = []
   box: MysteryBox | null = null
   zones: ZoneGates | null = null
+  perkMachines: PerkMachine[] = []
+  pack: PackAPunch | null = null
+  readonly perks = new Set<PerkKind>()
+  private bottle: PerkBottle
+  private packedLook = new PackedLook()
+  /** A perk being drunk: it takes effect when the bottle is empty. */
+  private pendingPerk: { kind: PerkKind; timer: number } | null = null
+  /** Seconds of grace after Second Draft gets you back up. */
+  private reviveGrace = 0
   private random: Random
   private spawn = new THREE.Vector3(...SPAWN_POINT)
   private abort = new AbortController()
@@ -138,6 +150,7 @@ export class ZombiesRuntime {
     this.riseMarks = new RiseMarks(scene)
     this.sparks = new MuzzleSparks(scene)
     this.powerups = new PowerupDrops(scene)
+    this.bottle = new PerkBottle(camera.perspective)
     this.dropper = new PowerupDropper(this.random)
     this.bulletTrails = new BulletTrails(scene, 'Player bullet')
     player.lookSensitivity = () => this.weapons.lookSensitivity
@@ -150,11 +163,12 @@ export class ZombiesRuntime {
     this.zombieHud = new ZombieHud(hudRoot)
     this.hits = new HitMarkers(hudRoot)
     this.indicator = new DamageIndicator(hudRoot)
-    this.hotbar = new Hotbar(hudRoot, ZOMBIE_SLOTS)
+    // One more cell than you start with, for Spare Nib's third gun; the hotbar hides cells you do not have.
+    this.hotbar = new Hotbar(hudRoot, ZOMBIE_SLOTS + 1)
     player.onPlayingChange = playing => this.hud.setPlaying(playing)
     player.actions.extraTargets = () => this.targets()
     player.actions.onAction = target => {
-      this.weapons.cancel(); this.aiming = false; this.interactionTime = 0.25
+      this.weapons.cancel(); this.aiming = false; this.interactionTime = Math.max(this.interactionTime, 0.25)
       if (target.kind === 'door' || target.kind === 'ladder') this.emit({ kind: target.kind, position: target.point, radius: target.kind === 'door' ? 8 : 5 })
     }
     this.bindInput()
@@ -218,6 +232,17 @@ export class ZombiesRuntime {
       this.wallBuys.push(buy)
       this.scene.add(buy.root)
     })
+    const taken = spots.map(spot => spot.stand)
+    for (const [kind, [x, y, z]] of MACHINE_PLACES) {
+      graph.flow([new THREE.Vector3(x, y, z)])
+      const [spot] = findWallSpots(graph, this.player.world, this.random, { count: 1, near: 0, far: 35, spacing: 7, avoid: taken })
+      if (!spot) { console.warn(`Dead Ink: no wall for ${kind} near ${x}, ${z}`); continue }
+      taken.push(spot.stand)
+      if (kind === 'pack') { this.pack = new PackAPunch(spot); this.scene.add(this.pack.root); continue }
+      const machine = new PerkMachine(kind, spot)
+      this.perkMachines.push(machine)
+      this.scene.add(machine.root)
+    }
   }
 
   private startGame() {
@@ -228,6 +253,8 @@ export class ZombiesRuntime {
     this.director?.navigation.clear()
     this.box?.close()
     this.powerups.clear(); this.timers = {}; this.earned = 0; this.heldWeapons = null
+    this.perks.clear(); this.pendingPerk = null; this.reviveGrace = 0; this.applyPerks(); this.zombieHud.perks([])
+    if (this.pack && this.pack.state !== 'idle') this.pack.take()
     this.dropper = new PowerupDropper(this.random)
     this.weapons.restore({ slots: [startingPistol(), null], selected: 0, pickups: [], nextId: 1 })
     this.player.actions.reset()
@@ -306,11 +333,12 @@ export class ZombiesRuntime {
       if (!this.aiming || !this.weapons.adjustScopeZoom(event.code === 'KeyE' ? 1 : -1)) return
       event.preventDefault(); this.invalidate(); return
     }
-    if (this.timers.deathMachine && ['KeyR', 'Digit1', 'Digit2'].includes(event.code)) { event.preventDefault(); return }
+    if (this.timers.deathMachine && ['KeyR', 'Digit1', 'Digit2', 'Digit3'].includes(event.code)) { event.preventDefault(); return }
     switch (event.code) {
       case 'KeyR': if (this.weapons.reload()) this.aiming = false; break
       case 'Digit1': this.weapons.switchSlot(0); break
       case 'Digit2': this.weapons.switchSlot(1); break
+      case 'Digit3': this.weapons.switchSlot(2); break
       case 'KeyV': this.knife(); break
       default: return
     }
@@ -337,6 +365,21 @@ export class ZombiesRuntime {
       targets.push({ object: gate.closed, point, kind: 'mission', descending: false,
         label: `Open the gate to ${gate.spec.zone} · ${cost}${this.state.points >= cost ? '' : ` · need ${cost - this.state.points} more`}`,
         use: () => this.useGate(gate) })
+    }
+    for (const machine of this.perkMachines) {
+      const perk = PERKS[machine.kind]
+      const label = this.perks.has(machine.kind) ? `${perk.name} · yours`
+        : this.perks.size >= PERK_LIMIT ? `${perk.name} · you can hold ${PERK_LIMIT} perks`
+        : `Drink ${perk.name} · ${perk.cost}${this.state.points >= perk.cost ? '' : ` · need ${perk.cost - this.state.points} more`} · ${perk.blurb}`
+      targets.push({ object: machine.root, point: machine.point, kind: 'mission', descending: false, label, use: () => this.buyPerk(machine) })
+    }
+    const pack = this.pack, held = this.weapons.current
+    if (pack && pack.state !== 'working') {
+      const label = pack.state === 'ready' && pack.held ? `Take the ${PACKED_NAMES[pack.held.name]}`
+        : !held || held.special ? 'Pack-a-Punch · hold a gun to upgrade it'
+        : held.packed ? 'Pack-a-Punch · already upgraded'
+        : `Pack-a-Punch · upgrade your ${WEAPON_RULES[held.name].label} · ${PACK.cost}${this.state.points >= PACK.cost ? '' : ` · need ${PACK.cost - this.state.points} more`}`
+      targets.push({ object: pack.root, point: pack.point, kind: 'mission', descending: false, label, use: () => this.usePack(pack) })
     }
     const box = this.box
     if (box && box.state !== 'spinning') {
@@ -372,6 +415,90 @@ export class ZombiesRuntime {
       this.hud.notify(`${WEAPON_RULES[buy.weapon].label} ammo refilled.`, 2)
     }
     this.emit({ kind: 'pickup', position: this.player.body.position.clone(), radius: 2 })
+    this.invalidate()
+    return true
+  }
+
+  private maxHealth() { return this.perks.has('thickInk') ? PLAYER_HEALTH.thickInk : PLAYER_HEALTH.base }
+
+  private applyPerks() {
+    this.weapons.reloadScale = this.perks.has('quickDip') ? PERK_EFFECT.reloadScale : 1
+    this.weapons.fireScale = this.perks.has('doubleLine') ? PERK_EFFECT.fireScale : 1
+  }
+
+  private buyPerk(machine: PerkMachine) {
+    const perk = PERKS[machine.kind]
+    if (!this.isActive() || !this.canReach(machine.point, machine.root) || this.pendingPerk || this.timers.deathMachine) return false
+    if (this.perks.has(machine.kind) || this.perks.size >= PERK_LIMIT || !this.spend(perk.cost)) return false
+    // Drink it: the gun goes down, the bottle comes up, the perk works once it is empty.
+    this.weapons.cancel(); this.aiming = false
+    this.bottle.drink(perk.color)
+    this.interactionTime = PerkBottle.SECONDS
+    this.pendingPerk = { kind: machine.kind, timer: PerkBottle.SECONDS * 0.8 }
+    this.emit({ kind: 'perk-drink', position: this.player.body.position.clone(), radius: 5 })
+    this.invalidate()
+    return true
+  }
+
+  private grantPerk(kind: PerkKind) {
+    this.perks.add(kind)
+    this.applyPerks()
+    if (kind === 'spareNib') {
+      const snapshot = this.heldWeapons ?? this.weapons.snapshot()
+      if (snapshot.slots.length < 3) snapshot.slots.push(null)
+      if (!this.heldWeapons) this.weapons.restore(snapshot)
+    }
+    this.zombieHud.perks([...this.perks])
+    this.zombieHud.announce(PERKS[kind].name, 2, PERKS[kind].css)
+  }
+
+  /** Going down costs every perk, and Spare Nib's third gun with it, as in Call of Duty. */
+  private losePerks() {
+    if (this.perks.has('spareNib')) {
+      const snapshot = this.heldWeapons ?? this.weapons.snapshot()
+      if (snapshot.slots.length > 2) {
+        snapshot.slots.length = 2
+        if (snapshot.selected >= 2) snapshot.selected = 0
+        if (!this.heldWeapons) this.weapons.restore(snapshot)
+      }
+    }
+    this.perks.clear()
+    this.applyPerks()
+    this.zombieHud.perks([])
+  }
+
+  /** Second Draft: instead of dying, get back up with your perks gone and the zombies around you knocked back. */
+  private selfRevive() {
+    this.losePerks()
+    this.state.health = PLAYER_HEALTH.base
+    this.reviveGrace = PERK_EFFECT.reviveGrace
+    this.director?.shove(this.player.body.position, PERK_EFFECT.reviveShove, 1.5)
+    this.zombieHud.announce('Second Draft!', 2.4, PERKS.secondDraft.css)
+    this.emit({ kind: 'powerup-grab', position: this.player.body.position.clone(), radius: 5 })
+  }
+
+  /** Put the gun in hand into the Pack-a-Punch; or take the upgraded one back out. */
+  private usePack(pack: PackAPunch) {
+    if (!this.isActive() || !this.canReach(pack.point, pack.root)) return false
+    if (pack.state === 'ready') {
+      const item = pack.take()
+      if (!item) return false
+      this.weapons.give(item)
+      this.emit({ kind: 'pickup', position: this.player.body.position.clone(), radius: 2 })
+      this.invalidate()
+      return true
+    }
+    const current = this.weapons.current
+    if (pack.state !== 'idle' || !current || current.special || current.packed || this.timers.deathMachine || !this.spend(PACK.cost)) return false
+    // The gun goes in: your hands move to your other gun, or stay empty, until it comes out.
+    const snapshot = this.weapons.snapshot()
+    snapshot.slots[snapshot.selected] = null
+    const other = snapshot.slots.findIndex(Boolean)
+    if (other >= 0) snapshot.selected = other
+    this.weapons.restore(snapshot)
+    const capacity = WEAPON_RULES[current.name].capacity
+    pack.insert({ ...current, id: `${current.id}-packed`, packed: true, magazine: capacity, reserve: capacity * RESERVE_MAGAZINES * 2 })
+    this.emit({ kind: 'pack-work', position: pack.point.clone(), radius: 30 })
     this.invalidate()
     return true
   }
@@ -442,7 +569,7 @@ export class ZombiesRuntime {
       case 'maxAmmo':
         for (const item of [...this.weapons.slots, ...(this.heldWeapons?.slots ?? [])]) {
           if (!item || item.special) continue
-          item.reserve = Math.max(item.reserve, WEAPON_RULES[item.name].capacity * RESERVE_MAGAZINES)
+          item.reserve = Math.max(item.reserve, WEAPON_RULES[item.name].capacity * RESERVE_MAGAZINES * (item.packed ? 2 : 1))
         }
         break
       case 'deathMachine':
@@ -486,7 +613,8 @@ export class ZombiesRuntime {
     const surface = this.player.world.raySurface(shot.origin, shot.direction, shot.range)
     const distance = surface?.distance ?? shot.range
     this.impactPoint = null
-    const hit = this.director.hit(shot, distance, ZOMBIE_DAMAGE_SCALE, !!this.timers.instaKill)
+    const scale = ZOMBIE_DAMAGE_SCALE * (this.perks.has('doubleLine') ? PERK_EFFECT.damage : 1)
+    const hit = this.director.hit(shot, distance, scale, !!this.timers.instaKill)
     if (hit) {
       this.hitFlash = 0.15
       this.award(pointsForHit({ lethal: hit.lethal, zone: hit.reaction.zone }))
@@ -518,7 +646,7 @@ export class ZombiesRuntime {
   }
 
   damage(amount: number, cause: 'zombie' | 'fall', source?: THREE.Vector3) {
-    if (this.invincible || !this.isActive() || !(amount > 0)) return
+    if (this.invincible || this.reviveGrace > 0 || !this.isActive() || !(amount > 0)) return
     this.state.health = Math.max(0, this.state.health - amount)
     this.lastHurt = this.state.elapsed
     const dead = this.state.health === 0
@@ -532,7 +660,8 @@ export class ZombiesRuntime {
     this.hud.hurt(); this.audio.play({ kind: 'damage' })
     this.audio.play({ kind: 'bullet-hit', intensity: Math.min(1, amount / 50) })
     if (cause === 'fall') this.hud.notify('You fell.', 2)
-    if (dead) this.gameOver(source)
+    if (dead && this.perks.has('secondDraft')) this.selfRevive()
+    else if (dead) this.gameOver(source)
     this.invalidate()
   }
 
@@ -640,7 +769,17 @@ export class ZombiesRuntime {
       this.relocateStranded(dt)
       // Health comes back after a few seconds without being hit, as in Call of Duty.
       if (this.state.phase === 'active' && this.state.elapsed - this.lastHurt > PLAYER_HEALTH.regenDelay)
-        this.state.health = Math.min(PLAYER_HEALTH.base, this.state.health + PLAYER_HEALTH.regenPerSecond * dt)
+        this.state.health = Math.min(this.maxHealth(), this.state.health + PLAYER_HEALTH.regenPerSecond * dt)
+      this.reviveGrace = Math.max(0, this.reviveGrace - dt)
+      if (this.pendingPerk && (this.pendingPerk.timer -= dt) <= 0) { this.grantPerk(this.pendingPerk.kind); this.pendingPerk = null }
+      for (const machine of this.perkMachines) {
+        machine.update(dt)
+        // Now and then a machine near you plays its jingle.
+        if (machine.point.distanceTo(body.position) < 9 && Math.random() < dt / 35) this.emit({ kind: 'perk-jingle', position: machine.point.clone(), radius: 14, voice: machine.kind })
+      }
+      const packed = this.pack?.update(dt)
+      if (packed === 'done') { this.emit({ kind: 'pack-ready', position: this.pack!.point.clone(), radius: 30 }); this.hud.notify('Your upgraded gun is ready.', 2.5) }
+      if (packed === 'expired') this.hud.notify('The Pack-a-Punch kept your gun.', 3, true)
       this.knifeCooldown = Math.max(0, this.knifeCooldown - dt)
       if (this.box?.update(dt, Object.keys(BOX_WEIGHTS) as WeaponName[])) this.hud.notify('The box closed.', 2)
       this.blood.update(dt); this.impacts.update(dt); this.riseMarks.update(dt); this.sparks.update(dt)
@@ -679,6 +818,8 @@ export class ZombiesRuntime {
       this.weapons.update(dt, { active: reactionActive && this.interactionTime === 0, climbing: this.player.actions.traversing,
         moving: this.player.body.velocity.length(), aiming: this.aiming, reducedMotion: this.hud.reducedMotion, feet: this.player.body.position, hitPose })
     }
+    this.bottle.update(dt)
+    this.packedLook.update(dt, this.weapons.heldModel, !!this.weapons.current?.packed)
     this.audio.update(this.camera.perspective)
     this.hud.setScoped(this.weapons.scoped, this.weapons.scopeMagnification)
     const running = active || deathPlaying ? dt : 0
@@ -688,7 +829,8 @@ export class ZombiesRuntime {
     this.indicator.update(running, this.camera.perspective.position, yaw)
     this.hotbar.update(this.weapons.slots, this.weapons.selectedSlot)
     this.zombieHud.update(running, this.state.round, this.state.points)
-    this.hud.update(dt, this.state, { playing: this.player.playing, enabled: this.player.enabled && !this.player.immersive,
+    // The heart shows health as a share of your maximum, which Thick Ink raises.
+    this.hud.update(dt, { ...this.state, health: this.state.health / this.maxHealth() * 100 }, { playing: this.player.playing, enabled: this.player.enabled && !this.player.immersive,
       weapon: this.weapons.current, reloading: this.weapons.reloading, position: this.player.body.position,
       yaw, deaths: this.deaths, ready: this.ready })
     return active || this.death.running
@@ -701,6 +843,8 @@ export class ZombiesRuntime {
     for (const buy of this.wallBuys) buy.dispose()
     this.box?.dispose()
     this.zones?.dispose()
+    for (const machine of this.perkMachines) machine.dispose()
+    this.pack?.dispose(); this.bottle.dispose(); this.packedLook.dispose()
     this.director?.dispose()
     this.hits.dispose(); this.indicator.dispose(); this.hotbar.dispose(); this.zombieHud.dispose()
     this.bulletTrails.dispose(); this.weapons.dispose(); this.blood.dispose(); this.impacts.dispose(); this.riseMarks.dispose(); this.sparks.dispose(); this.powerups.dispose()

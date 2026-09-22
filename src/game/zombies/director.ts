@@ -677,6 +677,15 @@ export class ZombieDirector {
     this.context.emit({ kind: 'enemy-down', position: zombie.position.clone(), radius: 5 })
   }
 
+  /** Zombies near `centre` stagger and stop swiping for a moment (Second Draft getting you back up). */
+  shove(centre: THREE.Vector3, radius: number, seconds: number) {
+    for (const zombie of this.zombies) {
+      if (zombie.state !== 'chase' || zombie.position.distanceTo(centre) > radius) continue
+      zombie.stagger = Math.max(zombie.stagger, seconds)
+      zombie.swing = 0
+    }
+  }
+
   /** Every living zombie dies at once (the Nuke power-up). Returns how many. */
   killAll() {
     let count = 0

@@ -1,6 +1,7 @@
 import './zombies.css'
 import type { PowerupKind } from './rules'
 import { POWERUP_INFO, powerupIcon } from './powerups'
+import { PERKS, perkIcon, type PerkKind } from './perks'
 
 /**
  * Dead Ink's own HUD, on top of the shared mission HUD (health, magazine) and combat HUD (hit markers,
@@ -30,6 +31,8 @@ export class ZombieHud {
   private banner = document.createElement('div')
   private powerupsEl = document.createElement('div')
   private powerupCells = new Map<PowerupKind, { cell: HTMLElement; time: HTMLElement }>()
+  private perksEl = document.createElement('div')
+  private shownPerks = ''
   private floaters: Floater[] = []
   private flashTimer = 0
   private shownRound = -1
@@ -45,14 +48,18 @@ export class ZombieHud {
     this.banner.className = 'dead-ink-banner'
     this.banner.setAttribute('role', 'status')
     this.powerupsEl.className = 'dead-ink-powerups'
-    this.root.append(this.roundEl, this.pointsEl, this.banner, this.powerupsEl)
+    this.perksEl.className = 'dead-ink-perks'
+    this.perksEl.setAttribute('aria-label', 'Perks')
+    this.root.append(this.roundEl, this.pointsEl, this.banner, this.powerupsEl, this.perksEl)
     parent.append(this.root)
   }
 
   /** Big announcement in the middle of the screen: red for rounds ("Round 3"), green for power-ups. */
-  announce(text: string, seconds = 3, tone: 'danger' | 'powerup' = 'danger') {
+  announce(text: string, seconds = 3, tone: 'danger' | 'powerup' | string = 'danger') {
     this.banner.textContent = text
     this.banner.classList.toggle('powerup', tone === 'powerup')
+    // Any other tone is a colour: a perk announces itself in its own.
+    this.banner.style.color = tone === 'danger' || tone === 'powerup' ? '' : tone
     this.banner.classList.add('show')
     this.bannerTime = seconds
   }
@@ -78,6 +85,19 @@ export class ZombieHud {
       entry.time.textContent = String(Math.ceil(left))
       entry.cell.classList.toggle('ending', left < 5)
     }
+  }
+
+  /** Your perks, as badges in their colours, bottom left above your health. */
+  perks(kinds: readonly PerkKind[]) {
+    const key = kinds.join(',')
+    if (key === this.shownPerks) return
+    this.shownPerks = key
+    this.perksEl.replaceChildren(...kinds.map(kind => {
+      const image = document.createElement('img')
+      image.src = perkIcon(kind).toDataURL()
+      image.alt = image.title = PERKS[kind].name
+      return image
+    }))
   }
 
   /** The Nuke's blast: the page flashes to a negative for a moment. */
@@ -140,6 +160,7 @@ export class ZombieHud {
     this.banner.classList.remove('show')
     this.bannerTime = 0
     this.powerups([])
+    this.perks([])
     this.flashTimer = 0
     delete document.body.dataset.deadInkNuke
     this.shownRound = -1

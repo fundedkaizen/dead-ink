@@ -44,6 +44,9 @@ export class FirstPersonWeapons {
   private model: Gun | null = null
   private partRest = new Map<THREE.Object3D, THREE.Vector3>()
   private partRotation = new Map<THREE.Object3D, THREE.Euler>()
+  /** Perks: reload time and time between shots are multiplied by these (1 = as the weapon is). */
+  reloadScale = 1
+  fireScale = 1
   /** The Death Machine's barrel cluster: how fast it spins and how far it has turned. */
   private barrelSpeed = 0
   private barrelAngle = 0
@@ -101,6 +104,8 @@ export class FirstPersonWeapons {
   get lookSensitivity() { return this.scopeActive ? 1 / this.scopeZoom : 1 }
   get current(): WeaponItem | null { return this.inventory[this.slot] }
   get slots(): readonly (WeaponItem | null)[] { return this.inventory }
+  /** The first-person model of the gun in hand, for looks layered on by a mode (Dead Ink's Pack-a-Punch camo). */
+  get heldModel() { return this.model }
 
   private makeArm(shoulder: THREE.Vector3, pole: THREE.Vector3): Arm {
     const upper = this.armShape(this.upperArmGeometry)
@@ -354,13 +359,13 @@ export class FirstPersonWeapons {
     this.reducedMotion = frame.reducedMotion
     if (this.reloadElapsed !== null && this.current) {
       this.reloadElapsed += delta
-      if (this.reloadElapsed >= weaponRules(this.current).reload) {
+      if (this.reloadElapsed >= weaponRules(this.current).reload * this.reloadScale) {
         const shellReload = this.current.name === 'shotgun'
         const amount = Math.min(WEAPON_RULES[this.current.name].capacity - this.current.magazine, this.current.reserve, shellReload ? 1 : Infinity)
         this.current.magazine += amount
         this.current.reserve -= amount
         if (shellReload) this.context.emit({ kind: 'shell-load', radius: 2, position: this.feet.clone() })
-        if (shellReload && this.current.magazine < WEAPON_RULES.shotgun.capacity && this.current.reserve > 0) this.reloadElapsed -= weaponRules(this.current).reload
+        if (shellReload && this.current.magazine < WEAPON_RULES.shotgun.capacity && this.current.reserve > 0) this.reloadElapsed -= weaponRules(this.current).reload * this.reloadScale
         else {
           this.reloadElapsed = null
           this.context.emit({ kind: 'reload-ready', weapon: this.current.name, radius: 2, position: this.feet.clone(), text: 'Weapon ready' })
@@ -415,7 +420,7 @@ export class FirstPersonWeapons {
   private pose(_dt: number) {
     if (!this.model || !this.current) return
     const motion = !this.frame.reducedMotion
-    const progress = this.reloadElapsed === null ? 0 : Math.max(0, this.reloadElapsed) / weaponRules(this.current).reload
+    const progress = this.reloadElapsed === null ? 0 : Math.max(0, this.reloadElapsed) / (weaponRules(this.current).reload * this.reloadScale)
     const working = this.reloading ? Math.sin(Math.PI * progress) : 0
     const position = this.gripPosition()
     const bob = motion ? Math.min(1, this.frame.moving) * (1 - this.aim) : 0
@@ -504,7 +509,7 @@ export class FirstPersonWeapons {
 
   private shoot(item: WeaponItem) {
     const rules = weaponRules(item)
-    this.cooldown = rules.interval
+    this.cooldown = rules.interval * this.fireScale
     if (item.magazine === 0) {
       this.held = false
       this.context.emit({ kind: 'empty', text: item.reserve ? 'Empty — press R to reload' : 'No ammunition' })

@@ -13,6 +13,14 @@ const VOICE_LIMIT = 6
 /** Footsteps sit lower than in the mission: a crowd of zombies' steps adds up fast. */
 const FOOTSTEP_VOLUME: Record<string, number> = { footstep: 0.65, 'enemy-footstep': 0.55 }
 const VOWELS = { uh: [640, 1190], aa: [760, 1150], oo: [380, 900], ae: [820, 1550] } as const
+/** Each perk machine's own little tune (original, eight notes). */
+const JINGLES: Record<string, { notes: readonly number[]; step: number }> = {
+  thickInk: { notes: [196, 233.1, 261.6, 233.1, 196, 174.6, 196, 146.8], step: 0.28 },
+  quickDip: { notes: [523.3, 659.3, 784, 1046.5, 784, 659.3, 784, 1046.5], step: 0.12 },
+  doubleLine: { notes: [392, 392, 523.3, 392, 392, 587.3, 523.3, 440], step: 0.16 },
+  secondDraft: { notes: [440, 554.4, 659.3, 880, 659.3, 554.4, 440, 329.6], step: 0.2 },
+  spareNib: { notes: [329.6, 415.3, 493.9, 415.3, 329.6, 246.9, 329.6, 493.9], step: 0.18 },
+}
 type Voice = { pitch: number; glide: number; length: number; rasp: number; drive: number; vowel: readonly [number, number]; level: number }
 
 export class DeadInkAudio extends MissionAudio {
@@ -21,7 +29,8 @@ export class DeadInkAudio extends MissionAudio {
 
   play(event: SoundEvent) {
     const context = this.context
-    const handled = ['zombie-groan', 'zombie-scream', 'zombie-snarl', 'zombie-swipe', 'zombie-rise', 'powerup-drop', 'powerup-grab', 'nuke', 'round-start', 'round-end']
+    const handled = ['zombie-groan', 'zombie-scream', 'zombie-snarl', 'zombie-swipe', 'zombie-rise', 'powerup-drop', 'powerup-grab', 'nuke', 'round-start', 'round-end',
+      'perk-drink', 'perk-jingle', 'pack-work', 'pack-ready']
     if (!handled.includes(event.kind)) { super.play(FOOTSTEP_VOLUME[event.kind] ? { ...event, volume: FOOTSTEP_VOLUME[event.kind] } : event); return }
     if (!context || !this.master || !this.active || this.muted || this.volume <= 0 || this.disposed || this.dying) return
     if (event.position && event.position.distanceTo(this.listenerPosition) > (event.radius ?? 60)) return
@@ -39,7 +48,68 @@ export class DeadInkAudio extends MissionAudio {
       case 'nuke': this.boom(event); break
       case 'round-start': this.bell(event, [55, 82.4, 110], 3.2, 0.5); break
       case 'round-end': this.arpeggio(event, [1318.5, 1046.5, 880], 0.34, 'sine', 0.16, 1.4); break
+      case 'perk-drink': this.glugs(event); break
+      case 'perk-jingle': { const tune = JINGLES[event.voice ?? '']; if (tune) this.melody(event, tune.notes, tune.step, 0.09); break }
+      case 'pack-work': this.pound(event); break
+      case 'pack-ready': this.arpeggio(event, [523.3, 659.3, 784, 1046.5, 1318.5], 0.06, 'triangle', 0.18, 0.9); break
     }
+  }
+
+  /** A music-box tune from a point in the world: a perk machine's jingle. */
+  private melody(event: SoundEvent, notes: readonly number[], step: number, level: number) {
+    const context = this.context!, t = context.currentTime
+    notes.forEach((frequency, i) => {
+      const start = t + i * step
+      for (const [ratio, weight] of [[1, 1], [2, 0.35], [3.01, 0.12]] as const) {
+        const { gain, panner } = this.output(event)
+        const tone = context.createOscillator()
+        tone.type = 'sine'; tone.frequency.value = frequency * ratio
+        gain.gain.setValueAtTime(0.0001, start); gain.gain.exponentialRampToValueAtTime(level * weight, start + 0.008)
+        gain.gain.exponentialRampToValueAtTime(0.0001, start + step * 2.4)
+        tone.connect(gain)
+        this.track(tone, [gain, ...(panner ? [panner] : [])])
+        tone.start(start); tone.stop(start + step * 2.5)
+      }
+    })
+  }
+
+  /** Three gulps from a bottle. */
+  private glugs(event: SoundEvent) {
+    const context = this.context!, t = context.currentTime
+    for (let i = 0; i < 3; i++) {
+      const at = t + 0.35 + i * 0.28
+      const { gain } = this.output({ kind: event.kind })
+      const noise = context.createBufferSource(), band = context.createBiquadFilter()
+      noise.buffer = this.noise; noise.playbackRate.value = 0.9
+      band.type = 'bandpass'; band.Q.value = 6
+      band.frequency.setValueAtTime(260, at); band.frequency.exponentialRampToValueAtTime(520, at + 0.12)
+      gain.gain.setValueAtTime(0.0001, at); gain.gain.exponentialRampToValueAtTime(0.7, at + 0.03); gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.16)
+      noise.connect(band).connect(gain)
+      this.track(noise, [band, gain])
+      noise.start(at); noise.stop(at + 0.18)
+    }
+  }
+
+  /** The Pack-a-Punch at work: heavy strokes of the press under a rising whine. */
+  private pound(event: SoundEvent) {
+    const context = this.context!, t = context.currentTime
+    for (let i = 0; i < 6; i++) {
+      const at = t + 0.3 + i * 0.45
+      const { gain, panner } = this.output(event)
+      const thud = context.createOscillator()
+      thud.type = 'sine'; thud.frequency.setValueAtTime(120, at); thud.frequency.exponentialRampToValueAtTime(45, at + 0.18)
+      gain.gain.setValueAtTime(0.0001, at); gain.gain.exponentialRampToValueAtTime(0.8, at + 0.01); gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.25)
+      thud.connect(gain)
+      this.track(thud, [gain, ...(panner ? [panner] : [])])
+      thud.start(at); thud.stop(at + 0.27)
+    }
+    const { gain, panner } = this.output(event)
+    const whine = context.createOscillator()
+    whine.type = 'triangle'; whine.frequency.setValueAtTime(220, t); whine.frequency.exponentialRampToValueAtTime(880, t + 3.1)
+    gain.gain.setValueAtTime(0.0001, t); gain.gain.exponentialRampToValueAtTime(0.08, t + 0.4); gain.gain.setValueAtTime(0.08, t + 2.9); gain.gain.exponentialRampToValueAtTime(0.0001, t + 3.2)
+    whine.connect(gain)
+    this.track(whine, [gain, ...(panner ? [panner] : [])])
+    whine.start(t); whine.stop(t + 3.25)
   }
 
   private waveshaper(drive: number) {

@@ -5,6 +5,9 @@ import { Capsule } from 'three/addons/math/Capsule.js'
 import { NavGraph, type NavData } from '../src/game/zombies/navgraph'
 import { SEALED, ZONE_GATES, ZoneGates } from '../src/game/zombies/zones'
 import { setDoorOpen } from '../src/world/doors'
+import { MACHINE_PLACES } from '../src/game/zombies/perks'
+import { findWallSpots } from '../src/game/zombies/placement'
+import { seeded } from '../src/game/shared/random'
 import { buildNavScene } from './nav-scene'
 
 // The compound as Dead Ink plays it, with the zone gates and fence: every zone is sealed except
@@ -67,6 +70,27 @@ zones.open(byId('southwest')); zones.open(byId('yards'))
 expect('into the warehouse yard from the southwest', [...start, 'southwest stores', 'southwest yard', 'warehouse', 'warehouse yard', 'south barracks'])
 zones.open(byId('rail')); zones.open(byId('railEntrance'))
 expect('into the annex by the rail entrance', Object.keys(places) as Place[])
-console.log(`zombies zones checks passed: ${ZONE_GATES.length} gates seal ${Object.keys(places).length - start.length} places behind them`)
+// Perk machines and the Pack-a-Punch: each finds a wall inside its own zone, with every gate shut.
+for (const g of zones.gates) zones.open(g)
+zones.update(5)
+zones.closeAll()
+const taken: THREE.Vector3[] = []
+const zoneOf = (p: THREE.Vector3) => {
+  graph.flow([spawn]); if (Number.isFinite(graph.distance(graph.nearest(p)))) return 'start'
+  return 'other'
+}
+const machines: string[] = []
+for (const [kind, [x, y, z]] of MACHINE_PLACES) {
+  const anchor = v(x, y, z)
+  graph.flow([anchor])
+  const [spot] = findWallSpots(graph, world, seeded(3), { count: 1, near: 0, far: 35, spacing: 7, avoid: taken })
+  assert(spot, `a wall for ${kind} near ${x}, ${z}`)
+  taken.push(spot.stand)
+  graph.flow([anchor])
+  assert(Number.isFinite(graph.distance(graph.nearest(spot.stand))), `${kind} stands in its own zone`)
+  assert.equal(zoneOf(spot.stand), kind === 'secondDraft' ? 'start' : 'other', `${kind}: ${kind === 'secondDraft' ? 'by the spawn' : 'behind a gate'}`)
+  machines.push(`${kind} ${spot.stand.x.toFixed(0)},${spot.stand.z.toFixed(0)}`)
+}
+console.log(`zombies zones checks passed: ${ZONE_GATES.length} gates seal ${Object.keys(places).length - start.length} places behind them; machines at ${machines.join('; ')}`)
 zones.dispose()
 world.dispose()

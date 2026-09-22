@@ -1,4 +1,4 @@
-import { RARITY_INFO, weaponRules } from '../loot'
+import { PACKED_NAMES, RARITY_INFO, weaponRules } from '../loot'
 import type { WeaponItem } from '../types'
 
 /**
@@ -26,9 +26,11 @@ export class Hotbar {
   }
 
   update(slots: readonly (WeaponItem | null)[], selected: number) {
-    const signature = slots.map(item => item ? `${item.name}.${item.special ?? ''}.${item.rarity ?? ''}.${item.magazine}.${item.reserve}` : '-').join('|') + `#${selected}`
+    const signature = slots.map(item => item ? `${item.name}.${item.special ?? ''}.${item.packed ? 'p' : ''}.${item.rarity ?? ''}.${item.magazine}.${item.reserve}` : '-').join('|') + `#${selected}`
     if (signature === this.signature) return
     this.signature = signature
+    // Cells past the slots you have (a perk can add one) stay hidden.
+    this.cells.forEach((cell, i) => { cell.hidden = i >= slots.length })
     slots.forEach((item, i) => {
       const cell = this.cells[i]
       if (!cell) return
@@ -36,7 +38,7 @@ export class Hotbar {
       cell.classList.toggle('empty', !item)
       cell.style.setProperty('--rarity', item?.rarity ? RARITY_INFO[item.rarity].css : 'var(--ink-rule)')
       // The Death Machine power-up never runs dry.
-      cell.querySelector('.hud-slot-name')!.textContent = item ? item.special ? 'Death Machine' : SHORT[item.name] : ''
+      cell.querySelector('.hud-slot-name')!.textContent = item ? item.special ? 'Death Machine' : item.packed ? PACKED_NAMES[item.name] : SHORT[item.name] : ''
       cell.querySelector('.hud-slot-ammo')!.textContent = item ? item.special ? '∞' : `${item.magazine}/${item.reserve}` : ''
       cell.title = item ? weaponRules(item).label : 'Empty'
     })

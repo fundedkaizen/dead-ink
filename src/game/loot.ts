@@ -63,13 +63,24 @@ export type ScaledRules = { -readonly [K in keyof Rules]: Widen<Rules[K]> }
  */
 export const DEATH_MACHINE = { interval: 0.055, damage: 1.7, kick: 0.005, settle: 0.4 } as const
 
-export function weaponRules(item: { name: WeaponName; rarity?: Rarity; special?: 'deathMachine' }): ScaledRules {
+/**
+ * Dead Ink's Pack-a-Punch: an upgraded gun hits twice as hard and gets its own name, as upgraded guns do
+ * in Call of Duty. Names are the ink's own.
+ */
+export const PACKED = { damage: 2 } as const
+export const PACKED_NAMES: Record<WeaponName, string> = { pistol: 'Fountain Pen', smg: 'Inkjet', ak: 'Blotter', shotgun: 'Splatter', sniper: 'Quill' }
+
+export function weaponRules(item: { name: WeaponName; rarity?: Rarity; special?: 'deathMachine'; packed?: boolean }): ScaledRules {
   const base = WEAPON_RULES[item.name]
   if (item.special === 'deathMachine') return { ...base, label: 'Death Machine', automatic: true,
     interval: DEATH_MACHINE.interval, damage: base.damage * DEATH_MACHINE.damage, kick: DEATH_MACHINE.kick, settle: DEATH_MACHINE.settle }
-  if (!item.rarity || item.rarity === 'common') return { ...base }
-  const info = RARITY_INFO[item.rarity]
-  return { ...base, label: `${info.label} ${base.label}`, damage: base.damage * info.damage, reload: base.reload * info.reload }
+  const rules: ScaledRules = { ...base }
+  if (item.rarity && item.rarity !== 'common') {
+    const info = RARITY_INFO[item.rarity]
+    rules.label = `${info.label} ${base.label}`; rules.damage *= info.damage; rules.reload *= info.reload
+  }
+  if (item.packed) { rules.label = PACKED_NAMES[item.name]; rules.damage *= PACKED.damage }
+  return rules
 }
 
 export const rarityOf = (item: { rarity?: Rarity } | null | undefined): Rarity => item?.rarity ?? 'common'
