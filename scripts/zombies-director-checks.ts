@@ -6,7 +6,7 @@ import { CollisionWorld } from '../src/player/collision'
 import { createCompound } from '../src/world/compound'
 import { createMissionWorld, prepareCompound } from '../src/game/world'
 import { setDoorOpen } from '../src/world/doors'
-import { ATTACK, CORPSE_SECONDS, ZombieDirector, type ZombieTarget } from '../src/game/zombies/director'
+import { ATTACK, CORPSE, RISE, ZombieDirector, type ZombieTarget } from '../src/game/zombies/director'
 import { PLAYER_HEALTH, ZOMBIE_DAMAGE_SCALE } from '../src/game/zombies/rules'
 import { NavGraph, type NavData } from '../src/game/zombies/navgraph'
 import { pickSpawn } from '../src/game/zombies/spawn'
@@ -31,10 +31,10 @@ for (const door of doors) { door.userData.missionLocked = false; setDoorOpen(doo
 const world = new CollisionWorld(scene)
 world.refresh()
 
-const sounds: SoundEvent[] = [], swipes: { id: string; amount: number }[] = []
+const sounds: SoundEvent[] = [], swipes: { id: string; amount: number }[] = [], rises: THREE.Vector3[] = []
 const graph = NavGraph.fromData(JSON.parse(readFileSync('public/nav/compound.json', 'utf8')) as NavData)
 const director = new ZombieDirector({ scene, world, doors, graph, emit: e => sounds.push(e),
-  damagePlayer: (id, amount) => swipes.push({ id, amount }) })
+  damagePlayer: (id, amount) => swipes.push({ id, amount }), onRise: p => rises.push(p) })
 const started = performance.now()
 await director.init(24)
 const loadSeconds = (performance.now() - started) / 1000
@@ -150,7 +150,7 @@ const run = (seconds: number, targets: ZombieTarget[], fps = 60) => {
   const lethal = director.hit(shotAt(chestPoint, 500), 120, ZOMBIE_DAMAGE_SCALE)!
   assert(lethal.lethal && z.state === 'dead' && z.health === 0, 'a lethal hit kills')
   assert.equal(director.hit(shotAt(chestPoint, 500), 120, ZOMBIE_DAMAGE_SCALE), null, 'a corpse takes no more hits')
-  run(CORPSE_SECONDS + 0.1, [])
+  run(CORPSE.lie + CORPSE.sink + 0.1, [])
   assert.equal(z.state, 'idle', 'the body vanishes back into the pool')
   assert.equal(z.actor.root.visible, false)
   const again = director.spawn(v(-23, 0, -21), 250, 'walk', 0)!
@@ -215,6 +215,78 @@ const run = (seconds: number, targets: ZombieTarget[], fps = 60) => {
   }
   assert.equal(picked, 20)
   director.clear()
+}
+
+// ---- 5d. Climbing out of the ground --------------------------------------------------------------
+{
+  swipes.length = 0
+  const z = director.spawn(v(-34, 0, -29), 150, 'run', 0, true)!
+  assert(z && rises.length === 1 && rises[0].distanceTo(z.position) < 0.01, 'a rising spawn is announced where it happens')
+  assert(z.actor.root.position.y < z.position.y - RISE.depth + 0.01, 'it starts under the ground')
+  // Standing right next to the hole: no swipe until it is out.
+  const beside: ZombieTarget = { id: 'p1', feet: z.position.clone().add(v(0.9, 0, 0)), alive: true }
+  run(RISE.seconds * 0.5, [beside])
+  const halfway = z.actor.root.position.y
+  assert(halfway > z.position.y - RISE.depth && halfway < z.position.y - 0.2, `halfway out (${(halfway - z.position.y).toFixed(2)} m)`)
+  assert.equal(swipes.length, 0, 'it cannot swipe while climbing out')
+  // Its head is above ground by now and can be shot.
+  const head = z.actor.rig.bones.head.getWorldPosition(v())
+  assert(head.y > z.position.y + 0.1, `its head is out of the ground (${(head.y - z.position.y).toFixed(2)} m)`)
+  run(RISE.seconds * 0.5 + 0.1, [beside])
+  assert(Math.abs(z.actor.root.position.y - z.position.y) < 0.01 && z.rise === 0, 'then it stands on the ground')
+  run(2, [beside])
+  assert(swipes.length >= 1, 'and swipes')
+  director.clear()
+}
+
+// ---- 5e. Ladders, towers and ledges: nowhere you can stand is safe --------------------------------
+// The observation tower and the water tower are reached by ladder (and zip line); the long warehouse
+// and the southwest stores stand on 0.6 m slabs a player hops up and a zombie must vault.
+{
+  const reach = (label: string, goal: THREE.Vector3, from: THREE.Vector3, seconds: number) => {
+    const node = graph.nearest(goal)
+    assert(node >= 0, `${label}: the goal is on the graph`)
+    const player: ZombieTarget = { id: 'p1', feet: graph.point(node), alive: true }
+    const z = director.spawn(graph.point(graph.nearest(from, 6)), 5000, 'run', 0)!
+    assert(z, `${label}: the zombie spawns`)
+    let t = 0, climbed = false
+    const close = () => Math.hypot(z.position.x - player.feet.x, z.position.z - player.feet.z) <= ATTACK.range + 0.2 && Math.abs(z.position.y - player.feet.y) < 1.3
+    while (t < seconds && !close()) {
+      run(0.25, [player]); t += 0.25
+      climbed ||= !!z.climb
+      if (z.stranded) break
+    }
+    assert(close(), `${label}: the zombie reached the player (still ${z.position.distanceTo(player.feet).toFixed(1)} m away after ${t} s${z.stranded ? ', stranded' : ''})`)
+    assert(climbed, `${label}: it climbed on the way`)
+    director.clear()
+    return t
+  }
+  const times = [
+    reach('observation tower deck', v(-50.4, 6.8, 16.5), v(-44, 0, 27), 40),
+    reach('water tower deck', v(10.9, 12.6, -31), v(20, 0, -24), 45),
+    reach('inside the long warehouse', v(25.5, 0.7, -6), v(25.5, 0, 7), 30),
+    reach('inside the southwest stores', v(-57, 0.7, 64), v(-42, 0, 71), 30),
+  ]
+  // And down again: from the observation tower deck to a player on the ground.
+  const deck = graph.point(graph.nearest(v(-50.4, 6.8, 16.5)))
+  const ground: ZombieTarget = { id: 'p1', feet: graph.point(graph.nearest(v(-44, 0, 27), 6)), alive: true }
+  const down = director.spawn(deck, 5000, 'run', 0)!
+  let t = 0
+  while (t < 40 && Math.hypot(down.position.x - ground.feet.x, down.position.z - ground.feet.z) > ATTACK.range + 0.2) { run(0.25, [ground]); t += 0.25 }
+  assert(Math.abs(down.position.y - ground.feet.y) < 1.3 && Math.hypot(down.position.x - ground.feet.x, down.position.z - ground.feet.z) <= ATTACK.range + 0.2,
+    `a zombie on the tower climbs down to a player below (${t} s)`)
+  director.clear()
+  // Shot off the ladder: the body drops to the ground, not left hanging in the air.
+  const climber = director.spawn(ground.feet.clone(), 5000, 'run', 0)!
+  const top: ZombieTarget = { id: 'p1', feet: deck.clone(), alive: true }
+  t = 0
+  while (t < 40 && !(climber.climb && climber.position.y > deck.y - 4 && climber.position.y < deck.y - 1.5)) { run(1 / 30, [top]); t += 1 / 30 }
+  assert(climber.climb, 'caught a zombie halfway up the ladder')
+  director.killAll()
+  const below = world.floor(climber.position.clone(), 0.2, 40)
+  assert(Math.abs(climber.position.y - below) < 0.05 && climber.position.y < 1, `its body lies on the ground (${climber.position.y.toFixed(2)} m)`)
+  director.clear()
+  console.log(`  climbing: tower ${times[0]} s, water tower ${times[1]} s, warehouse ${times[2]} s, stores ${times[3]} s, back down ${t.toFixed(1)} s`)
 }
 
 // ---- 6. Cost of a full crowd -----------------------------------------------------------------

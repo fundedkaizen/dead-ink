@@ -23,8 +23,25 @@
   text-shadow: 2px 2px 0 #fff, -2px 2px 0 #fff, 2px -2px 0 #fff, -2px -2px 0 #fff; transition: opacity 0.4s, transform 0.4s; }
 .dead-ink-banner.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 body[data-reduced-motion="true"] .dead-ink-banner { transition: none; transform: translate(-50%, -50%); }
+/* Power-ups are the one green thing: green means a power-up, as in Call of Duty. */
+.dead-ink-banner.powerup { color: #2e8c38; }
+
+/* Running power-ups, bottom centre above the weapon slots, with seconds left. */
+.dead-ink-powerups { position: absolute; left: 50%; bottom: 96px; transform: translateX(-50%); display: flex; gap: 10px; }
+.dead-ink-powerup { display: grid; justify-items: center; font-weight: 800; font-size: 15px; color: var(--ink);
+  text-shadow: 1px 1px 0 #fff, -1px 1px 0 #fff, 1px -1px 0 #fff, -1px -1px 0 #fff; font-variant-numeric: tabular-nums; }
+.dead-ink-powerup img { width: 58px; height: 58px; display: block; }
+.dead-ink-powerup.ending { animation: dead-ink-blink 0.5s steps(2, jump-none) infinite; }
+@keyframes dead-ink-blink { from { opacity: 1; } to { opacity: 0.25; } }
+body[data-reduced-motion="true"] .dead-ink-powerup.ending { animation: none; opacity: 0.6; }
+
+/* The Nuke: a flash to the negative, fading back. */
+body[data-dead-ink-nuke="true"] #world { animation: dead-ink-nuke 0.7s ease-out; }
+@keyframes dead-ink-nuke { 0% { filter: invert(1) contrast(1.4); } 35% { filter: invert(1); } 100% { filter: none; } }
+body[data-reduced-motion="true"][data-dead-ink-nuke="true"] #world { animation: none; }
 
 @media (max-width: 640px) {
+  .dead-ink-powerup img { width: 44px; height: 44px; }
   .dead-ink-round svg { width: 44px; height: 44px; }
   .dead-ink-round span { font-size: 40px; }
   .dead-ink-points { right: 18px; bottom: 96px; }

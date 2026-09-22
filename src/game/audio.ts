@@ -36,13 +36,13 @@ const PAIN_PITCH = [0.93, 1, 1.06, 0.97]
 const HIT_COLOR = { head: { pitch: 1.22, gain: 1.06 }, torso: { pitch: 0.82, gain: 1 }, arm: { pitch: 1.1, gain: 0.8 }, leg: { pitch: 0.94, gain: 0.88 } }
 
 export class MissionAudio {
-  private context: AudioContext | null = null
-  private master: GainNode | null = null
-  private sources = new Set<AudioScheduledSourceNode>()
+  protected context: AudioContext | null = null
+  protected master: GainNode | null = null
+  protected sources = new Set<AudioScheduledSourceNode>()
   private incidentalSources = new Set<AudioScheduledSourceNode>()
   private whizSources = new Set<AudioScheduledSourceNode>()
   private cleanup = new Map<AudioScheduledSourceNode, () => void>()
-  private noise: AudioBuffer | null = null
+  protected noise: AudioBuffer | null = null
   private crackNoise: AudioBuffer | null = null
   private ambience: AudioBufferSourceNode | null = null
   private music: AudioBufferSourceNode | null = null
@@ -60,13 +60,13 @@ export class MissionAudio {
   private painUntil = new Map<number, number>()
   private painSources = new Set<AudioScheduledSourceNode>()
   private spoken: { source: AudioScheduledSourceNode; speaker: number } | null = null
-  private disposed = false
+  protected disposed = false
   private loadAbort = new AbortController()
   private acceptedVoices = 0
   private suppressedVoices = 0
-  private active = false
-  private dying = false
-  private listenerPosition = new THREE.Vector3()
+  protected active = false
+  protected dying = false
+  protected listenerPosition = new THREE.Vector3()
   volume = 0.55
   muted = false
 
@@ -170,7 +170,7 @@ export class MissionAudio {
     return buffer
   }
 
-  private track(source: AudioScheduledSourceNode, nodes: AudioNode[], priority?: 'incidental' | 'whiz') {
+  protected track(source: AudioScheduledSourceNode, nodes: AudioNode[], priority?: 'incidental' | 'whiz') {
     this.sources.add(source)
     if (priority === 'incidental') this.incidentalSources.add(source)
     if (priority === 'whiz') this.whizSources.add(source)
@@ -200,14 +200,14 @@ export class MissionAudio {
     return true
   }
 
-  private duckMusic() {
+  protected duckMusic() {
     if (!this.context || !this.musicGain) return
     const t = this.context.currentTime, gain = this.musicGain.gain
     gain.cancelScheduledValues(t); gain.setValueAtTime(0.008, t)
     gain.setValueAtTime(0.008, t + 0.65); gain.linearRampToValueAtTime(0.028, t + 1.5)
   }
 
-  private output(event: SoundEvent) {
+  protected output(event: SoundEvent) {
     const context = this.context!
     const gain = context.createGain()
     const panner = event.position ? context.createPanner() : null
@@ -233,7 +233,7 @@ export class MissionAudio {
   }
 
   /** Returns false when no decoded sample exists for the event so the caller can synthesize instead. */
-  private sample(event: SoundEvent) {
+  protected sample(event: SoundEvent) {
     const context = this.context!
     let buffer: AudioBuffer | undefined, gainValue = 1, pitch = 1
     if (event.kind === 'callout') {

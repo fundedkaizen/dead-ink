@@ -20,6 +20,8 @@ export class FirstPersonController {
   onPlayingChange: (playing: boolean) => void = () => {}
   lookSensitivity: () => number = () => 1
   private fallback = false
+  private rawInput = false
+  private lastLook = 0
   private dragging = false
   private started = false
   private walkRotation = new THREE.Quaternion()
@@ -107,8 +109,16 @@ export class FirstPersonController {
     this.canvas.focus({ preventScroll: true })
     if (!this.canvas.requestPointerLock || this.fallback) { this.useFallback(); return }
     try {
-      const request = this.canvas.requestPointerLock() as Promise<void> | undefined
-      request?.catch(this.useFallback)
+      // Raw mouse input, as PC shooters use: no OS acceleration, and none of the bogus jumps Chrome on
+      // Windows reports under an accelerated lock, which snap the view. Browsers without the option
+      // refuse it; then lock without it.
+      this.rawInput = true
+      const request = this.canvas.requestPointerLock({ unadjustedMovement: true }) as Promise<void> | undefined
+      request?.catch((error: unknown) => {
+        if (!(error instanceof DOMException && error.name === 'NotSupportedError')) { this.useFallback(); return }
+        this.rawInput = false
+        try { (this.canvas.requestPointerLock() as Promise<void> | undefined)?.catch(this.useFallback) } catch { this.useFallback() }
+      })
     } catch { this.useFallback() }
   }
 
@@ -147,6 +157,12 @@ export class FirstPersonController {
 
   private look = (event: MouseEvent) => {
     if (!this.enabled || !this.playing || (document.pointerLockElement !== this.canvas && !(this.fallback && this.dragging))) return
+    // Without raw input, a lock can report one absurd movement out of nowhere (Chrome on Windows). A hand
+    // cannot go from nearly still to that in one event, so skip it rather than snap the view.
+    const size = Math.abs(event.movementX) + Math.abs(event.movementY)
+    const spike = !this.rawInput && document.pointerLockElement === this.canvas && size > 300 && size > 8 * (this.lastLook + 10)
+    if (!spike) this.lastLook = size
+    if (spike) return
     this.rotation.setFromQuaternion(this.camera.active.quaternion, 'YXZ')
     const sensitivity = 0.0022 * this.lookSensitivity()
     this.rotation.y -= event.movementX * sensitivity

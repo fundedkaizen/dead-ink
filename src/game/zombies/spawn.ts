@@ -25,7 +25,7 @@ export function pickSpawn(graph: NavGraph, world: CollisionWorld, rules: SpawnRu
     const near = pass === 0 ? rules.near : rules.near * 0.45
     const far = pass === 0 ? rules.far : rules.far * 1.6
     for (let i = 0; i < tries; i++) {
-      const index = Math.floor(random() * graph.size)
+      const index = Math.floor(random() * graph.cells)
       if (!graph.walkable(index)) continue
       const distance = graph.distance(index)
       if (!Number.isFinite(distance) || distance < near || distance > far) continue

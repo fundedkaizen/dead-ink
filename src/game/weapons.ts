@@ -44,6 +44,9 @@ export class FirstPersonWeapons {
   private model: Gun | null = null
   private partRest = new Map<THREE.Object3D, THREE.Vector3>()
   private partRotation = new Map<THREE.Object3D, THREE.Euler>()
+  /** The Death Machine's barrel cluster: how fast it spins and how far it has turned. */
+  private barrelSpeed = 0
+  private barrelAngle = 0
   private held = false
   private pendingShot = false
   private enabled = false
@@ -175,7 +178,7 @@ export class FirstPersonWeapons {
     this.partRest.clear()
     this.partRotation.clear()
     if (this.current) {
-      this.model = createMissionGun(this.current.name)
+      this.model = createMissionGun(this.current.name, this.current.special)
       // A slight muzzle-up tilt reveals the top of the barrel while aiming.
       // Measure that pose before parenting so its sights stay below the reticle.
       this.model.rotation.x = AIM_PITCH
@@ -344,6 +347,9 @@ export class FirstPersonWeapons {
     if (this.current?.name === 'shotgun' && previousCooldown > 0.72 && this.cooldown <= 0.72) this.context.emit({ kind: 'weapon-pump', position: this.feet.clone(), radius: 3 })
     this.switchTime = Math.max(0, this.switchTime - delta)
     this.recoil = Math.max(0, this.recoil - delta * 7)
+    // Spins up while the trigger is held and runs down after, like a real rotary gun.
+    this.barrelSpeed = THREE.MathUtils.damp(this.barrelSpeed, this.held && this.current?.special ? 42 : 0, 5, delta)
+    this.barrelAngle = (this.barrelAngle + this.barrelSpeed * delta) % (Math.PI * 2)
     this.flashTime = Math.max(0, this.flashTime - delta)
     this.reducedMotion = frame.reducedMotion
     if (this.reloadElapsed !== null && this.current) {
@@ -447,6 +453,8 @@ export class FirstPersonWeapons {
       const cycle = WEAPON_RULES.shotgun.interval - this.cooldown
       pump.position.z -= 0.07 * smooth(cycle, 0.12, 0.3) * (1 - smooth(cycle, 0.35, 0.55))
     }
+    const barrels = this.model.userData.parts.barrels
+    if (barrels) barrels.rotation.z += this.barrelAngle
     this.root.updateWorldMatrix(true, true)
     const shoulders = this.arms.map((arm, index) => arm.shoulder.clone().add(hit?.shoulders[index] ?? new THREE.Vector3()))
     const wrist = this.root.worldToLocal(this.mount.localToWorld(new THREE.Vector3(-0.029, -0.02, -0.033)))

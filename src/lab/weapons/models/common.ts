@@ -58,7 +58,7 @@ export const tube = (r: number, len: number, pos: V, mat = metal, rot: V = [90, 
   part(new THREE.CylinderGeometry(r, r, len, 16), mat, pos, rot)
 
 type Batch = { fill?: THREE.BufferGeometry; hull?: THREE.BufferGeometry; ink?: ReturnType<typeof penStrokeGeometry> }
-const batches = new Map<GunName, Batch[]>()
+const batches = new Map<string, Batch[]>()
 
 /**
  * A guard's gun used to be ~90 draw calls (a fill, a stroke mesh and often a hull per piece). Pieces that
@@ -66,7 +66,7 @@ const batches = new Map<GunName, Batch[]>()
  * magazine...), which game and lab code animate as a unit. Each piece keeps its own stroke seed, so the
  * drawing is unchanged. The batched geometry is built once per model and shared by every copy of that gun.
  */
-function batch(name: GunName, g: THREE.Group, parts: Record<string, THREE.Object3D>) {
+function batch(name: string, g: THREE.Group, parts: Record<string, THREE.Object3D>) {
   const owners = [g, ...Object.values(parts)]
   const pieces: THREE.Object3D[][] = owners.map(() => [])
   g.traverse(obj => {
@@ -118,12 +118,13 @@ function batch(name: GunName, g: THREE.Group, parts: Record<string, THREE.Object
   })
 }
 
+/** `model` names the drawing when one gun's handling carries a different body (the Death Machine is held like the AK). */
 export function gun(name: GunName, cls: GunClass, twoHanded: boolean, muzzle: V, eject: V,
-  build: (g: THREE.Group, parts: Record<string, THREE.Object3D>) => void): Gun {
+  build: (g: THREE.Group, parts: Record<string, THREE.Object3D>) => void, model: string = name): Gun {
   const g = new THREE.Group() as Gun
   const parts: Record<string, THREE.Object3D> = {}
   build(g, parts)
-  batch(name, g, parts)
+  batch(model, g, parts)
   g.name = `gun:${name}`
   g.userData = { name, cls, twoHanded, muzzle: new THREE.Vector3(...muzzle), eject: new THREE.Vector3(...eject), parts }
   return g

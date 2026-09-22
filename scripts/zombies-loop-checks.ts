@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import * as THREE from 'three'
-import { MAX_ALIVE, ROUND_BREAK, zombiesInRound } from '../src/game/zombies/rules'
+import { MAX_ALIVE, POWERUPS, ROUND_BREAK, zombiesInRound } from '../src/game/zombies/rules'
+import { DROPPED_KINDS, PowerupDropper } from '../src/game/zombies/powerups'
 import { FIRST_ROUND_DELAY, newGame, returnSpawns, stepRounds } from '../src/game/zombies/rounds'
 import { BOX_WEIGHTS, RESERVE_MAGAZINES, WALL_WEAPONS, ZOMBIE_SLOTS, freshWeapon, pointsForHit, rollBox, startingPistol, wallOffer } from '../src/game/zombies/economy'
 import { SHEET, findWallSpots } from '../src/game/zombies/placement'
@@ -9,7 +10,7 @@ import { NavGraph, type NavData } from '../src/game/zombies/navgraph'
 import { seeded } from '../src/game/shared/random'
 import { FirstPersonWeapons } from '../src/game/weapons'
 import { WEAPON_RULES } from '../src/game/balance'
-import { RARITIES } from '../src/game/loot'
+import { RARITIES, weaponRules } from '../src/game/loot'
 import { CollisionWorld } from '../src/player/collision'
 import type { WeaponFrame, WeaponName } from '../src/game/types'
 import { buildNavScene } from './nav-scene'
@@ -146,6 +147,37 @@ assert.equal(freshWeapon('z', 'smg').reserve, WEAPON_RULES.smg.capacity * RESERV
   assert.equal(weapons.slots[1]!.reserve, 96)
   assert.equal(weapons.refill('sniper', 5, 20), false, 'refilling a gun you do not carry does nothing')
   weapons.dispose(); world.dispose()
+}
+
+// ---- 4b. Power-up drops ---------------------------------------------------------------------------
+{
+  // Kills worth 60 each: the first guaranteed drop comes once 2000 points are earned.
+  const never = () => 0.999
+  const dropper = new PowerupDropper(never)
+  let earned = 0, first = -1
+  for (let kill = 1; kill <= 40 && first < 0; kill++) { earned += 60; if (dropper.onKill(earned)) first = earned }
+  assert(first >= POWERUPS.firstThreshold && first < POWERUPS.firstThreshold + 60, `first drop at ${first} points earned`)
+  // The next one needs 14% more on top.
+  let second = -1
+  for (let kill = 1; kill <= 80 && second < 0; kill++) { earned += 60; if (dropper.onKill(earned)) second = earned }
+  const gap = second - first
+  assert(gap >= POWERUPS.firstThreshold * POWERUPS.thresholdGrowth - 60 && gap <= POWERUPS.firstThreshold * POWERUPS.thresholdGrowth + 60, `the next drop needs ${gap} more`)
+  // At most four a round, however lucky.
+  const lucky = new PowerupDropper(() => 0)
+  let dropped = 0
+  for (let kill = 0; kill < 50; kill++) if (lucky.onKill(0)) dropped++
+  assert.equal(dropped, POWERUPS.maxPerRound, 'never more than four drops a round')
+  lucky.newRound()
+  assert(lucky.onKill(0), 'a new round allows drops again')
+  // The bag: every kind once before any repeats.
+  const bag = new PowerupDropper(seeded(9))
+  const kinds: string[] = []
+  for (let round = 0; round < 3; round++) { bag.newRound(); for (let i = 0; i < 4; i++) { const k = bag.onKill(1e9 * (round * 4 + i + 1)); if (k) kinds.push(k) } }
+  assert.deepEqual([...kinds.slice(0, DROPPED_KINDS.length)].sort(), [...DROPPED_KINDS].sort(), `every power-up once before a repeat (${kinds.join(', ')})`)
+  assert(!DROPPED_KINDS.includes('carpenter'), 'no Carpenter while the map has no barricades')
+  // The Death Machine: a minigun on the AK's handling.
+  const dm = weaponRules({ name: 'ak', special: 'deathMachine' })
+  assert(dm.label === 'Death Machine' && dm.automatic && dm.interval < WEAPON_RULES.ak.interval / 2 && dm.damage > WEAPON_RULES.ak.damage, 'the Death Machine fires fast and hits hard')
 }
 
 // ---- 5. Wall spots on the real compound -----------------------------------------------------------

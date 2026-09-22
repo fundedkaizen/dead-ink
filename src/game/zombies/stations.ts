@@ -6,6 +6,7 @@ import { RARITY_INFO, type Rarity } from '../loot'
 import type { WeaponName } from '../types'
 import { BOX_OFFER, BOX_SPIN } from './economy'
 import type { WallSpot } from './placement'
+import { LightMotes } from './effects'
 
 /**
  * The things you spend points on, drawn in the same ink as the buildings. Placeholder art until Astra's
@@ -57,6 +58,8 @@ export class MysteryBox {
   timer = 0
   offer: { name: WeaponName; rarity: Rarity } | null = null
   private lid = new THREE.Group()
+  /** Light rising off the box: a trickle marks it, a burst while it spins, the gun's colour on offer. */
+  private motes = new LightMotes(160, 0.06)
   private floating: ReturnType<typeof createMissionGun> | null = null
   private floatingName: WeaponName | null = null
   private beam: THREE.Group | null = null
@@ -85,6 +88,7 @@ export class MysteryBox {
     this.root.add(this.lid)
     for (const x of [-0.42, 0.42]) this.root.add(wallText('?', [x, height * 0.52, depth / 2 + 0.012], 0.34))
     this.baseY = height + 0.15
+    this.root.add(this.motes)
     this.point = centre.clone().setY(spot.stand.y + height + 0.1).addScaledVector(spot.normal, depth / 2)
   }
 
@@ -114,6 +118,14 @@ export class MysteryBox {
   update(dt: number, spinNames: readonly WeaponName[]) {
     const lidTarget = this.state === 'idle' ? 0 : -1.25
     this.lid.rotation.x += (lidTarget - this.lid.rotation.x) * Math.min(1, dt * 8)
+    const top = this.baseY - 0.15
+    if (this.state === 'idle') this.motes.update(dt, 5, p => p.set((Math.random() - 0.5) * 1.3, top + 0.1, (Math.random() - 0.5) * 0.55), 0xe8b64a, 0.35)
+    else if (this.state === 'spinning') this.motes.update(dt, 110, p => p.set((Math.random() - 0.5) * 1.2, top, (Math.random() - 0.5) * 0.45), 0xffc94a, 1.9)
+    else {
+      const color = this.offer && this.offer.rarity !== 'common' ? RARITY_INFO[this.offer.rarity].color : 0xe8b64a
+      const at = this.floating?.position ?? new THREE.Vector3(0, top + 0.6, 0)
+      this.motes.update(dt, 45, p => p.randomDirection().multiplyScalar(0.25 + Math.random() * 0.3).add(at), color, 0.45)
+    }
     if (this.state === 'idle') return false
     this.timer += dt
     if (this.state === 'spinning') {
@@ -163,5 +175,5 @@ export class MysteryBox {
     }
   }
 
-  dispose() { this.setFloating(null); this.root.removeFromParent() }
+  dispose() { this.setFloating(null); this.motes.dispose(); this.root.removeFromParent() }
 }

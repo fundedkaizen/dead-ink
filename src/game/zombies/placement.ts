@@ -86,7 +86,7 @@ function flatFloor(world: CollisionWorld, stand: THREE.Vector3, wall: THREE.Vect
 export function findWallSpots(graph: NavGraph, world: CollisionWorld, random: Random,
   options: { count: number; near: number; far: number; spacing: number; avoid?: readonly THREE.Vector3[] }): WallSpot[] {
   const candidates: number[] = []
-  for (let i = 0; i < graph.size; i++) {
+  for (let i = 0; i < graph.cells; i++) {
     if (!graph.walkable(i)) continue
     const walk = graph.distance(i)
     if (Number.isFinite(walk) && walk >= options.near && walk <= options.far) candidates.push(i)

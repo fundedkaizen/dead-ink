@@ -193,3 +193,38 @@ export function buildAk(): Gun {
   result.userData.support = new THREE.Vector3(0, -0.005, 0.27)
   return result
 }
+
+/**
+ * Dead Ink's Death Machine power-up: a six-barrel minigun, held like the AK (same grip, same support
+ * hand) so every pose and animation carries over. The barrel cluster is its own part, spun while firing.
+ */
+export function buildDeathMachine(): Gun {
+  const result = gun('ak', 'ak', true, [0, 0.077, 0.68], [0.045, 0.09, 0.1], (g, parts) => {
+    // A motor housing a little heavier than the AK's receiver, so the barrels stay the thing you see.
+    g.add(box(0.064, 0.078, 0.23, [0, 0.07, 0.09]))
+    g.add(box(0.066, 0.01, 0.17, [0, 0.114, 0.09], dark))
+    g.add(tube(0.036, 0.04, [0, 0.077, 0.225], dark))
+    // Pistol grip and trigger, where the AK's are, so the right hand needs no new pose.
+    g.add(box(0.034, 0.12, 0.05, [0, 0.0, 0.0], dark, [-10, 0, 0]))
+    g.add(triggerGuard(0.02, 0.085, 0.024, -0.024))
+    // Ammunition box low on the left, feeding the housing through a belt chute.
+    g.add(box(0.056, 0.07, 0.1, [-0.07, 0.02, 0.085]))
+    g.add(box(0.052, 0.01, 0.096, [-0.07, 0.058, 0.085], dark))
+    g.add(box(0.034, 0.022, 0.05, [-0.042, 0.066, 0.085], dark, [0, 0, -30]))
+    // Vertical front grip for the support hand.
+    g.add(box(0.03, 0.085, 0.034, [0, -0.02, 0.27], dark))
+    // Six barrels in a ring, clamped along their length; the cluster spins about the bore line.
+    const barrels = new THREE.Group()
+    barrels.position.set(0, 0.077, 0.25)
+    for (let i = 0; i < 6; i++) {
+      const angle = i * Math.PI / 3
+      barrels.add(tube(0.0095, 0.42, [Math.cos(angle) * 0.03, Math.sin(angle) * 0.03, 0.21], i % 2 ? metal : dark))
+    }
+    barrels.add(tube(0.012, 0.43, [0, 0, 0.21], dark))
+    for (const z of [0.04, 0.24, 0.41]) barrels.add(tube(0.044, 0.016, [0, 0, z]))
+    parts.barrels = barrels
+    g.add(barrels)
+  }, 'death-machine')
+  result.userData.support = new THREE.Vector3(0, -0.005, 0.27)
+  return result
+}

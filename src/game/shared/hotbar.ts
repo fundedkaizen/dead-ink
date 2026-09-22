@@ -26,7 +26,7 @@ export class Hotbar {
   }
 
   update(slots: readonly (WeaponItem | null)[], selected: number) {
-    const signature = slots.map(item => item ? `${item.name}.${item.rarity ?? ''}.${item.magazine}.${item.reserve}` : '-').join('|') + `#${selected}`
+    const signature = slots.map(item => item ? `${item.name}.${item.special ?? ''}.${item.rarity ?? ''}.${item.magazine}.${item.reserve}` : '-').join('|') + `#${selected}`
     if (signature === this.signature) return
     this.signature = signature
     slots.forEach((item, i) => {
@@ -35,8 +35,9 @@ export class Hotbar {
       cell.classList.toggle('selected', i === selected)
       cell.classList.toggle('empty', !item)
       cell.style.setProperty('--rarity', item?.rarity ? RARITY_INFO[item.rarity].css : 'var(--ink-rule)')
-      cell.querySelector('.hud-slot-name')!.textContent = item ? SHORT[item.name] : ''
-      cell.querySelector('.hud-slot-ammo')!.textContent = item ? `${item.magazine}/${item.reserve}` : ''
+      // The Death Machine power-up never runs dry.
+      cell.querySelector('.hud-slot-name')!.textContent = item ? item.special ? 'Death Machine' : SHORT[item.name] : ''
+      cell.querySelector('.hud-slot-ammo')!.textContent = item ? item.special ? '∞' : `${item.magazine}/${item.reserve}` : ''
       cell.title = item ? weaponRules(item).label : 'Empty'
     })
   }

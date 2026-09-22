@@ -1,0 +1,203 @@
+import { MissionAudio } from '../audio'
+import type { SoundEvent } from '../types'
+
+/**
+ * Dead Ink's sounds on top of the mission's (guns, footsteps, hits, bodies): zombie voices, the ground
+ * breaking as one climbs out, power-ups, the Nuke, and the round stings. All synthesised, so nothing
+ * needs downloading; a recorded file for any kind can replace its synthesis later.
+ *
+ * Voices are formant synthesis: a rasping sawtooth that slides in pitch, breath noise, a waveshaper for
+ * the rattle, and two vowel formants. Groans are low and long, sprinter screams high and harsh.
+ */
+const VOICE_LIMIT = 6
+const VOWELS = { uh: [640, 1190], aa: [760, 1150], oo: [380, 900], ae: [820, 1550] } as const
+type Voice = { pitch: number; glide: number; length: number; rasp: number; drive: number; vowel: readonly [number, number]; level: number }
+
+export class DeadInkAudio extends MissionAudio {
+  private voices = new Set<AudioScheduledSourceNode>()
+  private curve: Float32Array<ArrayBuffer> | null = null
+
+  play(event: SoundEvent) {
+    const context = this.context
+    const handled = ['zombie-groan', 'zombie-scream', 'zombie-snarl', 'zombie-swipe', 'zombie-rise', 'powerup-drop', 'powerup-grab', 'nuke', 'round-start', 'round-end']
+    if (!handled.includes(event.kind)) { super.play(event); return }
+    if (!context || !this.master || !this.active || this.muted || this.volume <= 0 || this.disposed || this.dying) return
+    if (event.position && event.position.distanceTo(this.listenerPosition) > (event.radius ?? 60)) return
+    if (this.sources.size >= 72) return
+    if (this.sample(event)) return
+    const r = Math.random
+    switch (event.kind) {
+      case 'zombie-groan': this.voice(event, { pitch: 62 + r() * 34, glide: 0.72 + r() * 0.2, length: 1 + r() * 0.9, rasp: 0.35, drive: 5, vowel: r() < 0.5 ? VOWELS.uh : VOWELS.oo, level: 0.5 }); break
+      case 'zombie-scream': this.voice(event, { pitch: 170 + r() * 80, glide: 0.62 + r() * 0.15, length: 0.65 + r() * 0.35, rasp: 0.65, drive: 11, vowel: r() < 0.5 ? VOWELS.aa : VOWELS.ae, level: 0.62 }); break
+      case 'zombie-snarl': this.voice(event, { pitch: 105 + r() * 30, glide: 1.25, length: 0.32, rasp: 0.8, drive: 9, vowel: VOWELS.aa, level: 0.6 }); break
+      case 'zombie-swipe': this.whoosh(event); break
+      case 'zombie-rise': this.dirt(event); this.voice(event, { pitch: 58 + r() * 20, glide: 0.8, length: 1.4, rasp: 0.4, drive: 6, vowel: VOWELS.oo, level: 0.45 }, 0.25); break
+      case 'powerup-drop': this.shimmer(event); break
+      case 'powerup-grab': this.arpeggio(event, [659.3, 880, 1318.5], 0.07, 'triangle', 0.22); break
+      case 'nuke': this.boom(event); break
+      case 'round-start': this.bell(event, [55, 82.4, 110], 3.2, 0.5); break
+      case 'round-end': this.arpeggio(event, [1318.5, 1046.5, 880], 0.34, 'sine', 0.16, 1.4); break
+    }
+  }
+
+  private waveshaper(drive: number) {
+    if (!this.curve || this.curve[0] !== -Math.tanh(drive)) {
+      const curve = new Float32Array(new ArrayBuffer(1024 * 4))
+      for (let i = 0; i < curve.length; i++) curve[i] = Math.tanh((i / (curve.length - 1) * 2 - 1) * drive)
+      this.curve = curve
+    }
+    const shaper = this.context!.createWaveShaper()
+    shaper.curve = this.curve
+    return shaper
+  }
+
+  /** A zombie's voice: rasping, sliding, rattling, shaped into a vowel. */
+  private voice(event: SoundEvent, v: Voice, delay = 0) {
+    const context = this.context!
+    if (this.voices.size >= VOICE_LIMIT) return
+    const t = context.currentTime + delay, end = t + v.length
+    const { gain, panner } = this.output(event)
+    const saw = context.createOscillator()
+    saw.type = 'sawtooth'
+    saw.frequency.setValueAtTime(v.pitch, t)
+    saw.frequency.linearRampToValueAtTime(v.pitch * (1 + (v.glide - 1) * 0.3), t + v.length * 0.35)
+    saw.frequency.exponentialRampToValueAtTime(v.pitch * v.glide, end)
+    // Unsteady pitch: a wobble, and a slower drift.
+    const wobble = context.createOscillator(), wobbleDepth = context.createGain()
+    wobble.frequency.value = 6 + Math.random() * 5
+    wobbleDepth.gain.value = v.pitch * 0.05
+    wobble.connect(wobbleDepth).connect(saw.frequency)
+    const breath = context.createBufferSource(), breathLevel = context.createGain()
+    breath.buffer = this.noise; breath.loop = true; breath.playbackRate.value = 1.6
+    breathLevel.gain.value = v.rasp
+    const mix = context.createGain()
+    saw.connect(mix); breath.connect(breathLevel).connect(mix)
+    const shaper = this.waveshaper(v.drive)
+    mix.connect(shaper)
+    const formants = v.vowel.map((frequency, i) => {
+      const band = context.createBiquadFilter()
+      band.type = 'bandpass'; band.frequency.value = frequency * (0.92 + Math.random() * 0.16); band.Q.value = i ? 9 : 5
+      shaper.connect(band).connect(gain)
+      return band
+    })
+    const body = context.createBiquadFilter()
+    body.type = 'lowpass'; body.frequency.value = 420
+    shaper.connect(body).connect(gain)
+    // Swells in, rattles, trails off.
+    gain.gain.setValueAtTime(0.0001, t)
+    gain.gain.exponentialRampToValueAtTime(v.level, t + Math.min(0.12, v.length * 0.2))
+    gain.gain.setValueAtTime(v.level, t + v.length * 0.55)
+    gain.gain.exponentialRampToValueAtTime(0.0001, end)
+    const nodes: AudioNode[] = [wobbleDepth, breathLevel, mix, shaper, ...formants, body, gain, ...(panner ? [panner] : [])]
+    this.track(saw, nodes); this.track(wobble, []); this.track(breath, [])
+    this.voices.add(saw)
+    saw.addEventListener('ended', () => this.voices.delete(saw))
+    for (const source of [saw, wobble, breath]) { source.start(t); source.stop(end + 0.02) }
+    this.duckMusic()
+  }
+
+  /** The claw's swing through the air. */
+  private whoosh(event: SoundEvent) {
+    const context = this.context!, t = context.currentTime
+    const { gain, panner } = this.output(event)
+    const noise = context.createBufferSource(), band = context.createBiquadFilter()
+    noise.buffer = this.noise; noise.playbackRate.value = 2.2
+    band.type = 'bandpass'; band.Q.value = 1.4
+    band.frequency.setValueAtTime(500, t); band.frequency.exponentialRampToValueAtTime(2600, t + 0.12); band.frequency.exponentialRampToValueAtTime(700, t + 0.26)
+    gain.gain.setValueAtTime(0.0001, t); gain.gain.exponentialRampToValueAtTime(0.5, t + 0.06); gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.28)
+    noise.connect(band).connect(gain)
+    this.track(noise, [band, gain, ...(panner ? [panner] : [])], 'incidental')
+    noise.start(t); noise.stop(t + 0.3)
+  }
+
+  /** Ground breaking: a thud, then clods pattering down. */
+  private dirt(event: SoundEvent) {
+    const context = this.context!, t = context.currentTime
+    const { gain, panner } = this.output(event)
+    const thud = context.createBufferSource(), low = context.createBiquadFilter()
+    thud.buffer = this.noise; thud.playbackRate.value = 0.5
+    low.type = 'lowpass'; low.frequency.value = 260
+    gain.gain.setValueAtTime(0.0001, t); gain.gain.exponentialRampToValueAtTime(0.9, t + 0.02); gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.7)
+    thud.connect(low).connect(gain)
+    this.track(thud, [low, gain, ...(panner ? [panner] : [])], 'incidental')
+    thud.start(t); thud.stop(t + 0.72)
+    for (let i = 0; i < 7; i++) {
+      const at = t + 0.18 + Math.random() * 0.8
+      const { gain: tick, panner: tickPanner } = this.output(event)
+      const clod = context.createBufferSource(), band = context.createBiquadFilter()
+      clod.buffer = this.noise; clod.playbackRate.value = 3
+      band.type = 'bandpass'; band.frequency.value = 1400 + Math.random() * 1800; band.Q.value = 3
+      tick.gain.setValueAtTime(0.0001, at); tick.gain.exponentialRampToValueAtTime(0.25, at + 0.005); tick.gain.exponentialRampToValueAtTime(0.0001, at + 0.05)
+      clod.connect(band).connect(tick)
+      this.track(clod, [band, tick, ...(tickPanner ? [tickPanner] : [])], 'incidental')
+      clod.start(at); clod.stop(at + 0.06)
+    }
+  }
+
+  /** A power-up appearing: glittering partials that shimmer and fade. */
+  private shimmer(event: SoundEvent) {
+    const context = this.context!, t = context.currentTime
+    for (const [i, frequency] of [1318.5, 1760, 2217.5, 2637].entries()) {
+      const { gain, panner } = this.output(event)
+      const tone = context.createOscillator(), tremolo = context.createOscillator(), depth = context.createGain()
+      tone.type = 'sine'; tone.frequency.value = frequency
+      tremolo.frequency.value = 9 + i * 2.3; depth.gain.value = 0.04
+      tremolo.connect(depth).connect(gain.gain)
+      const start = t + i * 0.06
+      gain.gain.setValueAtTime(0.0001, start); gain.gain.exponentialRampToValueAtTime(0.07, start + 0.03); gain.gain.exponentialRampToValueAtTime(0.0001, start + 1.3)
+      tone.connect(gain)
+      this.track(tone, [depth, gain, ...(panner ? [panner] : [])]); this.track(tremolo, [])
+      for (const source of [tone, tremolo]) { source.start(start); source.stop(start + 1.35) }
+    }
+  }
+
+  private arpeggio(event: SoundEvent, notes: number[], step: number, type: OscillatorType, level: number, decay = 0.45) {
+    const context = this.context!, t = context.currentTime
+    notes.forEach((frequency, i) => {
+      const { gain, panner } = this.output({ kind: event.kind })
+      const tone = context.createOscillator()
+      tone.type = type; tone.frequency.value = frequency
+      const start = t + i * step
+      gain.gain.setValueAtTime(0.0001, start); gain.gain.exponentialRampToValueAtTime(level, start + 0.01); gain.gain.exponentialRampToValueAtTime(0.0001, start + decay)
+      tone.connect(gain)
+      this.track(tone, [gain, ...(panner ? [panner] : [])])
+      tone.start(start); tone.stop(start + decay + 0.02)
+    })
+  }
+
+  /** A low, inharmonic bell with a long tail: the round begins. */
+  private bell(event: SoundEvent, fundamentals: number[], decay: number, level: number) {
+    const context = this.context!, t = context.currentTime
+    for (const fundamental of fundamentals) for (const [ratio, weight] of [[1, 1], [2.76, 0.5], [5.4, 0.25]] as const) {
+      const { gain } = this.output({ kind: event.kind })
+      const tone = context.createOscillator()
+      tone.type = 'sine'; tone.frequency.value = fundamental * ratio
+      const peak = level * weight / fundamentals.length
+      gain.gain.setValueAtTime(0.0001, t); gain.gain.exponentialRampToValueAtTime(peak, t + 0.015); gain.gain.exponentialRampToValueAtTime(0.0001, t + decay / ratio ** 0.4)
+      tone.connect(gain)
+      this.track(tone, [gain])
+      tone.start(t); tone.stop(t + decay + 0.05)
+    }
+    this.duckMusic()
+  }
+
+  /** The Nuke: a crack, a falling boom, a long rumble. */
+  private boom(event: SoundEvent) {
+    const context = this.context!, t = context.currentTime
+    const { gain } = this.output({ kind: event.kind })
+    const low = context.createOscillator()
+    low.type = 'sine'
+    low.frequency.setValueAtTime(95, t); low.frequency.exponentialRampToValueAtTime(26, t + 1.4)
+    gain.gain.setValueAtTime(0.0001, t); gain.gain.exponentialRampToValueAtTime(1, t + 0.02); gain.gain.exponentialRampToValueAtTime(0.0001, t + 1.6)
+    low.connect(gain)
+    this.track(low, [gain]); low.start(t); low.stop(t + 1.65)
+    const { gain: roar } = this.output({ kind: event.kind })
+    const rumble = context.createBufferSource(), filter = context.createBiquadFilter()
+    rumble.buffer = this.noise; rumble.playbackRate.value = 0.6
+    filter.type = 'lowpass'; filter.frequency.setValueAtTime(2400, t); filter.frequency.exponentialRampToValueAtTime(180, t + 2.6)
+    roar.gain.setValueAtTime(0.0001, t); roar.gain.exponentialRampToValueAtTime(0.9, t + 0.01); roar.gain.exponentialRampToValueAtTime(0.0001, t + 2.8)
+    rumble.connect(filter).connect(roar)
+    this.track(rumble, [filter, roar]); rumble.start(t); rumble.stop(t + 2.85)
+    this.duckMusic()
+  }
+}

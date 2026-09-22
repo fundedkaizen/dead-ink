@@ -1,4 +1,6 @@
 import './zombies.css'
+import type { PowerupKind } from './rules'
+import { POWERUP_INFO, powerupIcon } from './powerups'
 
 /**
  * Dead Ink's own HUD, on top of the shared mission HUD (health, magazine) and combat HUD (hit markers,
@@ -26,7 +28,10 @@ export class ZombieHud {
   private pointsEl = document.createElement('div')
   private pointsValue = document.createElement('strong')
   private banner = document.createElement('div')
+  private powerupsEl = document.createElement('div')
+  private powerupCells = new Map<PowerupKind, { cell: HTMLElement; time: HTMLElement }>()
   private floaters: Floater[] = []
+  private flashTimer = 0
   private shownRound = -1
   private shownPoints = -1
   private bannerTime = 0
@@ -39,15 +44,46 @@ export class ZombieHud {
     this.pointsEl.append(this.pointsValue)
     this.banner.className = 'dead-ink-banner'
     this.banner.setAttribute('role', 'status')
-    this.root.append(this.roundEl, this.pointsEl, this.banner)
+    this.powerupsEl.className = 'dead-ink-powerups'
+    this.root.append(this.roundEl, this.pointsEl, this.banner, this.powerupsEl)
     parent.append(this.root)
   }
 
-  /** Big red announcement in the middle of the screen, e.g. "Round 3". */
-  announce(text: string, seconds = 3) {
+  /** Big announcement in the middle of the screen: red for rounds ("Round 3"), green for power-ups. */
+  announce(text: string, seconds = 3, tone: 'danger' | 'powerup' = 'danger') {
     this.banner.textContent = text
+    this.banner.classList.toggle('powerup', tone === 'powerup')
     this.banner.classList.add('show')
     this.bannerTime = seconds
+  }
+
+  /** The timed power-ups running now, each with its icon and seconds left; blinking near the end. */
+  powerups(active: readonly { kind: PowerupKind; left: number }[]) {
+    for (const [kind, { cell }] of this.powerupCells) {
+      if (active.some(a => a.kind === kind)) continue
+      cell.remove(); this.powerupCells.delete(kind)
+    }
+    for (const { kind, left } of active) {
+      let entry = this.powerupCells.get(kind)
+      if (!entry) {
+        const cell = document.createElement('div'), image = document.createElement('img'), time = document.createElement('span')
+        cell.className = 'dead-ink-powerup'
+        image.src = powerupIcon(kind).toDataURL()
+        image.alt = POWERUP_INFO[kind].label
+        cell.append(image, time)
+        this.powerupsEl.append(cell)
+        entry = { cell, time }
+        this.powerupCells.set(kind, entry)
+      }
+      entry.time.textContent = String(Math.ceil(left))
+      entry.cell.classList.toggle('ending', left < 5)
+    }
+  }
+
+  /** The Nuke's blast: the page flashes to a negative for a moment. */
+  flash() {
+    document.body.dataset.deadInkNuke = 'true'
+    this.flashTimer = 0.7
   }
 
   /** A "+60" that pops beside the points and floats away. */
@@ -85,6 +121,10 @@ export class ZombieHud {
       this.bannerTime -= dt
       if (this.bannerTime <= 0) this.banner.classList.remove('show')
     }
+    if (this.flashTimer > 0) {
+      this.flashTimer -= dt
+      if (this.flashTimer <= 0) delete document.body.dataset.deadInkNuke
+    }
     for (const floater of this.floaters) {
       floater.age += dt
       floater.element.style.transform = `translateY(${-floater.age * 40}px)`
@@ -99,6 +139,9 @@ export class ZombieHud {
     this.floaters = []
     this.banner.classList.remove('show')
     this.bannerTime = 0
+    this.powerups([])
+    this.flashTimer = 0
+    delete document.body.dataset.deadInkNuke
     this.shownRound = -1
     this.shownPoints = -1
   }

@@ -6,8 +6,12 @@ import { EnemyNavigation } from '../navigation'
 /**
  * A map-wide walking graph for zombies: a grid of walkable spots over the whole arena, linked wherever
  * a body can walk between them, plus LINKS for everything a grid misses: doorways (they rarely line up
- * with the grid), narrow stairs, and later ladders. A link may carry its own route (waypoints between
- * its two spots) and a kind ('walk', later 'climb'), so a zombie follows the actual way in.
+ * with the grid), narrow stairs, ledges a body vaults and ladders it climbs. A link may carry its own
+ * route (waypoints between its two spots) and a kind ('walk' or 'climb'), so a zombie follows the
+ * actual way in.
+ *
+ * The grid holds one spot per cell, at ground level. Roofs, tower decks and tank tops are RAISED spots:
+ * extra spots above a cell, numbered after the grid, found by walking out from each ladder top.
  *
  * Building it costs seconds of collision queries, so it is BAKED ahead of time into a small data file
  * (scripts/build-navgraph.ts writes public/nav/compound.json) and loaded at startup, as games bake
@@ -19,7 +23,7 @@ import { EnemyNavigation } from '../navigation'
  * foot, not in a straight line.
  */
 
-export const NAV_VERSION = 3
+export const NAV_VERSION = 4
 export const CELL = 1.6
 /** A neighbour this much higher or lower still passes the quick test; beyond it, the fine walk test decides. */
 export const MAX_STEP = 0.45
@@ -31,6 +35,19 @@ export const DIRECTIONS: readonly [number, number][] = [[1, 0], [-1, 0], [0, 1],
 
 /** A link between two spots. `via` holds waypoints from `a` toward `b` as flat x,y,z triples. */
 export type NavLink = { a: number; b: number; via?: number[]; kind?: 'walk' | 'climb' }
+/**
+ * A spot on a raised surface. It belongs to a grid cell but stands wherever in that cell a body fits
+ * (a tower deck can be smaller than a cell). Mask bits follow DIRECTIONS and lead to the raised spot of
+ * the neighbouring cell at about the same height.
+ */
+export type RaisedSpot = { cell: number; x: number; y: number; z: number; mask: number }
+/**
+ * Ways up, from the map itself: ladders (the climb from the bottom rung to the deck) and points on
+ * raised surfaces to explore from (ladder tops, zip line landings).
+ */
+export type RaisedWays = { climbs: { bottom: THREE.Vector3; via: THREE.Vector3[]; top: THREE.Vector3 }[]; seeds: THREE.Vector3[] }
+/** Climbing up costs this many times its length on the flow field, so stairs win where they exist. */
+export const CLIMB_COST = { up: 2.5, down: 1.3 } as const
 
 export type NavData = {
   version: number; cell: number; minX: number; minZ: number; nx: number; nz: number
@@ -41,6 +58,8 @@ export type NavData = {
   links: NavLink[]
   /** Hash of the collision geometry the graph was built from, to detect a stale bake. */
   geometry: string
+  /** Raised spots as flat [cell, x, y, z, mask] quintuples, positions in centimetres. */
+  raised: number[]
 }
 
 const NONE = -32768
@@ -79,6 +98,11 @@ export class NavGraph {
   readonly masks: Uint8Array
   readonly links: NavLink[] = []
   private edges = new Map<number, Edge[]>()
+  readonly raised: RaisedSpot[]
+  /** Per raised spot and direction, the neighbouring raised spot (or -1). */
+  private raisedNext: Int32Array
+  /** Grid cell to the raised spots above it. */
+  private raisedIn = new Map<number, number[]>()
   // Full precision on purpose: Float32 would round a distance below the value that put it in the
   // queue, so the 'stale entry' test would drop the entry and the search would stop at the source.
   private dist: Float64Array
@@ -87,11 +111,31 @@ export class NavGraph {
   private scratchB = new THREE.Vector3()
 
   constructor(readonly cell: number, readonly minX: number, readonly minZ: number, readonly nx: number, readonly nz: number,
-    heights: Float32Array, masks: Uint8Array, links: NavLink[], readonly geometry = '') {
+    heights: Float32Array, masks: Uint8Array, links: NavLink[], readonly geometry = '', raised: RaisedSpot[] = []) {
     this.heights = heights
     this.masks = masks
+    this.raised = raised
+    this.raisedNext = new Int32Array(raised.length * 8).fill(-1)
+    raised.forEach((spot, r) => {
+      const list = this.raisedIn.get(spot.cell)
+      if (list) list.push(this.cells + r); else this.raisedIn.set(spot.cell, [this.cells + r])
+    })
+    raised.forEach((spot, r) => {
+      const i = Math.floor(spot.cell / nz), k = spot.cell % nz
+      for (let d = 0; d < 8; d++) {
+        if (!(spot.mask & (1 << d))) continue
+        const next = this.raisedAt(this.index(i + DIRECTIONS[d][0], k + DIRECTIONS[d][1]), spot.y, MAX_CLIMB)
+        if (next >= 0) this.raisedNext[r * 8 + d] = next
+      }
+    })
     for (const link of links) this.addLink(link)
-    this.dist = new Float64Array(nx * nz).fill(Infinity)
+    this.dist = new Float64Array(this.size).fill(Infinity)
+  }
+
+  /** The raised spot above grid cell `cell` within `tolerance` of height `y`, or -1. */
+  private raisedAt(cell: number, y: number, tolerance: number) {
+    for (const r of this.raisedIn.get(cell) ?? []) if (Math.abs(this.raised[r - this.cells].y - y) <= tolerance) return r
+    return -1
   }
 
   addLink(link: NavLink) {
@@ -115,19 +159,27 @@ export class NavGraph {
     return forward ? points : points.reverse()
   }
 
-  get size() { return this.nx * this.nz }
-  walkable(index: number) { return index >= 0 && index < this.size && !Number.isNaN(this.heights[index]) }
+  /** Ground spots: the grid. Raised spots are numbered after them, up to `size`. */
+  get cells() { return this.nx * this.nz }
+  get size() { return this.cells + this.raised.length }
+  walkable(index: number) { return index >= 0 && (index < this.cells ? !Number.isNaN(this.heights[index]) : index < this.size) }
   index(i: number, k: number) { return i < 0 || k < 0 || i >= this.nx || k >= this.nz ? -1 : i * this.nz + k }
   point(index: number, out = new THREE.Vector3()) {
+    if (index >= this.cells) { const spot = this.raised[index - this.cells]; return out.set(spot.x, spot.y, spot.z) }
     const i = Math.floor(index / this.nz), k = index % this.nz
     return out.set(this.minX + (i + 0.5) * this.cell, this.heights[index], this.minZ + (k + 0.5) * this.cell)
   }
+  height(index: number) { return index >= this.cells ? this.raised[index - this.cells].y : this.heights[index] }
 
   /** Neighbours of a spot: grid directions from its mask, then links. */
   neighbours(index: number, out: number[] = []) {
     out.length = 0
-    const i = Math.floor(index / this.nz), k = index % this.nz, mask = this.masks[index]
-    for (let d = 0; d < 8; d++) if (mask & (1 << d)) out.push((i + DIRECTIONS[d][0]) * this.nz + k + DIRECTIONS[d][1])
+    if (index >= this.cells) {
+      for (let d = 0, base = (index - this.cells) * 8; d < 8; d++) if (this.raisedNext[base + d] >= 0) out.push(this.raisedNext[base + d])
+    } else {
+      const i = Math.floor(index / this.nz), k = index % this.nz, mask = this.masks[index]
+      for (let d = 0; d < 8; d++) if (mask & (1 << d)) out.push((i + DIRECTIONS[d][0]) * this.nz + k + DIRECTIONS[d][1])
+    }
     const edges = this.edges.get(index)
     if (edges) for (const edge of edges) out.push(edge.to)
     return out
@@ -143,6 +195,9 @@ export class NavGraph {
     return { points: this.linkRoute(edge.link, edge.forward), kind: edge.link.kind ?? 'walk' }
   }
 
+  /** The kind of the link from `from` to `to`; plain grid steps are 'walk'. */
+  linkKind(from: number, to: number) { return this.edges.get(from)?.find(e => e.to === to)?.link.kind ?? 'walk' }
+
   /**
    * Remove a link that turned out to be impassable in play. The baked graph is built from geometry
    * tests that can be slightly too generous (a gap a body fits through at the spot centres but not
@@ -151,7 +206,11 @@ export class NavGraph {
    */
   blockEdge(a: number, b: number) {
     const i = Math.floor(a / this.nz), k = a % this.nz
-    for (let d = 0; d < 8; d++) {
+    for (const [from, to] of [[a, b], [b, a]] as const) {
+      if (from < this.cells) continue
+      for (let d = 0, base = (from - this.cells) * 8; d < 8; d++) if (this.raisedNext[base + d] === to) this.raisedNext[base + d] = -1
+    }
+    for (let d = 0; d < 8 && a < this.cells && b < this.cells; d++) {
       const [di, dk] = DIRECTIONS[d]
       if ((i + di) * this.nz + k + dk !== b) continue
       this.masks[a] &= ~(1 << d)
@@ -173,16 +232,23 @@ export class NavGraph {
   nearest(position: THREE.Vector3, rings = 3) {
     const ci = Math.floor((position.x - this.minX) / this.cell), ck = Math.floor((position.z - this.minZ) / this.cell)
     let best = -1, bestScore = Infinity
+    const spot = this.scratchA
+    const consider = (index: number) => {
+      this.point(index, spot)
+      const dy = Math.abs(spot.y - position.y)
+      if (dy > 2.2) return
+      const x = spot.x - position.x, z = spot.z - position.z
+      const score = x * x + z * z + dy * dy * 4
+      if (score < bestScore) { best = index; bestScore = score }
+    }
     for (let r = 0; r <= rings && best < 0; r++) {
       for (let i = ci - r; i <= ci + r; i++) for (let k = ck - r; k <= ck + r; k++) {
         if (Math.max(Math.abs(i - ci), Math.abs(k - ck)) !== r) continue
         const index = this.index(i, k)
-        if (!this.walkable(index)) continue
-        const dy = Math.abs(this.heights[index] - position.y)
-        if (dy > 2.2) continue
-        const x = this.minX + (i + 0.5) * this.cell - position.x, z = this.minZ + (k + 0.5) * this.cell - position.z
-        const score = x * x + z * z + dy * dy * 4
-        if (score < bestScore) { best = index; bestScore = score }
+        if (index < 0) continue
+        if (this.walkable(index)) consider(index)
+        const above = this.raisedIn.get(index)
+        if (above) for (const raised of above) consider(raised)
       }
     }
     return best
@@ -205,17 +271,30 @@ export class NavGraph {
     while (this.heap.length) {
       const [node, d] = this.heap.pop()
       if (d > dist[node]) continue
-      const i = Math.floor(node / this.nz), k = node % this.nz, mask = this.masks[node]
       this.point(node, a)
-      for (let dir = 0; dir < 8; dir++) {
-        if (!(mask & (1 << dir))) continue
-        const next = (i + DIRECTIONS[dir][0]) * this.nz + k + DIRECTIONS[dir][1]
-        const nd = d + a.distanceTo(this.point(next, b))
-        if (nd < dist[next]) { dist[next] = nd; this.heap.push(next, nd) }
+      if (node < this.cells) {
+        const i = Math.floor(node / this.nz), k = node % this.nz, mask = this.masks[node]
+        for (let dir = 0; dir < 8; dir++) {
+          if (!(mask & (1 << dir))) continue
+          const next = (i + DIRECTIONS[dir][0]) * this.nz + k + DIRECTIONS[dir][1]
+          const nd = d + a.distanceTo(this.point(next, b))
+          if (nd < dist[next]) { dist[next] = nd; this.heap.push(next, nd) }
+        }
+      } else {
+        for (let dir = 0, base = (node - this.cells) * 8; dir < 8; dir++) {
+          const next = this.raisedNext[base + dir]
+          if (next < 0) continue
+          const nd = d + a.distanceTo(this.point(next, b))
+          if (nd < dist[next]) { dist[next] = nd; this.heap.push(next, nd) }
+        }
       }
       const edges = this.edges.get(node)
       if (edges) for (const edge of edges) {
-        const nd = d + edge.length
+        // The zombie walks this edge the other way, from edge.to toward the player at node: a climb
+        // is uphill for it when node is the higher end.
+        const cost = edge.link.kind !== 'climb' ? edge.length
+          : edge.length * (this.height(node) > this.height(edge.to) ? CLIMB_COST.up : CLIMB_COST.down)
+        const nd = d + cost
         if (nd < dist[edge.to]) { dist[edge.to] = nd; this.heap.push(edge.to, nd) }
       }
     }
@@ -239,7 +318,8 @@ export class NavGraph {
       links: this.links.map(l => ({ a: l.a, b: l.b,
         ...(l.via?.length ? { via: l.via.map(n => Math.round(n * 100) / 100) } : {}),
         ...(l.kind && l.kind !== 'walk' ? { kind: l.kind } : {}) })),
-      geometry: this.geometry }
+      geometry: this.geometry,
+      raised: this.raised.flatMap(r => [r.cell, Math.round(r.x * 100), Math.round(r.y * 100), Math.round(r.z * 100), r.mask]) }
   }
 
   static fromData(data: NavData) {
@@ -247,7 +327,10 @@ export class NavGraph {
     const raw = fromBase64(data.heights), cm = new Int16Array(raw.buffer, raw.byteOffset, raw.byteLength / 2)
     const heights = new Float32Array(cm.length)
     for (let i = 0; i < cm.length; i++) heights[i] = cm[i] === NONE ? NaN : cm[i] / 100
-    return new NavGraph(data.cell, data.minX, data.minZ, data.nx, data.nz, heights, fromBase64(data.masks), data.links, data.geometry)
+    const raised: RaisedSpot[] = []
+    for (let i = 0; i + 4 < data.raised.length; i += 5)
+      raised.push({ cell: data.raised[i], x: data.raised[i + 1] / 100, y: data.raised[i + 2] / 100, z: data.raised[i + 3] / 100, mask: data.raised[i + 4] })
+    return new NavGraph(data.cell, data.minX, data.minZ, data.nx, data.nz, heights, fromBase64(data.masks), data.links, data.geometry, raised)
   }
 
   /** Connected regions: region id per spot (-1 where not walkable), and region sizes. */
@@ -269,26 +352,38 @@ export class NavGraph {
   }
 
   /**
-   * Build from collision geometry, in three passes:
+   * Build from collision geometry, in these passes:
    * 1. Spots: floor under it and a whole body fits.
    * 2. Grid links: small steps pass a quick knee-and-chest ray test; steps, ramps and anything the rays
    *    reject get the guards' own fine walk test. Diagonals never cut a corner. Doorways get links.
-   * 3. Pockets: any region the grid could not reach (narrow stairs are the usual reason) asks the
+   *    A step too high to walk but low enough to vault, with nothing standing between, is a climb link.
+   * 3. Raised spots: from each ladder top and zip line landing, out over the surface up there. Ladders
+   *    become climb links from the bottom rung to the deck.
+   * 4. Pockets: any region the grid could not reach (narrow stairs are the usual reason) asks the
    *    guards' fine route planner for a way to the main region, and stores it as a link with waypoints.
    * Seconds of work: run it offline (scripts/build-navgraph.ts).
    */
   static build(world: CollisionWorld, bounds: { minX: number; maxX: number; minZ: number; maxZ: number },
-    doors: readonly THREE.Object3D[], geometry = '', cell = CELL, log: (message: string) => void = () => {}) {
+    doors: readonly THREE.Object3D[], geometry = '', cell = CELL, log: (message: string) => void = () => {},
+    ways: RaisedWays = { climbs: [], seeds: [] }) {
     const nx = Math.ceil((bounds.maxX - bounds.minX) / cell), nz = Math.ceil((bounds.maxZ - bounds.minZ) / cell)
     const heights = new Float32Array(nx * nz).fill(NaN)
+    // A body standing exactly in the plane of a paper-thin fence reads as clear to the collision test,
+    // and fences run along round coordinates where spot centres sit: such a spot would link both sides
+    // of the fence. So a body is also tested a hair to either side.
     const capsule = new Capsule(new THREE.Vector3(), new THREE.Vector3(), BODY_RADIUS)
+    const bodyFits = (x: number, base: number, z: number) => {
+      for (const [ox, oz] of [[0, 0], [0.04, 0.03], [-0.03, -0.04]]) {
+        capsule.start.set(x + ox, base + BODY_RADIUS, z + oz); capsule.end.set(x + ox, base + BODY_HEIGHT - BODY_RADIUS, z + oz)
+        if (!world.fits(capsule)) return false
+      }
+      return true
+    }
     const probe = new THREE.Vector3()
     for (let i = 0; i < nx; i++) for (let k = 0; k < nz; k++) {
       const x = bounds.minX + (i + 0.5) * cell, z = bounds.minZ + (k + 0.5) * cell
       const h = world.floor(probe.set(x, 0.6, z), 0.6, 1.2, BODY_RADIUS * 0.95)
-      if (!Number.isFinite(h)) continue
-      capsule.start.set(x, h + 0.024 + BODY_RADIUS, z); capsule.end.set(x, h + 0.024 + BODY_HEIGHT - BODY_RADIUS, z)
-      if (world.fits(capsule)) heights[i * nz + k] = h
+      if (Number.isFinite(h) && bodyFits(x, h + 0.024, z)) heights[i * nz + k] = h
     }
     // The guards' own "can a body walk from A to B" test: a capsule swept in small steps, following the
     // floor up steps and ramps. Authoritative but slow, so it only runs where the quick test cannot decide.
@@ -302,10 +397,27 @@ export class NavGraph {
     const at = (i: number, k: number) => (i < 0 || k < 0 || i >= nx || k >= nz) ? NaN : heights[i * nz + k]
     const place = (index: number, out: THREE.Vector3) =>
       out.set(bounds.minX + (Math.floor(index / nz) + 0.5) * cell, heights[index], bounds.minZ + (index % nz + 0.5) * cell)
-    const raysClear = () => {
-      for (const lift of [0.45, 1.3]) if (!world.visible(a.clone().setY(a.y + lift), b.clone().setY(b.y + lift), ignore)) return false
+    // Sight lines alone pass straight through wire fences (you can see and shoot through them), so a
+    // body is swept between the two spots as well: capsules 0.4 m apart, overlapping, from knee height.
+    const along = new THREE.Vector3()
+    const bodyClear = (base: number) => {
+      for (const t of [0.25, 0.5, 0.75]) {
+        along.copy(a).lerp(b, t)
+        if (!bodyFits(along.x, base, along.z)) return false
+      }
       return true
     }
+    const raysClear = () => {
+      for (const lift of [0.45, 1.3]) if (!world.visible(a.clone().setY(a.y + lift), b.clone().setY(b.y + lift), ignore)) return false
+      return bodyClear(Math.max(a.y, b.y) + MAX_STEP * 0.7)
+    }
+    // A ledge rather than a wall: at the higher spot's level nothing stands between the two.
+    const ledgeClear = () => {
+      const top = Math.max(a.y, b.y)
+      for (const lift of [0.45, 1.3]) if (!world.visible(a.clone().setY(top + lift), b.clone().setY(top + lift), ignore)) return false
+      return bodyClear(top + 0.08)
+    }
+    const vaults: [number, number][] = []
     for (let i = 0; i < nx; i++) for (let k = 0; k < nz; k++) {
       const h = at(i, k)
       if (Number.isNaN(h)) continue
@@ -318,12 +430,110 @@ export class NavGraph {
         if (di && dk && (Number.isNaN(at(i + di, k)) || Number.isNaN(at(i, k + dk)))) continue
         place(i * nz + k, a); place(ii * nz + kk, b)
         const flat = Math.abs(h2 - h) <= MAX_STEP
-        if (!(flat && raysClear()) && !walks(a.clone(), b.clone())) continue
+        if (!(flat && raysClear()) && !walks(a.clone(), b.clone())) {
+          // Too high to step, low enough to vault: the 0.6 m slabs the warehouses stand on, crates.
+          if (!flat && !(di && dk) && ledgeClear()) vaults.push([i * nz + k, ii * nz + kk])
+          continue
+        }
         masks[i * nz + k] |= 1 << d
         masks[ii * nz + kk] |= 1 << DIRECTIONS.findIndex(([x, z]) => x === -di && z === -dk)
       }
+      // A cell straddling a ledge's edge has no level footing, so the spots either side of the edge are
+      // two cells apart, not neighbours: vault across the gap when there is floor under it.
+      for (let d = 0; d < 4; d++) {
+        const [di, dk] = DIRECTIONS[d], ii = i + 2 * di, kk = k + 2 * dk
+        if (ii * nz + kk < i * nz + k || !Number.isNaN(at(i + di, k + dk))) continue
+        const h2 = at(ii, kk)
+        if (Number.isNaN(h2) || Math.abs(h2 - h) <= MAX_STEP || Math.abs(h2 - h) > MAX_CLIMB) continue
+        place(i * nz + k, a); place(ii * nz + kk, b)
+        const edge = a.clone().lerp(b, 0.5)
+        const footing = world.floor(edge.setY(Math.max(h, h2) + 0.3), 0.3, Math.abs(h2 - h) + 0.3)
+        if (Number.isFinite(footing) && ledgeClear()) vaults.push([i * nz + k, ii * nz + kk])
+      }
     }
-    const graph = new NavGraph(cell, bounds.minX, bounds.minZ, nx, nz, heights, masks, [], geometry)
+    // Raised surfaces: walk out from every ladder top and zip line landing over whatever a body can
+    // stand on up there, one spot per cell, stopping at edges (a drop is not a way down) and joining the
+    // ground grid where stairs reach it.
+    const raised: RaisedSpot[] = []
+    const raisedIn = new Map<number, number[]>()
+    const joins: [number, number][] = []
+    const findRaised = (index: number, y: number) => (raisedIn.get(index) ?? []).find(r => Math.abs(raised[r].y - y) < 0.35) ?? -1
+    const standAt = (i: number, k: number, y: number, first?: THREE.Vector3) => {
+      const cx = bounds.minX + (i + 0.5) * cell, cz = bounds.minZ + (k + 0.5) * cell
+      const samples: [number, number][] = [[cx, cz], [cx + 0.4, cz], [cx - 0.4, cz], [cx, cz + 0.4], [cx, cz - 0.4]]
+      if (first) samples.unshift([first.x, first.z])
+      for (const [x, z] of samples) {
+        const h = world.floor(probe.set(x, y, z), 0.8, MAX_CLIMB + 0.2, BODY_RADIUS * 0.95)
+        if (Number.isFinite(h) && bodyFits(x, h + 0.024, z)) return new THREE.Vector3(x, h, z)
+      }
+      return null
+    }
+    const connects = (p: THREE.Vector3, q: THREE.Vector3) => {
+      a.copy(p); b.copy(q)
+      if (Math.abs(p.y - q.y) <= MAX_STEP && raysClear()) return true
+      return walks(p.clone(), q.clone())
+    }
+    const queue: number[] = []
+    const addRaised = (index: number, spot: THREE.Vector3) => {
+      raised.push({ cell: index, x: spot.x, y: spot.y, z: spot.z, mask: 0 })
+      const r = raised.length - 1
+      raisedIn.set(index, [...(raisedIn.get(index) ?? []), r])
+      queue.push(r)
+      return r
+    }
+    for (const seed of ways.seeds) {
+      const i = Math.floor((seed.x - bounds.minX) / cell), k = Math.floor((seed.z - bounds.minZ) / cell)
+      if (i < 0 || k < 0 || i >= nx || k >= nz) continue
+      const index = i * nz + k
+      if (Math.abs(heights[index] - seed.y) < 0.35 || findRaised(index, seed.y) >= 0) continue
+      const spot = standAt(i, k, seed.y + 0.3, seed)
+      if (spot) addRaised(index, spot)
+      else log(`  no standing room at raised seed ${seed.toArray().map(n => n.toFixed(1)).join(',')}`)
+    }
+    while (queue.length && raised.length < 4000) {
+      const r = queue.shift()!, from = raised[r]
+      const i = Math.floor(from.cell / nz), k = from.cell % nz
+      const here = new THREE.Vector3(from.x, from.y, from.z)
+      for (let d = 0; d < 8; d++) {
+        const [di, dk] = DIRECTIONS[d], ii = i + di, kk = k + dk
+        if (ii < 0 || kk < 0 || ii >= nx || kk >= nz || from.mask & (1 << d)) continue
+        const next = ii * nz + kk
+        const there = standAt(ii, kk, from.y + 0.3)
+        if (!there || Math.abs(there.y - from.y) > MAX_CLIMB) continue
+        if (Math.abs(heights[next] - there.y) < 0.35) {
+          if (connects(here, place(next, new THREE.Vector3()))) joins.push([r, next])
+          continue
+        }
+        let other = findRaised(next, there.y)
+        if (other >= 0) {
+          if (!connects(here, new THREE.Vector3(raised[other].x, raised[other].y, raised[other].z))) continue
+        } else {
+          if (!connects(here, there)) continue
+          other = addRaised(next, there)
+        }
+        from.mask |= 1 << d
+        raised[other].mask |= 1 << DIRECTIONS.findIndex(([x, z]) => x === -di && z === -dk)
+      }
+    }
+    log(`${raised.length} raised spots from ${ways.seeds.length} seeds, ${joins.length} joins to the ground, ${vaults.length} vaults`)
+    const graph = new NavGraph(cell, bounds.minX, bounds.minZ, nx, nz, heights, masks, [], geometry, raised)
+    for (const [r, ground] of joins) graph.addLink({ a: graph.cells + r, b: ground })
+    for (const [low, high] of vaults) graph.addLink({ a: low, b: high, kind: 'climb' })
+    for (const climb of ways.climbs) {
+      // Climbed from the nearest ground spot a body can actually walk to the bottom rung from: tower
+      // legs and bracing crowd the foot of a ladder, so the very nearest spot can be boxed in.
+      const ci = Math.floor((climb.bottom.x - bounds.minX) / cell), ck = Math.floor((climb.bottom.z - bounds.minZ) / cell)
+      const around: number[] = []
+      for (let i = ci - 2; i <= ci + 2; i++) for (let k = ck - 2; k <= ck + 2; k++) {
+        const index = graph.index(i, k)
+        if (graph.walkable(index) && Math.abs(heights[index] - climb.bottom.y) < 0.6) around.push(index)
+      }
+      around.sort((p, q) => place(p, a).distanceToSquared(climb.bottom) - place(q, b).distanceToSquared(climb.bottom))
+      const bottom = around.find(index => walks(place(index, new THREE.Vector3()), climb.bottom.clone())) ?? -1
+      const top = graph.nearest(climb.top)
+      if (bottom < 0 || top < 0 || bottom === top) { log(`  ladder at ${climb.bottom.toArray().map(n => n.toFixed(1)).join(',')} has no spot at ${bottom < 0 ? 'the bottom' : 'the top'}`); continue }
+      graph.addLink({ a: bottom, b: top, kind: 'climb', via: [climb.bottom, ...climb.via, climb.top].flatMap(v => [v.x, v.y, v.z]) })
+    }
     // Doorways: link spots on opposite sides whose connecting line passes through the opening.
     const centre = new THREE.Vector3(), flatCentre = new THREE.Vector3(), closest = new THREE.Vector3()
     for (const door of doors) {
@@ -352,12 +562,12 @@ export class NavGraph {
     const { id, sizes } = graph.regions()
     const main = sizes.indexOf(Math.max(...sizes))
     const mainSpots: number[] = []
-    for (let s = 0; s < graph.size; s++) if (id[s] === main) mainSpots.push(s)
+    for (let s = 0; s < graph.cells; s++) if (id[s] === main) mainSpots.push(s)
     log(`${sizes.length} regions before connecting pockets; main holds ${sizes[main]} of ${sizes.reduce((x, y) => x + y, 0)} spots`)
     for (let region = 0; region < sizes.length; region++) {
       if (region === main || sizes[region] < 6) continue
       const pairs: [number, number, number][] = []
-      for (let p = 0; p < graph.size; p++) {
+      for (let p = 0; p < graph.cells; p++) {
         if (id[p] !== region) continue
         place(p, a)
         let best = -1, bestDistance = 25

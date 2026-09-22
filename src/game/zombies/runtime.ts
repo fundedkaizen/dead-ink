@@ -6,14 +6,14 @@ import type { FirstPersonController } from '../../player/controller'
 import type { ActionTarget } from '../../player/actions'
 import { setDoorOpen } from '../../world/doors'
 import { FirstPersonWeapons } from '../weapons'
-import { MissionAudio } from '../audio'
+import { DeadInkAudio } from './audio'
 import { MissionHUD } from '../hud'
 import { MissionBlood } from '../hit-reactions'
 import { MissionImpacts } from '../impacts'
 import { PlayerHitReactions } from '../player-hit-reactions'
 import { PlayerDeathSequence } from '../player-death'
 import type { MenuCopy } from '../menu'
-import type { MissionWorld, Shot, SoundEvent, WeaponName } from '../types'
+import type { MissionWorld, Shot, SoundEvent, WeaponName, WeaponSnapshot } from '../types'
 import { HitMarkers } from '../shared/hitmarkers'
 import { DamageIndicator } from '../shared/damage-indicator'
 import { Hotbar } from '../shared/hotbar'
@@ -23,10 +23,12 @@ import { NavGraph, geometryHash, type NavData } from './navgraph'
 import { pickSpawn } from './spawn'
 import { findWallSpots } from './placement'
 import { newGame, returnSpawns, stepRounds, type RoundState } from './rounds'
-import { MAX_ALIVE, PLAYER_HEALTH, PRICES, STARTING_POINTS, ZOMBIE_DAMAGE_SCALE, movementMix, zombieHealth } from './rules'
+import { MAX_ALIVE, PLAYER_HEALTH, POWERUPS, PRICES, STARTING_POINTS, ZOMBIE_DAMAGE_SCALE, movementMix, zombieHealth, type PowerupKind } from './rules'
 import { BOX_WEIGHTS, WALL_WEAPONS, ZOMBIE_SLOTS, freshWeapon, pointsForHit, rollBox, startingPistol, wallOffer, RESERVE_MAGAZINES } from './economy'
 import { MysteryBox, WallBuy } from './stations'
 import { ZombieHud } from './hud'
+import { MuzzleSparks, RiseMarks } from './effects'
+import { POWERUP_INFO, PowerupDrops, PowerupDropper } from './powerups'
 
 export type ZombieState = {
   phase: 'active' | 'dead' | 'complete'
@@ -38,6 +40,11 @@ export type ZombieState = {
 export const SPAWN_POINT: [number, number, number] = [-30, 0, -25]
 /** Call of Duty's knife: 150 damage, which kills outright on the first rounds. */
 export const KNIFE = { damage: 150, range: 2.1, cooldown: 0.55 } as const
+/** Bodies lie a few seconds before they sink; spare actors let new zombies rise meanwhile. */
+export const POOL_SIZE = MAX_ALIVE + 8
+type TimedPowerup = 'instaKill' | 'doublePoints' | 'deathMachine'
+/** The Death Machine never runs dry: its drum is topped up every frame while it lasts. */
+const DEATH_MACHINE_ROUNDS = 999
 
 export const DEAD_INK_COPY: MenuCopy = {
   title: 'Dead Ink', premise: 'Survive the rounds. Buy guns off the walls. Try your luck at the box.',
@@ -62,7 +69,7 @@ export const DEAD_INK_COPY: MenuCopy = {
 export class ZombiesRuntime {
   state: ZombieState = { phase: 'active', health: PLAYER_HEALTH.base, elapsed: 0, kills: 0, points: STARTING_POINTS, round: 0, headshots: 0, knifeKills: 0 }
   readonly weapons: FirstPersonWeapons
-  readonly audio = new MissionAudio()
+  readonly audio = new DeadInkAudio()
   readonly blood: MissionBlood
   readonly impacts: MissionImpacts
   readonly bulletTrails: BulletTrails
@@ -73,6 +80,16 @@ export class ZombiesRuntime {
   readonly indicator: DamageIndicator
   readonly hotbar: Hotbar
   readonly zombieHud: ZombieHud
+  readonly riseMarks: RiseMarks
+  readonly sparks: MuzzleSparks
+  readonly powerups: PowerupDrops
+  private dropper: PowerupDropper
+  /** Timed power-ups running now, and the seconds each has left. */
+  timers: Partial<Record<TimedPowerup, number>> = {}
+  /** Every point earned this game (spending does not lower it): what power-up drops count. */
+  earned = 0
+  /** Your own guns, put away while you hold the Death Machine. */
+  private heldWeapons: WeaponSnapshot | null = null
   director: ZombieDirector | null = null
   graph: NavGraph | null = null
   rounds: RoundState = newGame()
@@ -116,6 +133,10 @@ export class ZombiesRuntime {
       return zombie.actor.rig.bones.chest.getWorldPosition(new THREE.Vector3())
     })
     this.impacts = new MissionImpacts(scene, player.world)
+    this.riseMarks = new RiseMarks(scene)
+    this.sparks = new MuzzleSparks(scene)
+    this.powerups = new PowerupDrops(scene)
+    this.dropper = new PowerupDropper(this.random)
     this.bulletTrails = new BulletTrails(scene, 'Player bullet')
     player.lookSensitivity = () => this.weapons.lookSensitivity
     this.hud = new MissionHUD(world, {
@@ -154,8 +175,9 @@ export class ZombiesRuntime {
       this.graph = graph
       this.director = new ZombieDirector({ scene: this.scene, world: this.player.world, doors, graph, emit: event => this.emit(event),
         damagePlayer: (_id, amount, source) => this.damage(amount, 'zombie', source),
-        onHit: hit => { this.impactPoint = hit.point.clone(); this.blood.emitHit(hit); this.audio.confirmHit(hit) } })
-      await this.director.init(MAX_ALIVE)
+        onHit: hit => { this.impactPoint = hit.point.clone(); this.blood.emitHit(hit); this.audio.confirmHit(hit) },
+        onRise: position => { this.riseMarks.emit(position); this.emit({ kind: 'zombie-rise', position, radius: 30 }) } })
+      await this.director.init(POOL_SIZE)
       if (this.disposed) return
       this.player.world.warm()
       const floor = this.player.world.floor(this.spawn.clone().setY(0.6), 1, 1.5, 0.28)
@@ -193,6 +215,8 @@ export class ZombiesRuntime {
     this.rounds = newGame()
     this.director?.clear()
     this.box?.close()
+    this.powerups.clear(); this.timers = {}; this.earned = 0; this.heldWeapons = null
+    this.dropper = new PowerupDropper(this.random)
     this.weapons.restore({ slots: [startingPistol(), null], selected: 0, pickups: [], nextId: 1 })
     this.player.actions.reset()
     this.player.body.teleport(this.spawn.clone())
@@ -211,7 +235,7 @@ export class ZombiesRuntime {
     this.player.movementLocked = false
     this.blood.restore(undefined)
     this.stepTime = 0; this.interactionTime = 0; this.hitFlash = 0; this.lastCaptionAt = -100; this.wheelAmount = 0
-    this.bulletTrails.clear(); this.impacts.clear(); this.hits.clear(); this.indicator.clear(); this.zombieHud.clear(); this.hud.reset()
+    this.bulletTrails.clear(); this.impacts.clear(); this.riseMarks.clear(); this.sparks.clear(); this.powerups.clear(); this.hits.clear(); this.indicator.clear(); this.zombieHud.clear(); this.hud.reset()
     this.startGame()
     this.invalidate()
   }
@@ -233,6 +257,7 @@ export class ZombiesRuntime {
         if (this.weapons.adjustScopeZoom(-Math.sign(wheel.deltaY))) this.invalidate()
         return
       }
+      if (this.timers.deathMachine) return
       const now = performance.now()
       if (now - this.wheelAt > 400) this.wheelAmount = 0
       this.wheelAmount += wheel.deltaY * (wheel.deltaMode === 1 ? 40 : wheel.deltaMode === 2 ? 400 : 1)
@@ -269,6 +294,7 @@ export class ZombiesRuntime {
       if (!this.aiming || !this.weapons.adjustScopeZoom(event.code === 'KeyE' ? 1 : -1)) return
       event.preventDefault(); this.invalidate(); return
     }
+    if (this.timers.deathMachine && ['KeyR', 'Digit1', 'Digit2'].includes(event.code)) { event.preventDefault(); return }
     switch (event.code) {
       case 'KeyR': if (this.weapons.reload()) this.aiming = false; break
       case 'Digit1': this.weapons.switchSlot(0); break
@@ -315,6 +341,7 @@ export class ZombiesRuntime {
 
   private useWall(buy: WallBuy) {
     if (!this.isActive() || !this.canReach(buy.point, buy.root)) return false
+    if (this.timers.deathMachine) { this.hud.notify('Not while you hold the Death Machine.', 2, true); return false }
     const offer = wallOffer(buy.weapon, buy.price, this.weapons.slots)
     if (offer.kind === 'full' || !this.spend(offer.cost)) return false
     if (offer.kind === 'buy') this.weapons.give(freshWeapon(`wall-${buy.weapon}-${Math.floor(this.state.elapsed * 1000)}`, buy.weapon))
@@ -330,6 +357,7 @@ export class ZombiesRuntime {
 
   private useBox(box: MysteryBox) {
     if (!this.isActive() || !this.canReach(box.point, box.root)) return false
+    if (this.timers.deathMachine) { this.hud.notify('Not while you hold the Death Machine.', 2, true); return false }
     if (box.state === 'offering') {
       const offer = box.take()
       if (!offer) return false
@@ -346,22 +374,90 @@ export class ZombiesRuntime {
 
   // ---------------------------------------------------------------- combat
 
+  /** Points in; Double Points doubles every gain while it runs. */
   private award(amount: number) {
-    this.state.points += amount
-    this.zombieHud.gain(amount)
+    const points = this.timers.doublePoints ? amount * 2 : amount
+    this.state.points += points
+    this.earned += points
+    this.zombieHud.gain(points)
+  }
+
+  /** A kill by the player: maybe a power-up drops where the zombie fell. */
+  private killed(position: THREE.Vector3) {
+    const kind = this.dropper.onKill(this.earned)
+    if (!kind) return
+    // On the surface, even for one shot while still climbing out of the ground.
+    const at = position.clone(), floor = this.player.world.floor(at.clone().setY(at.y + 2.2), 0.1, 3)
+    if (Number.isFinite(floor)) at.y = floor
+    this.powerups.spawn(kind, at)
+    this.emit({ kind: 'powerup-drop', position: at.clone(), radius: 40 })
+  }
+
+  private activate(kind: PowerupKind) {
+    this.zombieHud.announce(`${POWERUP_INFO[kind].label}!`, 2.4, 'powerup')
+    this.emit({ kind: 'powerup-grab', position: this.player.body.position.clone(), radius: 5 })
+    switch (kind) {
+      case 'nuke': {
+        const killed = this.director?.killAll() ?? 0
+        this.state.kills += killed
+        this.award(POWERUPS.nukePoints)
+        if (!this.hud.reducedMotion) this.zombieHud.flash()
+        this.emit({ kind: 'nuke', position: this.player.body.position.clone(), radius: 200 })
+        break
+      }
+      case 'maxAmmo':
+        for (const item of [...this.weapons.slots, ...(this.heldWeapons?.slots ?? [])]) {
+          if (!item || item.special) continue
+          item.reserve = Math.max(item.reserve, WEAPON_RULES[item.name].capacity * RESERVE_MAGAZINES)
+        }
+        break
+      case 'deathMachine':
+        if (!this.timers.deathMachine) {
+          this.heldWeapons = this.weapons.snapshot()
+          this.weapons.restore({ slots: [{ id: 'death-machine', name: 'ak', special: 'deathMachine', magazine: DEATH_MACHINE_ROUNDS, reserve: 0 }, null],
+            selected: 0, pickups: [], nextId: this.heldWeapons.nextId })
+          this.aiming = false
+        }
+        this.timers.deathMachine = POWERUPS.timed
+        break
+      case 'instaKill': case 'doublePoints':
+        this.timers[kind] = POWERUPS.timed
+        break
+      case 'carpenter':
+        this.award(POWERUPS.carpenterPoints)
+        break
+    }
+    this.invalidate()
+  }
+
+  /** Count timed power-ups down; the Death Machine hands your own guns back when it runs out. */
+  private tickPowerups(dt: number) {
+    for (const kind of Object.keys(this.timers) as TimedPowerup[]) {
+      const left = (this.timers[kind] ?? 0) - dt
+      if (left > 0) { this.timers[kind] = left; continue }
+      delete this.timers[kind]
+      if (kind === 'deathMachine' && this.heldWeapons) { this.weapons.restore(this.heldWeapons); this.heldWeapons = null; this.aiming = false }
+    }
+    const current = this.weapons.current
+    if (this.timers.deathMachine && current?.special) current.magazine = DEATH_MACHINE_ROUNDS
+    const feet = this.state.phase === 'active' ? this.player.body.position : null
+    for (const kind of this.powerups.update(dt, feet)) this.activate(kind)
+    this.zombieHud.powerups((Object.keys(this.timers) as TimedPowerup[]).map(kind => ({ kind, left: this.timers[kind]! })))
   }
 
   private shot(shot: Shot) {
     if (!this.isActive() || !this.director) return
+    // One burst per trigger pull, not one per shotgun pellet.
+    if (!shot.pelletIndex) this.sparks.emit(shot.origin, shot.direction, this.weapons.current?.special ? 2 : 4)
     const surface = this.player.world.raySurface(shot.origin, shot.direction, shot.range)
     const distance = surface?.distance ?? shot.range
     this.impactPoint = null
-    const hit = this.director.hit(shot, distance, ZOMBIE_DAMAGE_SCALE)
+    const hit = this.director.hit(shot, distance, ZOMBIE_DAMAGE_SCALE, !!this.timers.instaKill)
     if (hit) {
       this.hitFlash = 0.15
       this.award(pointsForHit({ lethal: hit.lethal, zone: hit.reaction.zone }))
       this.hits.hit(hit.reaction.point, hit.dealt, hit.zombie.id, hit.reaction.zone === 'head', hit.lethal)
-      if (hit.lethal) { this.state.kills++; if (hit.reaction.zone === 'head') this.state.headshots++ }
+      if (hit.lethal) { this.state.kills++; if (hit.reaction.zone === 'head') this.state.headshots++; this.killed(hit.zombie.position) }
     }
     const end = this.impactPoint ?? shot.origin.clone().addScaledVector(shot.direction, distance)
     const impact = !hit && surface ? () => {
@@ -377,13 +473,13 @@ export class ZombiesRuntime {
     this.weapons.cancel()
     const eye = this.camera.perspective.getWorldPosition(new THREE.Vector3())
     const forward = this.camera.perspective.getWorldDirection(new THREE.Vector3())
-    const hit = this.director.knife(eye, forward, KNIFE.range, KNIFE.damage)
+    const hit = this.director.knife(eye, forward, KNIFE.range, KNIFE.damage, !!this.timers.instaKill)
     this.emit({ kind: 'drop', position: eye.clone(), radius: 3 })
     if (!hit) return false
     this.hitFlash = 0.15
     this.award(pointsForHit({ lethal: hit.lethal, zone: hit.reaction.zone, knife: true }))
     this.hits.hit(hit.reaction.point, hit.dealt, hit.zombie.id, false, hit.lethal)
-    if (hit.lethal) { this.state.kills++; this.state.knifeKills++ }
+    if (hit.lethal) { this.state.kills++; this.state.knifeKills++; this.killed(hit.zombie.position) }
     return true
   }
 
@@ -427,22 +523,35 @@ export class ZombiesRuntime {
 
   private eyes() { return [this.camera.perspective.position.clone()] }
 
+  /** On screen and not behind a wall: what the player would see disappear. */
+  private seen(point: THREE.Vector3, ignore: THREE.Object3D) {
+    const camera = this.camera.perspective
+    const screen = point.clone().project(camera)
+    if (screen.z < -1 || screen.z > 1 || Math.abs(screen.x) > 1.15 || Math.abs(screen.y) > 1.15) return false
+    return this.player.world.visible(camera.position, point, ignore)
+  }
+
+  /** Zombies climb out of the ground somewhere they can walk to you from; seeing it happen is the point. */
   private spawnZombie() {
     const director = this.director, graph = this.graph
     if (!director || !graph) return false
-    const spot = pickSpawn(graph, this.player.world, { near: 14, far: 42, eyes: this.eyes() }, this.random)
+    const spot = pickSpawn(graph, this.player.world, { near: 14, far: 42, eyes: [] }, this.random)
     if (!spot) return false
     const feet = this.player.body.position
-    return !!director.spawn(spot, zombieHealth(this.rounds.round), this.gait(), Math.atan2(feet.x - spot.x, feet.z - spot.z))
+    return !!director.spawn(spot, zombieHealth(this.rounds.round), this.gait(), Math.atan2(feet.x - spot.x, feet.z - spot.z), true)
   }
 
-  /** Zombies that cannot reach you, or stopped getting closer, come back into play near you. */
+  /**
+   * Zombies that cannot reach you, or stopped getting closer, come back into play near you, out of
+   * sight at both ends: one you are looking at stays put until you look away.
+   */
   private relocateStranded(dt: number) {
     this.strandTimer -= dt
     if (this.strandTimer > 0 || !this.director || !this.graph) return
     this.strandTimer = 0.5
     for (const zombie of this.director.zombies) {
       if (zombie.state !== 'chase' || !zombie.stranded) continue
+      if (this.seen(zombie.position.clone().setY(zombie.position.y + 1.2), zombie.actor.root)) continue
       const spot = pickSpawn(this.graph, this.player.world, { near: 12, far: 32, eyes: this.eyes() }, this.random)
       if (spot) this.director.relocate(zombie, spot)
     }
@@ -488,11 +597,11 @@ export class ZombiesRuntime {
       // Rounds: announce, feed zombies in, and hand back any that found nowhere to stand.
       const events = stepRounds(this.rounds, dt, this.director.aliveCount, 1)
       this.state.round = this.rounds.round
-      if (events.roundStarted) this.zombieHud.announce(`Round ${events.roundStarted}`)
+      if (events.roundStarted) { this.zombieHud.announce(`Round ${events.roundStarted}`); this.dropper.newRound(); this.emit({ kind: 'round-start' }) }
       let failed = 0
       for (let i = 0; i < events.spawn; i++) if (!this.spawnZombie()) failed++
       returnSpawns(this.rounds, failed)
-      if (events.roundEnded) this.zombieHud.announce(`Round ${events.roundEnded} survived`, 3.5)
+      if (events.roundEnded) { this.zombieHud.announce(`Round ${events.roundEnded} survived`, 3.5); this.emit({ kind: 'round-end' }) }
       this.director.update(dt, target())
       this.relocateStranded(dt)
       // Health comes back after a few seconds without being hit, as in Call of Duty.
@@ -500,7 +609,8 @@ export class ZombiesRuntime {
         this.state.health = Math.min(PLAYER_HEALTH.base, this.state.health + PLAYER_HEALTH.regenPerSecond * dt)
       this.knifeCooldown = Math.max(0, this.knifeCooldown - dt)
       if (this.box?.update(dt, Object.keys(BOX_WEIGHTS) as WeaponName[])) this.hud.notify('The box closed.', 2)
-      this.blood.update(dt); this.impacts.update(dt)
+      this.blood.update(dt); this.impacts.update(dt); this.riseMarks.update(dt); this.sparks.update(dt)
+      this.tickPowerups(dt)
       const speed = Math.hypot(body.velocity.x, body.velocity.z)
       if (speed > 0.5 && body.grounded || this.player.actions.climbing) {
         this.stepTime += dt
@@ -515,7 +625,7 @@ export class ZombiesRuntime {
       this.state.elapsed += dt
       this.player.world.refresh()
       this.director.update(dt, target())
-      this.blood.update(dt); this.impacts.update(dt)
+      this.blood.update(dt); this.impacts.update(dt); this.riseMarks.update(dt)
     }
     const reactionActive = this.isActive()
     const yaw = new THREE.Euler().setFromQuaternion(this.camera.perspective.quaternion, 'YXZ').y
@@ -557,7 +667,7 @@ export class ZombiesRuntime {
     this.box?.dispose()
     this.director?.dispose()
     this.hits.dispose(); this.indicator.dispose(); this.hotbar.dispose(); this.zombieHud.dispose()
-    this.bulletTrails.dispose(); this.weapons.dispose(); this.blood.dispose(); this.impacts.dispose()
+    this.bulletTrails.dispose(); this.weapons.dispose(); this.blood.dispose(); this.impacts.dispose(); this.riseMarks.dispose(); this.sparks.dispose(); this.powerups.dispose()
     this.audio.dispose(); this.hud.dispose()
     this.player.movementLocked = false; this.player.onPlayingChange = () => {}; this.player.lookSensitivity = () => 1
     this.player.actions.extraTargets = () => []; this.player.actions.onAction = () => {}

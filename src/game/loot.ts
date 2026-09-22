@@ -57,8 +57,16 @@ export type ScaledRules = { -readonly [K in keyof Rules]: Widen<Rules[K]> }
  * A weapon's stats after rarity. Common, or no rarity at all, returns the base values unchanged,
  * including the label, so existing text and checks see exactly what they always did.
  */
-export function weaponRules(item: { name: WeaponName; rarity?: Rarity }): ScaledRules {
+/**
+ * Dead Ink's Death Machine power-up, a minigun on the AK's handling: about 1,100 rounds a minute,
+ * harder hits, almost no kick. Tuned by play.
+ */
+export const DEATH_MACHINE = { interval: 0.055, damage: 1.7, kick: 0.005, settle: 0.4 } as const
+
+export function weaponRules(item: { name: WeaponName; rarity?: Rarity; special?: 'deathMachine' }): ScaledRules {
   const base = WEAPON_RULES[item.name]
+  if (item.special === 'deathMachine') return { ...base, label: 'Death Machine', automatic: true,
+    interval: DEATH_MACHINE.interval, damage: base.damage * DEATH_MACHINE.damage, kick: DEATH_MACHINE.kick, settle: DEATH_MACHINE.settle }
   if (!item.rarity || item.rarity === 'common') return { ...base }
   const info = RARITY_INFO[item.rarity]
   return { ...base, label: `${info.label} ${base.label}`, damage: base.damage * info.damage, reload: base.reload * info.reload }
