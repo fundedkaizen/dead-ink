@@ -639,7 +639,10 @@ export class ZombieDirector {
   private applyHit(zombie: Zombie, damage: number, zone: HitZone, point: THREE.Vector3, direction: THREE.Vector3,
     bone: BoneName | undefined, weapon: Shot['weapon']): ZombieHit {
     const before = zombie.health
-    zombie.health = Math.max(0, zombie.health - Math.max(0, damage))
+    // Whole points, as in Call of Duty: fractional damage left zombies on 0.3 health, and the shot that
+    // finished them showed "0".
+    const amount = damage > 0 ? Math.max(1, Math.round(damage)) : 0
+    zombie.health = Math.max(0, zombie.health - amount)
     const lethal = zombie.health === 0
     const reaction: HitReaction = { zone, point: point.clone(), direction: direction.clone(), lethal, bone, weapon, targetId: zombie.id }
     const fromBehind = direction.x * Math.sin(zombie.yaw) + direction.z * Math.cos(zombie.yaw) > 0.25

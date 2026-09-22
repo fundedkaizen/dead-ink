@@ -29,6 +29,7 @@ import { MysteryBox, WallBuy } from './stations'
 import { ZombieHud } from './hud'
 import { MuzzleSparks, RiseMarks } from './effects'
 import { POWERUP_INFO, PowerupDrops, PowerupDropper } from './powerups'
+import { SEALED, ZoneGates, type ZoneGate } from './zones'
 
 export type ZombieState = {
   phase: 'active' | 'dead' | 'complete'
@@ -99,6 +100,7 @@ export class ZombiesRuntime {
   invincible = false
   wallBuys: WallBuy[] = []
   box: MysteryBox | null = null
+  zones: ZoneGates | null = null
   private random: Random
   private spawn = new THREE.Vector3(...SPAWN_POINT)
   private abort = new AbortController()
@@ -161,10 +163,14 @@ export class ZombiesRuntime {
 
   private async initialize() {
     try {
-      // Every door open and unlocked, exactly as the navigation graph was baked.
+      // Every door open and unlocked, exactly as the navigation graph was baked, except the sealed exits.
       const doors: THREE.Group[] = []
       this.scene.traverse(object => { if (object.userData.kind === 'door') doors.push(object as THREE.Group) })
-      for (const door of doors) { door.userData.missionLocked = false; setDoorOpen(door, true, true) }
+      for (const door of doors) {
+        const sealed = SEALED.some(seal => seal.door === door.name)
+        door.userData.missionLocked = sealed
+        setDoorOpen(door, !sealed, true)
+      }
       this.player.world.refresh()
       const response = await fetch(`${import.meta.env?.BASE_URL ?? '/'}nav/compound.json`)
       if (!response.ok) throw new Error(`navigation data: HTTP ${response.status}`)
@@ -173,12 +179,16 @@ export class ZombiesRuntime {
       const hash = geometryHash(this.scene)
       if (graph.geometry && graph.geometry !== hash) console.warn(`Dead Ink: navigation graph was baked for geometry ${graph.geometry}, map is ${hash}. Rebake with scripts/build-navgraph.ts.`)
       this.graph = graph
-      this.director = new ZombieDirector({ scene: this.scene, world: this.player.world, doors, graph, emit: event => this.emit(event),
+      this.director = new ZombieDirector({ scene: this.scene, world: this.player.world, doors: doors.filter(door => !door.userData.missionLocked), graph, emit: event => this.emit(event),
         damagePlayer: (_id, amount, source) => this.damage(amount, 'zombie', source),
         onHit: hit => { this.impactPoint = hit.point.clone(); this.blood.emitHit(hit); this.audio.confirmHit(hit) },
         onRise: position => { this.riseMarks.emit(position); this.emit({ kind: 'zombie-rise', position, radius: 30 }) } })
       await this.director.init(POOL_SIZE)
       if (this.disposed) return
+      // Every zone but the first shut behind its gate, before anything is placed.
+      this.zones = new ZoneGates(this.scene, this.player.world, graph)
+      this.zones.closeAll()
+      this.director.navigation.clear()
       this.player.world.warm()
       const floor = this.player.world.floor(this.spawn.clone().setY(0.6), 1, 1.5, 0.28)
       if (Number.isFinite(floor)) this.spawn.y = floor
@@ -214,6 +224,8 @@ export class ZombiesRuntime {
     this.state = { phase: 'active', health: PLAYER_HEALTH.base, elapsed: 0, kills: 0, points: STARTING_POINTS, round: 0, headshots: 0, knifeKills: 0 }
     this.rounds = newGame()
     this.director?.clear()
+    this.zones?.closeAll()
+    this.director?.navigation.clear()
     this.box?.close()
     this.powerups.clear(); this.timers = {}; this.earned = 0; this.heldWeapons = null
     this.dropper = new PowerupDropper(this.random)
@@ -317,6 +329,15 @@ export class ZombiesRuntime {
         label: offer.kind === 'full' ? offer.label : this.state.points >= offer.cost ? offer.label : `${offer.label} · need ${offer.cost - this.state.points} more`,
         use: () => this.useWall(buy) })
     }
+    const eye = this.camera.perspective.position
+    for (const gate of this.zones?.gates ?? []) {
+      if (gate.state !== 'closed') continue
+      const point = this.zones!.nearestPoint(gate, eye), cost = gate.spec.cost
+      if (point.distanceTo(eye) > 4) continue
+      targets.push({ object: gate.closed, point, kind: 'mission', descending: false,
+        label: `Open the gate to ${gate.spec.zone} · ${cost}${this.state.points >= cost ? '' : ` · need ${cost - this.state.points} more`}`,
+        use: () => this.useGate(gate) })
+    }
     const box = this.box
     if (box && box.state !== 'spinning') {
       const label = box.state === 'offering' && box.offer ? `Take ${box.offer.rarity === 'common' ? '' : `${box.offer.rarity[0].toUpperCase()}${box.offer.rarity.slice(1)} `}${WEAPON_RULES[box.offer.name].label}`
@@ -351,6 +372,19 @@ export class ZombiesRuntime {
       this.hud.notify(`${WEAPON_RULES[buy.weapon].label} ammo refilled.`, 2)
     }
     this.emit({ kind: 'pickup', position: this.player.body.position.clone(), radius: 2 })
+    this.invalidate()
+    return true
+  }
+
+  /** Pay to open a zone: the gate sinks into the ink and zombies can now come from the other side too. */
+  private useGate(gate: ZoneGate) {
+    if (!this.isActive() || !this.zones || gate.state !== 'closed') return false
+    const point = this.zones.nearestPoint(gate, this.camera.perspective.position)
+    if (!this.canReach(point, gate.closed) || !this.spend(gate.spec.cost)) return false
+    this.zones.open(gate)
+    this.emit({ kind: 'door', position: point.clone(), radius: 30 })
+    this.emit({ kind: 'zombie-rise', position: point.clone().setY(0), radius: 30 })
+    this.hud.notify(`${gate.spec.zone} is open.`, 2.5)
     this.invalidate()
     return true
   }
@@ -610,6 +644,7 @@ export class ZombiesRuntime {
       this.knifeCooldown = Math.max(0, this.knifeCooldown - dt)
       if (this.box?.update(dt, Object.keys(BOX_WEIGHTS) as WeaponName[])) this.hud.notify('The box closed.', 2)
       this.blood.update(dt); this.impacts.update(dt); this.riseMarks.update(dt); this.sparks.update(dt)
+      this.zones?.update(dt)
       this.tickPowerups(dt)
       const speed = Math.hypot(body.velocity.x, body.velocity.z)
       if (speed > 0.5 && body.grounded || this.player.actions.climbing) {
@@ -665,6 +700,7 @@ export class ZombiesRuntime {
     this.playerHits.clear(); this.disposed = true; this.abort.abort()
     for (const buy of this.wallBuys) buy.dispose()
     this.box?.dispose()
+    this.zones?.dispose()
     this.director?.dispose()
     this.hits.dispose(); this.indicator.dispose(); this.hotbar.dispose(); this.zombieHud.dispose()
     this.bulletTrails.dispose(); this.weapons.dispose(); this.blood.dispose(); this.impacts.dispose(); this.riseMarks.dispose(); this.sparks.dispose(); this.powerups.dispose()

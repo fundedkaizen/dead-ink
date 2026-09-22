@@ -10,6 +10,8 @@ import type { SoundEvent } from '../types'
  * the rattle, and two vowel formants. Groans are low and long, sprinter screams high and harsh.
  */
 const VOICE_LIMIT = 6
+/** Footsteps sit lower than in the mission: a crowd of zombies' steps adds up fast. */
+const FOOTSTEP_VOLUME: Record<string, number> = { footstep: 0.65, 'enemy-footstep': 0.55 }
 const VOWELS = { uh: [640, 1190], aa: [760, 1150], oo: [380, 900], ae: [820, 1550] } as const
 type Voice = { pitch: number; glide: number; length: number; rasp: number; drive: number; vowel: readonly [number, number]; level: number }
 
@@ -20,7 +22,7 @@ export class DeadInkAudio extends MissionAudio {
   play(event: SoundEvent) {
     const context = this.context
     const handled = ['zombie-groan', 'zombie-scream', 'zombie-snarl', 'zombie-swipe', 'zombie-rise', 'powerup-drop', 'powerup-grab', 'nuke', 'round-start', 'round-end']
-    if (!handled.includes(event.kind)) { super.play(event); return }
+    if (!handled.includes(event.kind)) { super.play(FOOTSTEP_VOLUME[event.kind] ? { ...event, volume: FOOTSTEP_VOLUME[event.kind] } : event); return }
     if (!context || !this.master || !this.active || this.muted || this.volume <= 0 || this.disposed || this.dying) return
     if (event.position && event.position.distanceTo(this.listenerPosition) > (event.radius ?? 60)) return
     if (this.sources.size >= 72) return

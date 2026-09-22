@@ -95,6 +95,41 @@ const status = window.__deadInkCheck = { done: false, results }
   check(m.weapons.current?.name === offer.name && m.weapons.current?.rarity === offer.rarity, `taking it puts the ${offer.rarity} ${offer.name} in your hands`)
   check(box.state === 'idle', 'the box closes')
 
+  // ---- Zone gates: shut until paid for ----------------------------------------------------------------
+  check(m.zones.gates.every(g => g.state === 'closed'), 'every zone gate starts shut')
+  const gate = m.zones.gates.find(g => g.spec.id === 'southwest')
+  const [ga, gb] = gate.segment
+  const centre = ga.clone().lerp(gb, 0.5)
+  const normal = new V(-(gb.z - ga.z), 0, gb.x - ga.x).normalize()
+  if (new V(-30, 0, -25).sub(centre).dot(normal) < 0) normal.negate()
+  const near = m.graph.point(m.graph.nearest(centre.clone().addScaledVector(normal, 1.8), 3))
+  const beyond = centre.clone().addScaledVector(normal, -4)
+  const crossed = () => p.body.position.clone().sub(centre).dot(normal) < -0.5
+  const walkAtGate = async ms => {
+    standAt(near.clone(), beyond.clone().setY(near.y + 1.6))
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'w', code: 'KeyW', bubbles: true }))
+    await sleep(ms)
+    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'w', code: 'KeyW', bubbles: true }))
+    await sleep(100)
+  }
+  await walkAtGate(1500)
+  check(!crossed(), 'walking into a shut gate does not get you through', p.body.position.toArray().map(n => n.toFixed(1)).join(','))
+  m.graph.flow([near])
+  check(!Number.isFinite(m.graph.distance(m.graph.nearest(beyond))), 'and zombies cannot path through it either')
+  m.state.points = Math.max(m.state.points, gate.spec.cost + 100)
+  const beforeGate = m.state.points
+  standAt(near.clone(), centre.clone().setY(near.y + 1.3))
+  await sleep(250)
+  pressKey('KeyF')
+  await sleep(250)
+  check(gate.state !== 'closed', 'pressing F at the gate opens it')
+  check(m.state.points === beforeGate - gate.spec.cost, `and costs ${gate.spec.cost}`, `${beforeGate} -> ${m.state.points}`)
+  check(await until(() => gate.state === 'open', 2500), 'the gate sinks into the ink')
+  await walkAtGate(2500)
+  check(crossed(), 'then you walk through', p.body.position.toArray().map(n => n.toFixed(1)).join(','))
+  m.graph.flow([near])
+  check(Number.isFinite(m.graph.distance(m.graph.nearest(beyond))), 'and so can zombies')
+
   // ---- The frame budget with a round in progress ---------------------------------------------------
   await sleep(4000)
   const stats = e.stats()

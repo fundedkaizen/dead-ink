@@ -262,7 +262,7 @@ export class MissionAudio {
       if (event.kind === 'enemy-pain') pitch *= PAIN_PITCH[(event.speaker ?? 0) % PAIN_PITCH.length]
     }
     const { gain, panner } = this.output(event)
-    gain.gain.value = gainValue
+    gain.gain.value = gainValue * (event.volume ?? 1)
     const source = context.createBufferSource()
     source.buffer = buffer
     source.playbackRate.value = event.kind === 'horn' ? 1 : pitch

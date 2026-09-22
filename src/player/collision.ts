@@ -83,7 +83,29 @@ export class CollisionWorld {
 
   constructor(scene: THREE.Object3D) {
     scene.updateWorldMatrix(true, true)
-    scene.traverse(object => {
+    this.register(scene)
+  }
+
+  /** Add the colliders of an object placed after the world was built (Dead Ink's zone gates). */
+  addObject(root: THREE.Object3D) {
+    root.updateWorldMatrix(true, true)
+    this.register(root)
+    this.cells = null
+  }
+
+  /** Remove every collider belonging to `root`, including its panel proxies. */
+  removeObject(root: THREE.Object3D) {
+    const owned = (mesh: THREE.Object3D) => {
+      for (let object: THREE.Object3D | null = mesh.userData.panelOwner ?? mesh; object; object = object.parent) if (object === root) return true
+      return false
+    }
+    this.colliders = this.colliders.filter(collider => !owned(collider.mesh))
+    this.proxies = this.proxies.filter(proxy => { if (!owned(proxy)) return true; proxy.geometry.dispose(); return false })
+    this.cells = null
+  }
+
+  private register(root: THREE.Object3D) {
+    root.traverse(object => {
       for (let parent: THREE.Object3D | null = object; parent; parent = parent.parent) {
         if (parent.userData.noCollision) return
       }
@@ -102,6 +124,7 @@ export class CollisionWorld {
         const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }))
         mesh.matrixAutoUpdate = false
         mesh.matrixWorld.copy(object.matrixWorld)
+        mesh.userData.panelOwner = object
         this.proxies.push(mesh)
         this.add(mesh, false, panel.blocksSight !== false, panel.blocksShots !== false)
       }

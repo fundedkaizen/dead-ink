@@ -92,6 +92,14 @@ export function geometryHash(scene: THREE.Object3D) {
 }
 
 type Edge = { to: number; link: NavLink; length: number; forward: boolean }
+type Gap = { masks: [number, number][]; raised: [number, number][]; edges: [number, Edge][] }
+
+/** Do the flat segments p-q and a-b cross? */
+function crosses(p: { x: number; z: number }, q: { x: number; z: number }, a: { x: number; z: number }, b: { x: number; z: number }) {
+  const side = (o: { x: number; z: number }, u: { x: number; z: number }, v: { x: number; z: number }) => (u.x - o.x) * (v.z - o.z) - (u.z - o.z) * (v.x - o.x)
+  const d1 = side(a, b, p), d2 = side(a, b, q), d3 = side(p, q, a), d4 = side(p, q, b)
+  return d1 * d2 < 0 && d3 * d4 < 0
+}
 
 export class NavGraph {
   readonly heights: Float32Array
@@ -107,6 +115,8 @@ export class NavGraph {
   // queue, so the 'stale entry' test would drop the entry and the search would stop at the source.
   private dist: Float64Array
   private heap = new MinHeap()
+  private gaps = new Map<number, Gap>()
+  private nextGap = 1
   private scratchA = new THREE.Vector3()
   private scratchB = new THREE.Vector3()
 
@@ -223,6 +233,59 @@ export class NavGraph {
     }
     const index = this.links.findIndex(l => (l.a === a && l.b === b) || (l.a === b && l.b === a))
     if (index >= 0) this.links.splice(index, 1)
+  }
+
+  /**
+   * Cut every way across the flat segment a-b (a closed gate, a fence added at run time): grid steps,
+   * raised steps and links whose route crosses it. Undone by openGap(key). The graph is baked with
+   * every gate open; Dead Ink closes the ones a player has not paid for.
+   */
+  closeGap(a: { x: number; z: number }, b: { x: number; z: number }) {
+    const cut: Gap = { masks: [], raised: [], edges: [] }
+    const p = new THREE.Vector3(), q = new THREE.Vector3()
+    const i0 = Math.floor((Math.min(a.x, b.x) - this.minX) / this.cell) - 2, i1 = Math.floor((Math.max(a.x, b.x) - this.minX) / this.cell) + 2
+    const k0 = Math.floor((Math.min(a.z, b.z) - this.minZ) / this.cell) - 2, k1 = Math.floor((Math.max(a.z, b.z) - this.minZ) / this.cell) + 2
+    for (let i = i0; i <= i1; i++) for (let k = k0; k <= k1; k++) {
+      const index = this.index(i, k)
+      if (index < 0) continue
+      if (this.walkable(index)) {
+        this.point(index, p)
+        for (let d = 0; d < 8; d++) {
+          if (!(this.masks[index] & (1 << d))) continue
+          this.point((i + DIRECTIONS[d][0]) * this.nz + k + DIRECTIONS[d][1], q)
+          if (crosses(p, q, a, b)) { this.masks[index] &= ~(1 << d); cut.masks.push([index, d]) }
+        }
+      }
+      for (const r of this.raisedIn.get(index) ?? []) {
+        this.point(r, p)
+        for (let d = 0, base = (r - this.cells) * 8; d < 8; d++) {
+          const next = this.raisedNext[base + d]
+          if (next < 0 || !crosses(p, this.point(next, q), a, b)) continue
+          this.raisedNext[base + d] = -1; cut.raised.push([base + d, next])
+        }
+      }
+    }
+    for (const [from, edges] of this.edges) {
+      const keep = edges.filter(edge => {
+        const route = this.linkRoute(edge.link, edge.forward)
+        for (let n = 1; n < route.length; n++) if (crosses(route[n - 1], route[n], a, b)) { cut.edges.push([from, edge]); return false }
+        return true
+      })
+      if (keep.length !== edges.length) this.edges.set(from, keep)
+    }
+    const key = this.nextGap++
+    this.gaps.set(key, cut)
+    return key
+  }
+
+  /** Restore what closeGap(key) cut. */
+  openGap(key: number) {
+    const cut = this.gaps.get(key)
+    if (!cut) return
+    this.gaps.delete(key)
+    for (const [index, d] of cut.masks) this.masks[index] |= 1 << d
+    for (const [slot, next] of cut.raised) this.raisedNext[slot] = next
+    for (const [from, edge] of cut.edges) this.edges.get(from)?.push(edge) ?? this.edges.set(from, [edge])
   }
 
   /** True when `from` to `to` is a plain grid step (safe to cut straight across when smoothing). */

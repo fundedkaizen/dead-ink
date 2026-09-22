@@ -20,6 +20,8 @@ export class FirstPersonController {
   onPlayingChange: (playing: boolean) => void = () => {}
   lookSensitivity: () => number = () => 1
   private fallback = false
+  /** The browser has granted a lock at least once, so a later refusal is momentary, not a missing feature. */
+  private lockWorked = false
   private rawInput = false
   private lastLook = 0
   private dragging = false
@@ -60,10 +62,11 @@ export class FirstPersonController {
     window.addEventListener('pointercancel', () => { this.dragging = false }, options)
     document.addEventListener('mousemove', this.look, options)
     document.addEventListener('pointerlockchange', () => {
+      if (document.pointerLockElement === canvas) this.lockWorked = true
       if (document.pointerLockElement === canvas && this.enabled) this.resume()
       else if (this.playing && !this.fallback) this.pause()
     }, options)
-    document.addEventListener('pointerlockerror', this.useFallback, options)
+    document.addEventListener('pointerlockerror', this.lockRefused, options)
     window.addEventListener('keydown', this.keyDown, options)
     window.addEventListener('keyup', event => { this.pressed.delete(event.code) }, options)
     window.addEventListener('blur', this.pause, options)
@@ -115,11 +118,21 @@ export class FirstPersonController {
       this.rawInput = true
       const request = this.canvas.requestPointerLock({ unadjustedMovement: true }) as Promise<void> | undefined
       request?.catch((error: unknown) => {
-        if (!(error instanceof DOMException && error.name === 'NotSupportedError')) { this.useFallback(); return }
+        if (!(error instanceof DOMException && error.name === 'NotSupportedError')) { this.lockRefused(); return }
         this.rawInput = false
-        try { (this.canvas.requestPointerLock() as Promise<void> | undefined)?.catch(this.useFallback) } catch { this.useFallback() }
+        try { (this.canvas.requestPointerLock() as Promise<void> | undefined)?.catch(this.lockRefused) } catch { this.lockRefused() }
       })
-    } catch { this.useFallback() }
+    } catch { this.lockRefused() }
+  }
+
+  /**
+   * Chrome refuses a new lock for about a second after one ends (leaving the window, Escape). Where
+   * locking has worked before, that is momentary: stay paused and let the next click lock again, rather
+   * than dropping for good to drag-to-look, which is only for browsers that cannot lock at all.
+   */
+  private lockRefused = () => {
+    if (this.lockWorked) return
+    this.useFallback()
   }
 
   private useFallback = () => {
