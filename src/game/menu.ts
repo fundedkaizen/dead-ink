@@ -7,7 +7,7 @@ type MenuCallbacks = { retry: () => void; restart: () => void }
 export type MenuState = Pick<MissionState, 'phase' | 'health' | 'elapsed' | 'kills'>
 
 /**
- * The words on the menu. Modes other than the hostage mission (the battle royale) supply their own;
+ * The words on the menu. Modes other than the hostage mission (Dead Ink) supply their own;
  * MISSION_COPY holds the mission's original strings verbatim, so its menu reads exactly as before.
  */
 export type MenuCopy = {
@@ -32,7 +32,6 @@ export const MISSION_COPY: MenuCopy = {
   // Only the mission uses this copy, and the mission always passes its full MissionState.
   objective: state => missionObjective(state as MissionState),
   missionPage: true,
-  modeLink: { label: 'Battle royale', href: '?mode=royale' },
   restartWarning: 'Your current mission progress will be reset.',
 }
 

@@ -1,6 +1,6 @@
 /**
- * Seeded random numbers for the battle royale. A match is fully described by its seed, so loot,
- * spawns and the storm path can be reproduced exactly in checks and when chasing a bug.
+ * Seeded random numbers. A run is fully described by its seed, so spawns and Mystery Box rolls can be
+ * reproduced exactly in checks and when chasing a bug.
  */
 export type Random = () => number
 

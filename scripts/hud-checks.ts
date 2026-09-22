@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import * as THREE from 'three'
-import { screenBearing } from '../src/game/royale/damage-indicator'
+import { screenBearing } from '../src/game/shared/damage-indicator'
 import { FirstPersonWeapons } from '../src/game/weapons'
 import { CollisionWorld } from '../src/player/collision'
-import { seeded } from '../src/game/royale/random'
+import { seeded } from '../src/game/shared/random'
 import type { Shot, SoundEvent, WeaponFrame, WeaponItem } from '../src/game/types'
 
 const near = (a: number, b: number, eps = 1e-9) => Math.abs(a - b) < eps
@@ -79,4 +79,4 @@ const gun = (id: string, name: WeaponItem['name']): WeaponItem => ({ id, name, m
   f.dispose()
 }
 
-console.log('royale hud checks passed')
+console.log('hud checks passed')

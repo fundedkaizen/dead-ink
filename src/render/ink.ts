@@ -87,15 +87,9 @@ const silhouette = new THREE.ShaderMaterial({
   side: THREE.BackSide, depthWrite: false,
 })
 
-// Fat-line materials created after startup (enemy fire streaks) must follow the viewport too.
-const trackedLines = new Set<LineMaterial>()
-const viewport = new THREE.Vector2(1, 1)
-
 export function resizeInk(width: number, height: number) {
-  viewport.set(width, height)
   strokeMaterial.resolution.set(width, height)
   silhouette.uniforms.resolution.value.set(width, height)
-  for (const material of trackedLines) material.resolution.set(width, height)
 }
 
 /** Single-sided ink lettering, placed just outside a wall with no backing board. */
@@ -357,52 +351,6 @@ export function createRarityBeam(color: number, height = 7) {
   ring.renderOrder = 10
   beam.add(column, ring)
   return beam
-}
-
-// ---- Battle royale storm wall -------------------------------------------------------------------
-// A violet wall of diagonal ink hatching that drifts slowly, fading upward, so the storm reads as
-// part of the drawing rather than a glowing effect. The mesh is a unit cylinder: callers set
-// scale.x/z to the radius each frame and update `radius` (hatch spacing stays in metres) and `time`.
-export const STORM_COLOR = 0x4a46c8
-export function createStormWall(height = 60) {
-  const material = new THREE.ShaderMaterial({
-    uniforms: { color: { value: new THREE.Color(STORM_COLOR) }, radius: { value: 1 }, time: { value: 0 }, height: { value: height } },
-    vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
-    fragmentShader: `uniform vec3 color; uniform float radius; uniform float time; uniform float height; varying vec2 vUv;
-      void main() {
-        float around = vUv.x * 6.2831853 * radius;      // metres along the wall
-        float up = vUv.y * height;                      // metres above the ground
-        float hatch = fract((around + up) / 2.4 - time * 0.12);
-        float line = smoothstep(0.0, 0.08, hatch) * (1.0 - smoothstep(0.16, 0.24, hatch));
-        float fade = pow(1.0 - vUv.y, 1.4);
-        gl_FragColor = vec4(color, (0.16 + 0.34 * line) * fade);
-      }`,
-    transparent: true, depthWrite: false, side: THREE.DoubleSide,
-  })
-  const wall = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, height, 96, 1, true), material)
-  wall.name = 'Storm wall'
-  wall.userData.noCollision = true
-  wall.position.y = height / 2 - 2
-  wall.renderOrder = 11
-  wall.frustumCulled = false
-  return { wall, material }
-}
-
-// ---- Enemy fire streaks -------------------------------------------------------------------------
-// Red means danger. A bot's shot at you leaves a short-lived red ink streak from its muzzle, so a
-// distant shooter can be found by eye. Each streak owns its material so it can fade on its own.
-export const DANGER_COLOR = 0xd4332a
-export function createDangerStreak() {
-  const material = new LineMaterial({ color: DANGER_COLOR, linewidth: 2.6, transparent: true, opacity: 1 })
-  material.depthWrite = false
-  material.resolution.copy(viewport)
-  trackedLines.add(material)
-  const line = new LineSegments2(new LineSegmentsGeometry(), material)
-  line.name = 'Enemy fire streak'
-  line.userData.noCollision = true
-  line.frustumCulled = false
-  line.renderOrder = 12
-  return { line, material, dispose() { trackedLines.delete(material); material.dispose(); line.geometry.dispose(); line.removeFromParent() } }
 }
 
 // ---- Dead Ink zombie eyes -----------------------------------------------------------------------

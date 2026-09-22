@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import './combat-hud.css'
 
 /**
  * Modern Warfare style hit feedback: an X flashes over the crosshair on every hit and turns red on a
@@ -19,9 +20,9 @@ export class HitMarkers {
   private projected = new THREE.Vector3()
 
   constructor(parent: HTMLElement) {
-    this.root.className = 'royale-hits'
+    this.root.className = 'hud-hits'
     this.root.setAttribute('aria-hidden', 'true')
-    this.marker.className = 'royale-hitmarker'
+    this.marker.className = 'hud-hitmarker'
     this.marker.innerHTML = '<i></i><i></i><i></i><i></i>'
     this.root.append(this.marker)
     parent.append(this.root)
@@ -39,7 +40,7 @@ export class HitMarkers {
       return
     }
     const element = document.createElement('span')
-    element.className = 'royale-damage'
+    element.className = 'hud-damage-number'
     this.root.append(element)
     const entry: Floating = { element, point: point.clone(), age: 0, damage, targetId, head, kill }
     this.paint(entry)

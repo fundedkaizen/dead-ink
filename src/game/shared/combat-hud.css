@@ -1,0 +1,39 @@
+/* Combat feedback shared by game modes: hit markers, damage numbers, damage direction, hotbar.
+   Ink on paper like the rest of the HUD; colour only where it means something. */
+
+/* Hit markers: four short strokes forming an X around the crosshair. */
+.hud-hits { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.hud-hitmarker { position: absolute; left: 50%; top: 50%; width: 30px; height: 30px; transform: translate(-50%, -50%) rotate(45deg); opacity: 0; }
+.hud-hitmarker.show { opacity: 1; }
+.hud-hitmarker i { position: absolute; background: var(--ink); box-shadow: 0 0 0 1px #ffffffcc; }
+.hud-hitmarker i:nth-child(1) { left: 14px; top: 0; width: 2px; height: 9px; }
+.hud-hitmarker i:nth-child(2) { left: 14px; bottom: 0; width: 2px; height: 9px; }
+.hud-hitmarker i:nth-child(3) { top: 14px; left: 0; width: 9px; height: 2px; }
+.hud-hitmarker i:nth-child(4) { top: 14px; right: 0; width: 9px; height: 2px; }
+.hud-hitmarker.kill i { background: #d4332a; }
+
+/* Floating damage numbers. A paper-coloured outline keeps them readable over black stickmen. */
+.hud-damage-number { position: absolute; left: 0; top: 0; font-size: 19px; font-weight: 800; color: var(--ink); white-space: nowrap;
+  text-shadow: 1px 1px 0 #fff, -1px 1px 0 #fff, 1px -1px 0 #fff, -1px -1px 0 #fff; will-change: transform, opacity; }
+.hud-damage-number.head { color: #e8a317; font-size: 23px; }
+.hud-damage-number.kill { color: #d4332a; }
+
+
+/* Call of Duty style damage direction: red arcs around the crosshair, rotated toward the shooter. */
+.hud-damage-ring { position: absolute; left: 50%; top: 50%; width: 0; height: 0; pointer-events: none; }
+.hud-damage-arc { position: absolute; left: -150px; top: -150px; width: 300px; height: 300px; transform-origin: 50% 50%; }
+.hud-damage-arc svg { width: 100%; height: 100%; overflow: visible; }
+.hud-damage-arc path { fill: none; stroke: #d4332a; stroke-width: 10; stroke-linecap: round; filter: drop-shadow(0 0 2px #ffffff); }
+
+/* Fortnite style hotbar: four slots, rarity colour along the bottom edge, the selected one raised. */
+.hud-hotbar { position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); display: flex; gap: 6px; pointer-events: none; }
+.hud-slot { position: relative; width: 74px; height: 48px; display: grid; align-content: center; gap: 2px; padding: 3px 7px;
+  background: #ffffffe8; border: 1.5px solid var(--ink-rule); border-bottom: 4px solid var(--rarity); border-radius: 3px 5px 3px 4px;
+  color: var(--ink); transition: transform 0.12s, border-color 0.12s; }
+.hud-slot kbd { position: absolute; top: 2px; right: 5px; font-size: 9px; color: var(--ink-muted); }
+.hud-slot-name { font-weight: 700; font-size: 13px; line-height: 1.1; }
+.hud-slot-ammo { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--ink-muted); }
+.hud-slot.selected { transform: translateY(-7px); border-color: var(--ink); box-shadow: 0 2px 0 var(--rarity); }
+.hud-slot.empty { opacity: 0.5; }
+@media (prefers-reduced-motion: reduce) { .hud-slot { transition: none; } }
+@media (max-width: 640px) { .hud-slot { width: 58px; height: 42px; } .hud-slot-name { font-size: 11px; } }

@@ -1190,30 +1190,6 @@ export class EnemyDirector {
     }
   }
 
-  /**
-   * Damage that is not a bullet: the battle royale storm. Follows the same death path as a lethal
-   * shot (death clip, weapon drop) but has no shooter, so no ally learns a position from it.
-   * Returns true when this damage killed the enemy. The hostage mission never calls it.
-   */
-  applyDamage(id: string, amount: number) {
-    const enemy = this.enemies.find(candidate => candidate.spec.id === id)
-    if (!enemy || !(amount > 0) || enemy.state === 'dead' || enemy.state === 'reserve') return false
-    enemy.health = Math.max(0, enemy.health - amount)
-    if (enemy.health > 0) return false
-    const backward = new THREE.Vector3(-Math.sin(enemy.yaw), 0, -Math.cos(enemy.yaw))
-    enemy.actor.react(reactionClipName({ zone: 'torso', lethal: true }, false), true, backward, 1)
-    enemy.deathClip = enemy.actor.deathClip
-    this.enter(enemy, 'dead')
-    enemy.actor.update(0, 'dead', false)
-    this.context.emit({ kind: 'enemy-down', position: enemy.position.clone(), radius: 5 })
-    if (!enemy.dropped) {
-      enemy.dropped = true
-      this.context.dropWeapon({ id: `enemy-${enemy.spec.id}`, name: enemy.spec.weapon,
-        magazine: enemy.magazine, reserve: WEAPON[enemy.spec.weapon].magazine, position: tuple(enemy.position) })
-    }
-    return true
-  }
-
   snapshot(): EnemySnapshot[] {
     return this.enemies.map(enemy => ({
       id: enemy.spec.id, position: tuple(enemy.position), yaw: enemy.yaw, health: enemy.health,

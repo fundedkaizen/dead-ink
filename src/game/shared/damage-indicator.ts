@@ -25,7 +25,7 @@ export class DamageIndicator {
   private arcs: Arc[] = []
 
   constructor(parent: HTMLElement) {
-    this.root.className = 'royale-damage-ring'
+    this.root.className = 'hud-damage-ring'
     this.root.setAttribute('aria-hidden', 'true')
     parent.append(this.root)
   }
@@ -36,7 +36,7 @@ export class DamageIndicator {
     const existing = this.arcs.find(arc => arc.source.distanceTo(source) < MERGE_DISTANCE)
     if (existing) { existing.age = 0; existing.strength = Math.max(existing.strength, strength); existing.source.copy(source); return }
     const element = document.createElement('div')
-    element.className = 'royale-damage-arc'
+    element.className = 'hud-damage-arc'
     // A 300 px square centred on the crosshair; the arc sits at its top (radius 140, about 44 degrees
     // wide) and the whole square rotates to the shooter's bearing.
     element.innerHTML = '<svg viewBox="-150 -150 300 300"><path d="M -52 -130 A 140 140 0 0 1 52 -130" /></svg>'

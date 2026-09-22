@@ -13,12 +13,12 @@ export class Hotbar {
   private signature = ''
 
   constructor(parent: HTMLElement, slots = 4) {
-    this.root.className = 'royale-hotbar'
+    this.root.className = 'hud-hotbar'
     this.root.setAttribute('aria-label', 'Weapons')
     for (let i = 0; i < slots; i++) {
       const cell = document.createElement('div')
-      cell.className = 'royale-slot'
-      cell.innerHTML = `<kbd>${i + 1}</kbd><span class="royale-slot-name"></span><span class="royale-slot-ammo"></span>`
+      cell.className = 'hud-slot'
+      cell.innerHTML = `<kbd>${i + 1}</kbd><span class="hud-slot-name"></span><span class="hud-slot-ammo"></span>`
       this.root.append(cell)
       this.cells.push(cell)
     }
@@ -35,8 +35,8 @@ export class Hotbar {
       cell.classList.toggle('selected', i === selected)
       cell.classList.toggle('empty', !item)
       cell.style.setProperty('--rarity', item?.rarity ? RARITY_INFO[item.rarity].css : 'var(--ink-rule)')
-      cell.querySelector('.royale-slot-name')!.textContent = item ? SHORT[item.name] : ''
-      cell.querySelector('.royale-slot-ammo')!.textContent = item ? `${item.magazine}/${item.reserve}` : ''
+      cell.querySelector('.hud-slot-name')!.textContent = item ? SHORT[item.name] : ''
+      cell.querySelector('.hud-slot-ammo')!.textContent = item ? `${item.magazine}/${item.reserve}` : ''
       cell.title = item ? weaponRules(item).label : 'Empty'
     })
   }

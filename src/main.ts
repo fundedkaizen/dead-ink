@@ -7,7 +7,6 @@ import { FirstPersonController } from './player/controller'
 import { VRWalkthrough } from './vr/walkthrough'
 import { createMissionWorld, prepareCompound } from './game/world'
 import { MissionRuntime } from './game/runtime'
-import { RoyaleRuntime } from './game/royale/runtime'
 import './style.css'
 
 const canvas = document.querySelector<HTMLCanvasElement>('#world')!
@@ -46,16 +45,7 @@ const camera = new EnvironmentCamera(canvas, invalidate)
 const interactions = new EnvironmentInteractions(canvas, scene, () => camera.active, invalidate, () => camera.walking)
 const player = new FirstPersonController(canvas, scene, camera, interactions, invalidate)
 const vr = new VRWalkthrough(renderer, scene, camera, player, invalidate)
-// ?mode=royale plays the battle royale on the same compound; anything else is the hostage mission.
-// ?bots=N sets the bot count (1-35, default 20); ?seed=N replays an exact match.
-const params = new URLSearchParams(location.search)
-const botsParam = Number.parseInt(params.get('bots') ?? '', 10)
-const bots = Number.isFinite(botsParam) ? Math.max(1, Math.min(35, botsParam)) : 20
-const seedParam = Number.parseInt(params.get('seed') ?? '', 10)
-const seed = Number.isFinite(seedParam) ? seedParam : undefined
-const mission = !missionWorld ? null : params.get('mode') === 'royale'
-  ? new RoyaleRuntime(scene, camera, player, missionWorld, invalidate, { bots, seed })
-  : new MissionRuntime(scene, camera, player, missionWorld, invalidate)
+const mission = missionWorld ? new MissionRuntime(scene, camera, player, missionWorld, invalidate) : null
 const frameTimes: number[] = []
 let startupReady = !mission
 // Initialization positions the mission camera and settles the menu (including

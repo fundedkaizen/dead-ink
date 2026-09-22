@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import type { CollisionWorld } from '../../player/collision'
 import type { NavGraph } from './navgraph'
-import type { Random } from '../royale/random'
+import type { Random } from '../shared/random'
 
 /**
  * Where a zombie appears. Call of Duty spawns them in the zone you are in; here the flow field does

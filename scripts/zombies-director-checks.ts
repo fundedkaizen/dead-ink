@@ -10,7 +10,7 @@ import { ATTACK, CORPSE_SECONDS, ZombieDirector, type ZombieTarget } from '../sr
 import { PLAYER_HEALTH, ZOMBIE_DAMAGE_SCALE } from '../src/game/zombies/rules'
 import { NavGraph, type NavData } from '../src/game/zombies/navgraph'
 import { pickSpawn } from '../src/game/zombies/spawn'
-import { seeded } from '../src/game/royale/random'
+import { seeded } from '../src/game/shared/random'
 import type { Shot, SoundEvent } from '../src/game/types'
 
 // Load the real stickman from disk (the loader normally fetches it over HTTP).
