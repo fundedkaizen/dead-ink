@@ -1,0 +1,32 @@
+/* Dead Ink HUD. Ink on paper; red only for what is dangerous (the round) and for spending. */
+
+.dead-ink-hud { position: absolute; inset: 0; pointer-events: none; }
+
+/* Round counter, top left, Call of Duty style: tally marks to five, then numerals. */
+.dead-ink-round { position: absolute; left: 26px; top: 20px; color: #d4332a; filter: drop-shadow(0 0 2px #fff); }
+.dead-ink-round svg { width: 58px; height: 58px; display: block; }
+.dead-ink-round path { fill: none; stroke: currentColor; stroke-width: 5.5; stroke-linecap: round; }
+.dead-ink-round span { font: 700 54px/1 var(--notes, "Chalkboard SE", "Comic Sans MS", cursive); letter-spacing: -1px; }
+
+/* Points, right side above the magazine meter. */
+.dead-ink-points { position: absolute; right: 28px; bottom: 104px; display: grid; justify-items: end;
+  font-variant-numeric: tabular-nums; color: var(--ink); }
+.dead-ink-points strong { font-size: 26px; line-height: 1; padding: 3px 9px; background: #ffffffe8;
+  border: 1px solid var(--ink-rule); border-radius: 4px 3px 5px 3px; }
+.dead-ink-gain { position: absolute; right: 2px; bottom: 34px; font-weight: 800; font-size: 16px; color: var(--ink);
+  text-shadow: 1px 1px 0 #fff, -1px 1px 0 #fff, 1px -1px 0 #fff, -1px -1px 0 #fff; white-space: nowrap; }
+.dead-ink-gain.spend { color: #d4332a; }
+
+/* Round announcements. */
+.dead-ink-banner { position: absolute; left: 50%; top: 26%; transform: translate(-50%, -50%) scale(0.96); opacity: 0;
+  font: 700 46px/1.1 var(--notes, "Chalkboard SE", "Comic Sans MS", cursive); color: #d4332a; text-align: center;
+  text-shadow: 2px 2px 0 #fff, -2px 2px 0 #fff, 2px -2px 0 #fff, -2px -2px 0 #fff; transition: opacity 0.4s, transform 0.4s; }
+.dead-ink-banner.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+body[data-reduced-motion="true"] .dead-ink-banner { transition: none; transform: translate(-50%, -50%); }
+
+@media (max-width: 640px) {
+  .dead-ink-round svg { width: 44px; height: 44px; }
+  .dead-ink-round span { font-size: 40px; }
+  .dead-ink-points { right: 18px; bottom: 96px; }
+  .dead-ink-banner { font-size: 34px; }
+}

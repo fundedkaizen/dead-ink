@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { applyPenMaterial, createPenSilhouette, penPalette } from '../render/ballpoint'
 import { disposeGun, type Gun } from '../lab/weapons/models'
-import type { WeaponContext, WeaponFrame, WeaponItem, WeaponSnapshot } from './types'
+import type { WeaponContext, WeaponFrame, WeaponItem, WeaponName, WeaponSnapshot } from './types'
 import { WEAPON_RULES, WEAPON_SLOTS, SHOTGUN_PELLETS, SHOTGUN_BALLISTICS, SNIPER_ZOOM, startingLoadout } from './balance'
 import { createMissionGun } from './weapon-models'
 import { RARITY_INFO, weaponRules } from './loot'
@@ -214,6 +214,34 @@ export class FirstPersonWeapons {
   }
 
   get selectedSlot() { return this.slot }
+
+  /**
+   * Put a weapon straight into the inventory (bought off a wall, taken from the Mystery Box). It goes
+   * into an empty slot if there is one; with every slot full it replaces the weapon in your hands, as
+   * in Call of Duty. Returns the slot it went into.
+   */
+  give(source: WeaponItem) {
+    const item = copyItem(source)
+    delete item.position
+    const empty = this.inventory.findIndex(slot => !slot)
+    const destination = empty >= 0 ? empty : this.slot
+    this.cancel()
+    this.inventory[destination] = item
+    this.slot = destination
+    this.switchTime = 0.22
+    this.setHeldModel()
+    this.context.emit({ kind: 'pickup', position: this.feet.clone(), radius: 2, text: `${this.label} picked up` })
+    return destination
+  }
+
+  /** Top up a carried weapon to at least this magazine and reserve. False when it is not carried. */
+  refill(name: WeaponName, magazine: number, reserve: number) {
+    const item = this.inventory.find(slot => slot?.name === name)
+    if (!item) return false
+    item.magazine = Math.max(item.magazine, Math.min(magazine, WEAPON_RULES[name].capacity))
+    item.reserve = Math.max(item.reserve, reserve)
+    return true
+  }
 
   /**
    * Switch to the next (1) or previous (-1) slot that holds a weapon, wrapping around and skipping

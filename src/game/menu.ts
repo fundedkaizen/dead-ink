@@ -24,6 +24,8 @@ export type MenuCopy = {
   deadPremise?: (state: MenuState) => string
   /** The warning on the restart confirmation page. */
   restartWarning?: string
+  /** Extra rows for the Controls page, as [action, key]. */
+  controls?: [string, string][]
 }
 export const MISSION_COPY: MenuCopy = {
   title: 'Operation Safe Return', premise: 'Find the hostage. Get out together.',
@@ -33,6 +35,7 @@ export const MISSION_COPY: MenuCopy = {
   objective: state => missionObjective(state as MissionState),
   missionPage: true,
   restartWarning: 'Your current mission progress will be reset.',
+  modeLink: { label: 'Dead Ink', href: '?mode=zombies' },
 }
 
 /** One decision at a time; reference material never blocks entering the game. */
@@ -103,6 +106,7 @@ export class MissionMenu {
           <div><dt>Scope zoom</dt><dd><kbd>Q / E / Wheel</kbd></dd></div>
           <div><dt>Mission map</dt><dd><kbd>M</kbd></dd></div>
           <div><dt>Pause</dt><dd><kbd>Esc</kbd></dd></div>
+          ${(copy.controls ?? []).map(([action, key]) => `<div><dt>${action}</dt><dd><kbd>${key}</kbd></dd></div>`).join('')}
         </dl>
       </section>
       <section data-menu-page="settings" hidden>

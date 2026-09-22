@@ -7,6 +7,7 @@ import { FirstPersonController } from './player/controller'
 import { VRWalkthrough } from './vr/walkthrough'
 import { createMissionWorld, prepareCompound } from './game/world'
 import { MissionRuntime } from './game/runtime'
+import { ZombiesRuntime } from './game/zombies/runtime'
 import './style.css'
 
 const canvas = document.querySelector<HTMLCanvasElement>('#world')!
@@ -45,7 +46,11 @@ const camera = new EnvironmentCamera(canvas, invalidate)
 const interactions = new EnvironmentInteractions(canvas, scene, () => camera.active, invalidate, () => camera.walking)
 const player = new FirstPersonController(canvas, scene, camera, interactions, invalidate)
 const vr = new VRWalkthrough(renderer, scene, camera, player, invalidate)
-const mission = missionWorld ? new MissionRuntime(scene, camera, player, missionWorld, invalidate) : null
+// ?mode=zombies plays Dead Ink on the same compound; anything else is the hostage mission.
+const zombies = new URLSearchParams(location.search).get('mode') === 'zombies'
+const mission = !missionWorld ? null : zombies
+  ? new ZombiesRuntime(scene, camera, player, missionWorld, invalidate)
+  : new MissionRuntime(scene, camera, player, missionWorld, invalidate)
 const frameTimes: number[] = []
 let startupReady = !mission
 // Initialization positions the mission camera and settles the menu (including
