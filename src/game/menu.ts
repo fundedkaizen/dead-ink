@@ -3,6 +3,34 @@ import { missionObjective, type MissionState } from './mission'
 type MenuPage = 'home' | 'mission' | 'controls' | 'settings' | 'vr' | 'restart'
 type MenuCallbacks = { retry: () => void; restart: () => void }
 
+/** What the menu reads from game state. The hostage mission passes its full MissionState. */
+export type MenuState = Pick<MissionState, 'phase' | 'health' | 'elapsed' | 'kills'>
+
+/**
+ * The words on the menu. Modes other than the hostage mission (the battle royale) supply their own;
+ * MISSION_COPY holds the mission's original strings verbatim, so its menu reads exactly as before.
+ */
+export type MenuCopy = {
+  title: string; premise: string; begin: string; resume: string; restart: string
+  deadTitle: string; completeTitle: string; completePremise: string
+  objective: (state: MenuState) => string
+  /** Recap rows on the win screen; the mission's Time / Kills / Health recap when absent. */
+  recap?: (state: MenuState) => [string, string][]
+  /** The mission's field-map page. Off for modes whose map it does not describe. */
+  missionPage?: boolean
+  /** A menu button that switches to the other game mode. */
+  modeLink?: { label: string; href: string }
+}
+export const MISSION_COPY: MenuCopy = {
+  title: 'Operation Safe Return', premise: 'Find the hostage. Get out together.',
+  begin: 'Begin mission', resume: 'Resume mission', restart: 'Restart mission',
+  deadTitle: 'No way through.', completeTitle: 'Hostage safe.', completePremise: 'You both made it out.',
+  // Only the mission uses this copy, and the mission always passes its full MissionState.
+  objective: state => missionObjective(state as MissionState),
+  missionPage: true,
+  modeLink: { label: 'Battle royale', href: '?mode=royale' },
+}
+
 /** One decision at a time; reference material never blocks entering the game. */
 export class MissionMenu {
   private card = document.querySelector<HTMLElement>('.walk-card')!
@@ -20,15 +48,15 @@ export class MissionMenu {
   private retry: HTMLButtonElement
   private restart: HTMLButtonElement
 
-  constructor(private start: HTMLButtonElement, map: string, reducedMotion: boolean, callbacks: MenuCallbacks) {
+  constructor(private start: HTMLButtonElement, map: string, reducedMotion: boolean, callbacks: MenuCallbacks, private copy: MenuCopy = MISSION_COPY) {
     this.card.dataset.page = 'home'
     this.card.setAttribute('role', 'dialog')
     this.card.setAttribute('aria-modal', 'true')
     this.card.setAttribute('aria-labelledby', 'mission-menu-title')
     this.card.innerHTML = `
       <section data-menu-page="home">
-        <h1 id="mission-menu-title">Operation Safe Return</h1>
-        <p id="mission-premise">Find the hostage. Get out together.</p>
+        <h1 id="mission-menu-title">${copy.title}</h1>
+        <p id="mission-premise">${copy.premise}</p>
         <div id="mission-debrief" role="status" hidden></div>
         <div class="mission-actions">
           <div class="mission-start-slot"></div>
@@ -36,9 +64,10 @@ export class MissionMenu {
           <button id="mission-restart" class="menu-quiet" hidden>Restart mission</button>
         </div>
         <nav class="mission-menu-links" aria-label="Mission menu">
-          <button data-menu-open="mission">Mission</button>
+          ${copy.missionPage === false ? '' : '<button data-menu-open="mission">Mission</button>'}
           <button data-menu-open="controls">Controls</button>
           <button data-menu-open="settings">Settings</button>
+          ${copy.modeLink ? `<button data-mode-href="${copy.modeLink.href}">${copy.modeLink.label}</button>` : ''}
         </nav>
       </section>
       <section data-menu-page="mission" hidden>
@@ -94,7 +123,7 @@ export class MissionMenu {
         <p>Your current mission progress will be reset.</p>
         <div class="mission-actions">
           <button id="mission-cancel-restart" class="menu-primary">Cancel</button>
-          <button id="mission-confirm-restart" class="menu-secondary">Restart mission</button>
+          <button id="mission-confirm-restart" class="menu-secondary">${copy.restart}</button>
         </div>
       </section>`
     this.card.querySelector('.mission-start-slot')!.append(start)
@@ -112,6 +141,9 @@ export class MissionMenu {
     this.card.querySelectorAll('[data-menu-back]').forEach(button => {
       button.addEventListener('click', () => this.back(), options)
     })
+    this.card.querySelector<HTMLElement>('[data-mode-href]')?.addEventListener('click', event => {
+      location.href = (event.currentTarget as HTMLElement).dataset.modeHref!
+    }, options)
     this.retry.addEventListener('click', callbacks.retry, options)
     this.restart.addEventListener('click', () => {
       if (this.phase === 'complete') callbacks.restart()
@@ -163,12 +195,12 @@ export class MissionMenu {
     const primary = this.phase === 'dead' ? this.retry : this.phase === 'complete' ? this.restart : this.start
     if (!this.pause.hidden && !this.pause.inert && !primary.hidden && !primary.disabled) primary.focus({ preventScroll: true })
   }
-  ready() { this.loaded = true; this.start.disabled = false; this.start.textContent = 'Begin mission'; if (this.page === 'home') this.focusPrimary() }
+  ready() { this.loaded = true; this.start.disabled = false; this.start.textContent = this.copy.begin; if (this.page === 'home') this.focusPrimary() }
   error(message: string) { this.loadError = message; this.start.textContent = 'Unable to load'; this.start.disabled = true; this.show('home'); this.showError() }
   private showError() { const debrief = this.element('#mission-debrief'); debrief.hidden = false; delete debrief.dataset.summary; debrief.textContent = this.loadError }
   reset() { this.phase = 'active'; this.loadError = ''; this.show('home', undefined, false) }
 
-  update(state: MissionState, data: { playing: boolean; enabled: boolean; ready: boolean }) {
+  update(state: MenuState, data: { playing: boolean; enabled: boolean; ready: boolean }) {
     if (data.playing) {
       this.hasPlayed = true
       if (!this.wasPlaying) this.show('home', undefined, false)
@@ -182,18 +214,18 @@ export class MissionMenu {
       this.show('home', undefined, false)
     }
     const dead = state.phase === 'dead', complete = state.phase === 'complete'
-    this.title.textContent = dead ? 'No way through.' : complete ? 'Hostage safe.' : this.hasPlayed ? 'Paused.' : 'Operation Safe Return'
+    this.title.textContent = dead ? this.copy.deadTitle : complete ? this.copy.completeTitle : this.hasPlayed ? 'Paused.' : this.copy.title
     this.premise.hidden = dead
-    this.premise.textContent = complete ? 'You both made it out.' : this.hasPlayed ? missionObjective(state) : 'Find the hostage. Get out together.'
+    this.premise.textContent = complete ? this.copy.completePremise : this.hasPlayed ? this.copy.objective(state) : this.copy.premise
     this.start.hidden = dead || complete
     this.start.disabled = !data.ready || !this.loaded
-    if (!this.loadError && this.loaded) this.start.textContent = this.hasPlayed ? 'Resume mission' : 'Begin mission'
+    if (!this.loadError && this.loaded) this.start.textContent = this.hasPlayed ? this.copy.resume : this.copy.begin
     this.retry.hidden = !dead
     this.retry.disabled = !data.ready
     this.restart.hidden = dead || (!complete && !this.hasPlayed)
     this.restart.disabled = !data.ready
     this.restart.className = complete ? 'menu-primary' : 'menu-quiet'
-    this.restart.textContent = complete ? 'Play again' : 'Restart mission'
+    this.restart.textContent = complete ? 'Play again' : this.copy.restart
     const debrief = this.element('#mission-debrief')
     debrief.hidden = !complete
     if (complete) {
@@ -202,15 +234,14 @@ export class MissionMenu {
       const summary = `${time}|${state.kills}|${health}`
       if (debrief.dataset.summary !== summary) {
         debrief.dataset.summary = summary
+        const rows: [string, string][] = this.copy.recap?.(state) ?? [['Time', time], ['Kills', String(state.kills)], ['Health', `${health}%`]]
         debrief.innerHTML = `<dl class="mission-recap" aria-label="Mission recap">
-          <div><dt>Time</dt><dd>${time}</dd></div>
-          <div><dt>Kills</dt><dd>${state.kills}</dd></div>
-          <div><dt>Health</dt><dd>${health}%</dd></div>
+          ${rows.map(([label, value]) => `<div><dt>${label}</dt><dd>${value}</dd></div>`).join('')}
         </dl>`
       }
     }
     if (this.loadError) this.showError()
-    this.element('#mission-current-objective').textContent = missionObjective(state)
+    this.element('#mission-current-objective').textContent = this.copy.objective(state)
     if (data.enabled && ((justPaused && !dead) || complete) && this.page === 'home' && !this.card.contains(document.activeElement)) this.focusPrimary()
   }
 

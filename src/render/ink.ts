@@ -352,3 +352,32 @@ export function createRarityBeam(color: number, height = 7) {
   beam.add(column, ring)
   return beam
 }
+
+// ---- Battle royale storm wall -------------------------------------------------------------------
+// A violet wall of diagonal ink hatching that drifts slowly, fading upward, so the storm reads as
+// part of the drawing rather than a glowing effect. The mesh is a unit cylinder: callers set
+// scale.x/z to the radius each frame and update `radius` (hatch spacing stays in metres) and `time`.
+export const STORM_COLOR = 0x4a46c8
+export function createStormWall(height = 60) {
+  const material = new THREE.ShaderMaterial({
+    uniforms: { color: { value: new THREE.Color(STORM_COLOR) }, radius: { value: 1 }, time: { value: 0 }, height: { value: height } },
+    vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: `uniform vec3 color; uniform float radius; uniform float time; uniform float height; varying vec2 vUv;
+      void main() {
+        float around = vUv.x * 6.2831853 * radius;      // metres along the wall
+        float up = vUv.y * height;                      // metres above the ground
+        float hatch = fract((around + up) / 2.4 - time * 0.12);
+        float line = smoothstep(0.0, 0.08, hatch) * (1.0 - smoothstep(0.16, 0.24, hatch));
+        float fade = pow(1.0 - vUv.y, 1.4);
+        gl_FragColor = vec4(color, (0.16 + 0.34 * line) * fade);
+      }`,
+    transparent: true, depthWrite: false, side: THREE.DoubleSide,
+  })
+  const wall = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, height, 96, 1, true), material)
+  wall.name = 'Storm wall'
+  wall.userData.noCollision = true
+  wall.position.y = height / 2 - 2
+  wall.renderOrder = 11
+  wall.frustumCulled = false
+  return { wall, material }
+}

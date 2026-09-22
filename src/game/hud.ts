@@ -1,9 +1,9 @@
 import * as THREE from 'three'
-import { type MissionState, SIGNALS_COMPUTER_ID } from './mission'
+import { SIGNALS_COMPUTER_ID } from './mission'
 import type { MissionWorld, WeaponItem } from './types'
 import './game.css'
 import { IncomingFire } from './incoming-fire'
-import { MissionMenu } from './menu'
+import { MissionMenu, MISSION_COPY, type MenuCopy, type MenuState } from './menu'
 import type { PlayerDeathSequence } from './player-death'
 import type { EscapeCinematic } from './escape-cinematic'
 import { RARITY_INFO, weaponRules } from './loot'
@@ -44,16 +44,16 @@ export class MissionHUD {
   private threatLabel: HTMLElement
   reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches
 
-  constructor(world: MissionWorld, callbacks: { retry: () => void; restart: () => void; volume: (value: number) => void; mute: (value: boolean) => void }) {
+  constructor(world: MissionWorld, callbacks: { retry: () => void; restart: () => void; volume: (value: number) => void; mute: (value: boolean) => void }, copy: MenuCopy = MISSION_COPY) {
     document.body.dataset.mission = 'true'
     document.body.dataset.reducedMotion = String(this.reducedMotion)
-    document.title = 'Operation Safe Return — Stickman'
+    document.title = `${copy.title} — Stickman`
     const $ = <T extends HTMLElement = HTMLElement>(selector: string) => document.querySelector<T>(selector)!
     this.start = $<HTMLButtonElement>('#walk-start')
     this.start.textContent = 'Loading the compound…'; this.start.disabled = true
-    $('.walk-heading .walk-eyebrow').textContent = 'Operation Safe Return'
+    $('.walk-heading .walk-eyebrow').textContent = copy.title
     $('#world').setAttribute('aria-label', 'Operation Safe Return tactical mission. Mouse to look, WASD move, left click fire, right click toggle aim, F interact, R reload, M field map, Escape pause.')
-    this.menu = new MissionMenu(this.start, this.buildMap(world), this.reducedMotion, callbacks)
+    this.menu = new MissionMenu(this.start, this.buildMap(world), this.reducedMotion, callbacks, copy)
     this.mapDot = document.querySelector('#field-player')!
     this.root.id = 'mission-hud'
     this.root.innerHTML = `
@@ -208,7 +208,7 @@ export class MissionHUD {
     if (this.scopeLabel.textContent !== label) this.scopeLabel.textContent = label
   }
 
-  update(dt: number, state: MissionState, data: { playing: boolean; enabled: boolean; weapon: WeaponItem | null; reloading: boolean; position: THREE.Vector3; yaw: number; deaths: number; ready: boolean }) {
+  update(dt: number, state: MenuState, data: { playing: boolean; enabled: boolean; weapon: WeaponItem | null; reloading: boolean; position: THREE.Vector3; yaw: number; deaths: number; ready: boolean }) {
     this.root.hidden = !data.enabled || !data.playing
     const health = Math.max(0, Math.min(100, state.health))
     this.health.setAttribute('aria-valuenow', String(Math.ceil(health)))
