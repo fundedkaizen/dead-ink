@@ -39,6 +39,14 @@ body[data-reduced-motion="true"] .dead-ink-powerup.ending { animation: none; opa
 .dead-ink-perks { position: absolute; left: 24px; bottom: 96px; display: flex; gap: 6px; }
 .dead-ink-perks img { width: 38px; height: 38px; display: block; }
 
+/* The Brute's health: red, because it is the danger. */
+.dead-ink-boss { position: absolute; left: 50%; top: 22px; transform: translateX(-50%); width: min(460px, 70vw); display: grid; gap: 4px; justify-items: center;
+  font: 700 20px/1 var(--notes, "Chalkboard SE", "Comic Sans MS", cursive); color: #d4332a; letter-spacing: 2px;
+  text-shadow: 1px 1px 0 #fff, -1px 1px 0 #fff, 1px -1px 0 #fff, -1px -1px 0 #fff; }
+.dead-ink-boss[hidden] { display: none; }
+.dead-ink-boss-bar { width: 100%; height: 12px; border: 2px solid var(--ink); border-radius: 3px 5px 3px 4px; background: #ffffffd8; overflow: hidden; }
+.dead-ink-boss-bar > div { height: 100%; background: #d4332a; transition: width 0.15s; }
+
 /* The Nuke: a flash to the negative, fading back. */
 body[data-dead-ink-nuke="true"] #world { animation: dead-ink-nuke 0.7s ease-out; }
 @keyframes dead-ink-nuke { 0% { filter: invert(1) contrast(1.4); } 35% { filter: invert(1); } 100% { filter: none; } }

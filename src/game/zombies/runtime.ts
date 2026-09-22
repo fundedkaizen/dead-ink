@@ -19,16 +19,16 @@ import { HitMarkers } from '../shared/hitmarkers'
 import { DamageIndicator } from '../shared/damage-indicator'
 import { Hotbar } from '../shared/hotbar'
 import { seeded, weighted, type Random } from '../shared/random'
-import { ZombieDirector, type ZombieGait, type ZombieTarget } from './director'
+import { ZombieDirector, type Zombie, type ZombieGait, type ZombieTarget } from './director'
 import { NavGraph, geometryHash, type NavData } from './navgraph'
 import { pickSpawn } from './spawn'
 import { findWallSpots } from './placement'
 import { newGame, returnSpawns, stepRounds, type RoundState } from './rounds'
-import { MAX_ALIVE, PLAYER_HEALTH, POWERUPS, PRICES, STARTING_POINTS, ZOMBIE_DAMAGE_SCALE, movementMix, zombieHealth, type PowerupKind } from './rules'
+import { BOSS, MAX_ALIVE, PLAYER_HEALTH, POWERUPS, PRICES, STARTING_POINTS, ZOMBIE_DAMAGE_SCALE, isBossRound, movementMix, zombieHealth, type PowerupKind } from './rules'
 import { BOX_WEIGHTS, WALL_WEAPONS, ZOMBIE_SLOTS, freshWeapon, pointsForHit, rollBox, startingPistol, wallOffer, RESERVE_MAGAZINES } from './economy'
 import { MysteryBox, WallBuy } from './stations'
 import { ZombieHud } from './hud'
-import { MuzzleSparks, RiseMarks } from './effects'
+import { MuzzleSparks, RiseMarks, Shockwaves } from './effects'
 import { POWERUP_INFO, PowerupDrops, PowerupDropper } from './powerups'
 import { SEALED, ZoneGates, type ZoneGate } from './zones'
 import { MACHINE_PLACES, PACK, PERKS, PERK_EFFECT, PERK_LIMIT, PackAPunch, PackedLook, PerkBottle, PerkMachine, type PerkKind } from './perks'
@@ -86,6 +86,10 @@ export class ZombiesRuntime {
   readonly zombieHud: ZombieHud
   readonly riseMarks: RiseMarks
   readonly sparks: MuzzleSparks
+  readonly shockwaves: Shockwaves
+  /** The Brute, while it lives; and the seconds until it comes, on a boss round. */
+  brute: Zombie | null = null
+  private bruteTimer = -1
   readonly powerups: PowerupDrops
   private dropper: PowerupDropper
   /** Timed power-ups running now, and the seconds each has left. */
@@ -149,6 +153,7 @@ export class ZombiesRuntime {
     this.impacts = new MissionImpacts(scene, player.world)
     this.riseMarks = new RiseMarks(scene)
     this.sparks = new MuzzleSparks(scene)
+    this.shockwaves = new Shockwaves(scene)
     this.powerups = new PowerupDrops(scene)
     this.bottle = new PerkBottle(camera.perspective)
     this.dropper = new PowerupDropper(this.random)
@@ -180,23 +185,22 @@ export class ZombiesRuntime {
       // Every door open and unlocked, exactly as the navigation graph was baked, except the sealed exits.
       const doors: THREE.Group[] = []
       this.scene.traverse(object => { if (object.userData.kind === 'door') doors.push(object as THREE.Group) })
-      for (const door of doors) {
-        const sealed = SEALED.some(seal => seal.door === door.name)
-        door.userData.missionLocked = sealed
-        setDoorOpen(door, !sealed, true)
-      }
+      for (const door of doors) { door.userData.missionLocked = false; setDoorOpen(door, true, true) }
+      // Fingerprint the map as it was baked, every door open; then shut the sealed exits.
+      const hash = geometryHash(this.scene)
+      for (const door of doors) if (SEALED.some(seal => seal.door === door.name)) { door.userData.missionLocked = true; setDoorOpen(door, false, true) }
       this.player.world.refresh()
       const response = await fetch(`${import.meta.env?.BASE_URL ?? '/'}nav/compound.json`)
       if (!response.ok) throw new Error(`navigation data: HTTP ${response.status}`)
       const graph = NavGraph.fromData(await response.json() as NavData)
       if (this.disposed) return
-      const hash = geometryHash(this.scene)
       if (graph.geometry && graph.geometry !== hash) console.warn(`Dead Ink: navigation graph was baked for geometry ${graph.geometry}, map is ${hash}. Rebake with scripts/build-navgraph.ts.`)
       this.graph = graph
       this.director = new ZombieDirector({ scene: this.scene, world: this.player.world, doors: doors.filter(door => !door.userData.missionLocked), graph, emit: event => this.emit(event),
         damagePlayer: (_id, amount, source) => this.damage(amount, 'zombie', source),
         onHit: hit => { this.impactPoint = hit.point.clone(); this.blood.emitHit(hit); this.audio.confirmHit(hit) },
-        onRise: position => { this.riseMarks.emit(position); this.emit({ kind: 'zombie-rise', position, radius: 30 }) } })
+        onRise: position => { this.riseMarks.emit(position); this.emit({ kind: 'zombie-rise', position, radius: 30 }) },
+        onSlam: (position, radius) => { this.shockwaves.emit(position, radius); this.riseMarks.emit(position) } })
       await this.director.init(POOL_SIZE)
       if (this.disposed) return
       // Every zone but the first shut behind its gate, before anything is placed.
@@ -254,6 +258,7 @@ export class ZombiesRuntime {
     this.box?.close()
     this.powerups.clear(); this.timers = {}; this.earned = 0; this.heldWeapons = null
     this.perks.clear(); this.pendingPerk = null; this.reviveGrace = 0; this.applyPerks(); this.zombieHud.perks([])
+    this.brute = null; this.bruteTimer = -1
     if (this.pack && this.pack.state !== 'idle') this.pack.take()
     this.dropper = new PowerupDropper(this.random)
     this.weapons.restore({ slots: [startingPistol(), null], selected: 0, pickups: [], nextId: 1 })
@@ -274,7 +279,7 @@ export class ZombiesRuntime {
     this.player.movementLocked = false
     this.blood.restore(undefined)
     this.stepTime = 0; this.interactionTime = 0; this.hitFlash = 0; this.lastCaptionAt = -100; this.wheelAmount = 0
-    this.bulletTrails.clear(); this.impacts.clear(); this.riseMarks.clear(); this.sparks.clear(); this.powerups.clear(); this.hits.clear(); this.indicator.clear(); this.zombieHud.clear(); this.hud.reset()
+    this.bulletTrails.clear(); this.impacts.clear(); this.riseMarks.clear(); this.sparks.clear(); this.shockwaves.clear(); this.powerups.clear(); this.hits.clear(); this.indicator.clear(); this.zombieHud.clear(); this.hud.reset()
     this.startGame()
     this.invalidate()
   }
@@ -543,8 +548,18 @@ export class ZombiesRuntime {
     this.zombieHud.gain(points)
   }
 
-  /** A kill by the player: maybe a power-up drops where the zombie fell. */
-  private killed(position: THREE.Vector3) {
+  /** A kill by the player: the Brute pays and always leaves a Max Ammo; others may drop a power-up. */
+  private killed(position: THREE.Vector3, zombie?: Zombie) {
+    if (zombie && zombie === this.brute) {
+      this.brute = null
+      this.award(BOSS.points)
+      const at = position.clone(), floor = this.player.world.floor(at.clone().setY(at.y + 2.2), 0.1, 3)
+      if (Number.isFinite(floor)) at.y = floor
+      this.powerups.spawn('maxAmmo', at)
+      this.emit({ kind: 'powerup-drop', position: at.clone(), radius: 40 })
+      this.zombieHud.announce('The Brute is down', 3)
+      return
+    }
     const kind = this.dropper.onKill(this.earned)
     if (!kind) return
     // On the surface, even for one shot while still climbing out of the ground.
@@ -619,7 +634,7 @@ export class ZombiesRuntime {
       this.hitFlash = 0.15
       this.award(pointsForHit({ lethal: hit.lethal, zone: hit.reaction.zone }))
       this.hits.hit(hit.reaction.point, hit.dealt, hit.zombie.id, hit.reaction.zone === 'head', hit.lethal)
-      if (hit.lethal) { this.state.kills++; if (hit.reaction.zone === 'head') this.state.headshots++; this.killed(hit.zombie.position) }
+      if (hit.lethal) { this.state.kills++; if (hit.reaction.zone === 'head') this.state.headshots++; this.killed(hit.zombie.position, hit.zombie) }
     }
     const end = this.impactPoint ?? shot.origin.clone().addScaledVector(shot.direction, distance)
     const impact = !hit && surface ? () => {
@@ -641,7 +656,7 @@ export class ZombiesRuntime {
     this.hitFlash = 0.15
     this.award(pointsForHit({ lethal: hit.lethal, zone: hit.reaction.zone, knife: true }))
     this.hits.hit(hit.reaction.point, hit.dealt, hit.zombie.id, false, hit.lethal)
-    if (hit.lethal) { this.state.kills++; this.state.knifeKills++; this.killed(hit.zombie.position) }
+    if (hit.lethal) { this.state.kills++; this.state.knifeKills++; this.killed(hit.zombie.position, hit.zombie) }
     return true
   }
 
@@ -704,6 +719,21 @@ export class ZombiesRuntime {
     return !!director.spawn(spot, zombieHealth(this.rounds.round), this.gait(), Math.atan2(feet.x - spot.x, feet.z - spot.z), true)
   }
 
+  /** The Brute climbs out of the ground somewhere it can walk to you from, and roars. */
+  private spawnBrute() {
+    const director = this.director, graph = this.graph
+    if (!director || !graph) return
+    const spot = pickSpawn(graph, this.player.world, { near: 16, far: 40, eyes: [] }, this.random)
+    const feet = this.player.body.position
+    const brute = spot && director.spawn(spot, BOSS.health(this.rounds.round), 'run', Math.atan2(feet.x - spot.x, feet.z - spot.z), true, true)
+    // Nowhere to stand, or every body in use: try again in a moment.
+    if (!brute) { this.bruteTimer = 1; return }
+    this.brute = brute
+    this.riseMarks.emit(brute.position); this.riseMarks.emit(brute.position.clone().add(new THREE.Vector3(0.6, 0, 0.4)))
+    this.zombieHud.announce('The Brute', 3)
+    this.emit({ kind: 'boss-roar', position: brute.position.clone().setY(brute.position.y + 3), radius: 250 })
+  }
+
   /**
    * Zombies that cannot reach you, or stopped getting closer, come back into play near you, out of
    * sight at both ends: one you are looking at stays put until you look away.
@@ -760,7 +790,11 @@ export class ZombiesRuntime {
       // Rounds: announce, feed zombies in, and hand back any that found nowhere to stand.
       const events = stepRounds(this.rounds, dt, this.director.aliveCount, 1)
       this.state.round = this.rounds.round
-      if (events.roundStarted) { this.zombieHud.announce(`Round ${events.roundStarted}`); this.dropper.newRound(); this.emit({ kind: 'round-start' }) }
+      if (events.roundStarted) {
+        this.zombieHud.announce(`Round ${events.roundStarted}`); this.dropper.newRound(); this.emit({ kind: 'round-start' })
+        if (isBossRound(events.roundStarted)) this.bruteTimer = BOSS.delay
+      }
+      if (this.bruteTimer > 0 && (this.bruteTimer -= dt) <= 0) this.spawnBrute()
       let failed = 0
       for (let i = 0; i < events.spawn; i++) if (!this.spawnZombie()) failed++
       returnSpawns(this.rounds, failed)
@@ -782,7 +816,7 @@ export class ZombiesRuntime {
       if (packed === 'expired') this.hud.notify('The Pack-a-Punch kept your gun.', 3, true)
       this.knifeCooldown = Math.max(0, this.knifeCooldown - dt)
       if (this.box?.update(dt, Object.keys(BOX_WEIGHTS) as WeaponName[])) this.hud.notify('The box closed.', 2)
-      this.blood.update(dt); this.impacts.update(dt); this.riseMarks.update(dt); this.sparks.update(dt)
+      this.blood.update(dt); this.impacts.update(dt); this.riseMarks.update(dt); this.sparks.update(dt); this.shockwaves.update(dt)
       this.zones?.update(dt)
       this.tickPowerups(dt)
       const speed = Math.hypot(body.velocity.x, body.velocity.z)
@@ -829,6 +863,7 @@ export class ZombiesRuntime {
     this.indicator.update(running, this.camera.perspective.position, yaw)
     this.hotbar.update(this.weapons.slots, this.weapons.selectedSlot)
     this.zombieHud.update(running, this.state.round, this.state.points)
+    this.zombieHud.boss(this.brute && this.brute.state === 'chase' ? this.brute.health / this.brute.maxHealth : null)
     // The heart shows health as a share of your maximum, which Thick Ink raises.
     this.hud.update(dt, { ...this.state, health: this.state.health / this.maxHealth() * 100 }, { playing: this.player.playing, enabled: this.player.enabled && !this.player.immersive,
       weapon: this.weapons.current, reloading: this.weapons.reloading, position: this.player.body.position,
@@ -847,7 +882,7 @@ export class ZombiesRuntime {
     this.pack?.dispose(); this.bottle.dispose(); this.packedLook.dispose()
     this.director?.dispose()
     this.hits.dispose(); this.indicator.dispose(); this.hotbar.dispose(); this.zombieHud.dispose()
-    this.bulletTrails.dispose(); this.weapons.dispose(); this.blood.dispose(); this.impacts.dispose(); this.riseMarks.dispose(); this.sparks.dispose(); this.powerups.dispose()
+    this.bulletTrails.dispose(); this.weapons.dispose(); this.blood.dispose(); this.impacts.dispose(); this.riseMarks.dispose(); this.sparks.dispose(); this.shockwaves.dispose(); this.powerups.dispose()
     this.audio.dispose(); this.hud.dispose()
     this.player.movementLocked = false; this.player.onPlayingChange = () => {}; this.player.lookSensitivity = () => 1
     this.player.actions.extraTargets = () => []; this.player.actions.onAction = () => {}

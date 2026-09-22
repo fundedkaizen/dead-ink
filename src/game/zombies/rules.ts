@@ -109,3 +109,17 @@ export const PLAYER_HEALTH = { base: 100, thickInk: 250, zombieHit: 50, regenDel
  * about two AK body shots or one headshot, as in Call of Duty. Tuned by play, not taken from a source.
  */
 export const ZOMBIE_DAMAGE_SCALE = 3.5
+
+/**
+ * The Brute, Dead Ink's boss: every fifth round it climbs out of the ground partway into the round,
+ * like Call of Duty's Brutus or Panzer Soldat. Our own design, tuned by play: slow and relentless, a
+ * telegraphed swing that takes most of your health, and a ground slam that hits everything near it.
+ * The round is not over until it is dead; killing it pays and drops a Max Ammo.
+ */
+export const BOSS = {
+  every: 5, delay: 8, points: 500, scale: 1.9, speed: 2.4,
+  health: (round: number) => 2000 + 600 * round,
+  attack: { range: 2.3, windup: 0.6, reach: 2.9, swing: 1.0, recover: 0.8, damage: 80 },
+  slam: { every: 10, windup: 1.0, radius: 6.5, damage: 70 },
+} as const
+export const isBossRound = (round: number) => round > 0 && round % BOSS.every === 0

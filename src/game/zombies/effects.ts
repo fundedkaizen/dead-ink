@@ -246,3 +246,50 @@ export class MuzzleSparks {
   clear() { this.sparks = []; this.mesh.count = 0 }
   dispose() { this.clear(); this.mesh.removeFromParent(); this.mesh.geometry.dispose(); (this.mesh.material as THREE.Material).dispose(); this.mesh.dispose() }
 }
+
+// ---------------------------------------------------------------- the Brute's slam
+
+type Ring = { position: THREE.Vector3; radius: number; age: number }
+const RING_LIFE = 0.7
+
+/** An ink ring racing out over the ground from where the Brute's fists came down. */
+export class Shockwaves {
+  readonly mesh = new THREE.InstancedMesh(new THREE.RingGeometry(0.88, 1, 48).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 }), 6)
+  private rings: Ring[] = []
+  private matrix = new THREE.Matrix4()
+  private quaternion = new THREE.Quaternion()
+  private scale = new THREE.Vector3()
+  private color = new THREE.Color()
+
+  constructor(scene: THREE.Scene) {
+    this.mesh.name = 'Brute shockwaves'
+    this.mesh.userData.noCollision = true
+    this.mesh.frustumCulled = false
+    this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
+    this.mesh.setColorAt(0, INK)
+    this.mesh.count = 0
+    scene.add(this.mesh)
+  }
+
+  emit(position: THREE.Vector3, radius: number) {
+    this.rings.push({ position: position.clone().setY(position.y + 0.03), radius, age: 0 })
+    if (this.rings.length > 6) this.rings.shift()
+  }
+
+  update(dt: number) {
+    this.rings = this.rings.filter(ring => (ring.age += Math.min(dt, 0.05)) < RING_LIFE)
+    this.rings.forEach((ring, i) => {
+      const t = ring.age / RING_LIFE
+      this.scale.set(1, 1, 1).multiplyScalar(ring.radius * (0.15 + 0.85 * Math.sqrt(t)))
+      this.mesh.setMatrixAt(i, this.matrix.compose(ring.position, this.quaternion, this.scale))
+      this.mesh.setColorAt(i, this.color.copy(INK).lerp(PAPER, t * t))
+    })
+    this.mesh.count = this.rings.length
+    this.mesh.instanceMatrix.needsUpdate = true
+    if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true
+  }
+
+  clear() { this.rings = []; this.mesh.count = 0 }
+  dispose() { this.clear(); this.mesh.removeFromParent(); this.mesh.geometry.dispose(); (this.mesh.material as THREE.Material).dispose(); this.mesh.dispose() }
+}

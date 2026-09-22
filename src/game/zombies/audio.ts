@@ -30,7 +30,7 @@ export class DeadInkAudio extends MissionAudio {
   play(event: SoundEvent) {
     const context = this.context
     const handled = ['zombie-groan', 'zombie-scream', 'zombie-snarl', 'zombie-swipe', 'zombie-rise', 'powerup-drop', 'powerup-grab', 'nuke', 'round-start', 'round-end',
-      'perk-drink', 'perk-jingle', 'pack-work', 'pack-ready']
+      'perk-drink', 'perk-jingle', 'pack-work', 'pack-ready', 'boss-roar', 'boss-growl', 'boss-slam']
     if (!handled.includes(event.kind)) { super.play(FOOTSTEP_VOLUME[event.kind] ? { ...event, volume: FOOTSTEP_VOLUME[event.kind] } : event); return }
     if (!context || !this.master || !this.active || this.muted || this.volume <= 0 || this.disposed || this.dying) return
     if (event.position && event.position.distanceTo(this.listenerPosition) > (event.radius ?? 60)) return
@@ -52,6 +52,10 @@ export class DeadInkAudio extends MissionAudio {
       case 'perk-jingle': { const tune = JINGLES[event.voice ?? '']; if (tune) this.melody(event, tune.notes, tune.step, 0.09); break }
       case 'pack-work': this.pound(event); break
       case 'pack-ready': this.arpeggio(event, [523.3, 659.3, 784, 1046.5, 1318.5], 0.06, 'triangle', 0.18, 0.9); break
+      // The Brute: the same voice as the others, an octave and more down, and much louder.
+      case 'boss-roar': this.voice(event, { pitch: 40 + r() * 8, glide: 0.62, length: 2.3, rasp: 0.7, drive: 14, vowel: VOWELS.aa, level: 1 }); break
+      case 'boss-growl': this.voice(event, { pitch: 36 + r() * 10, glide: 0.8, length: 1.4, rasp: 0.5, drive: 9, vowel: VOWELS.oo, level: 0.8 }); break
+      case 'boss-slam': this.boom(event); this.dirt(event); break
     }
   }
 

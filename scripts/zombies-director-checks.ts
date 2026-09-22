@@ -7,7 +7,7 @@ import { createCompound } from '../src/world/compound'
 import { createMissionWorld, prepareCompound } from '../src/game/world'
 import { setDoorOpen } from '../src/world/doors'
 import { ATTACK, CORPSE, RISE, ZombieDirector, type ZombieTarget } from '../src/game/zombies/director'
-import { PLAYER_HEALTH, ZOMBIE_DAMAGE_SCALE } from '../src/game/zombies/rules'
+import { BOSS, PLAYER_HEALTH, ZOMBIE_DAMAGE_SCALE } from '../src/game/zombies/rules'
 import { NavGraph, type NavData } from '../src/game/zombies/navgraph'
 import { pickSpawn } from '../src/game/zombies/spawn'
 import { seeded } from '../src/game/shared/random'
@@ -288,6 +288,46 @@ const run = (seconds: number, targets: ZombieTarget[], fps = 60) => {
   assert(Math.abs(climber.position.y - below) < 0.05 && climber.position.y < 1, `its body lies on the ground (${climber.position.y.toFixed(2)} m)`)
   director.clear()
   console.log(`  climbing: tower ${times[0]} s, water tower ${times[1]} s, warehouse ${times[2]} s, stores ${times[3]} s, back down ${t.toFixed(1)} s`)
+}
+
+// ---- 5f. The Brute -------------------------------------------------------------------------------
+{
+  swipes.length = 0
+  const yard = graph.point(graph.nearest(v(-30, 0, -25), 4))
+  const brute = director.spawn(yard.clone(), BOSS.health(5), 'run', 0, false, true)!
+  run(0.1, [])
+  assert.equal(brute.actor.root.scale.x, BOSS.scale, 'the Brute is twice a man\'s size')
+  assert(brute.actor.root.userData.spikes?.visible, 'and wears its crown of spikes')
+  // Its head is up where it is, and a shot there is a headshot.
+  const head = brute.actor.rig.bones.head.getWorldPosition(v())
+  assert(head.y > yard.y + 2.4, `its head is high (${(head.y - yard.y).toFixed(2)} m)`)
+  const from = head.clone().add(v(0, 0, 8))
+  const shot: Shot = { origin: from, direction: head.clone().add(v(0, 0.1, 0)).sub(from).normalize(), range: 60, damage: 30, weapon: 'ak' }
+  const hit = director.hit(shot, 60, ZOMBIE_DAMAGE_SCALE, true)!
+  assert(hit && hit.reaction.zone === 'head', `a shot at its head is a headshot (${hit?.reaction.zone})`)
+  assert(!hit.lethal && brute.health > 0, 'Insta-Kill does not one-shot the Brute')
+  // Its swipe takes most of your health.
+  const player: ZombieTarget = { id: 'p1', feet: yard.clone().add(v(0, 0, 1.8)), alive: true }
+  brute.slamTimer = 99
+  run(3, [player])
+  assert(swipes.length >= 1 && swipes.every(s => s.amount === BOSS.attack.damage), `the Brute swipes for ${BOSS.attack.damage} (${swipes.map(s => s.amount)})`)
+  // The slam: hurts close by, less further out, nothing beyond its reach.
+  swipes.length = 0
+  const near: ZombieTarget = { id: 'near', feet: yard.clone().add(v(2.5, 0, 0)), alive: true }
+  const far: ZombieTarget = { id: 'far', feet: yard.clone().add(v(12, 0, 0)), alive: true }
+  brute.slamTimer = 0; brute.swing = 0; brute.recover = 0
+  run(BOSS.slam.windup + 0.3, [near, far])
+  const slam = swipes.find(s => s.id === 'near')
+  assert(slam && slam.amount > 0 && slam.amount < BOSS.slam.damage, `a slam 2.5 m away hurts (${slam?.amount})`)
+  assert(!swipes.some(s => s.id === 'far'), 'a slam does not reach 12 m')
+  // The Nuke leaves it standing.
+  assert.equal(director.killAll(), 0, 'a Nuke does not kill the Brute')
+  assert.equal(brute.state, 'chase')
+  director.clear()
+  // Its body, reused for an ordinary zombie, is ordinary again.
+  const reused = director.spawn(yard.clone(), 150, 'walk', 0)!
+  assert(reused.actor.root.scale.x === 1 && !reused.actor.root.userData.spikes?.visible && !reused.boss, 'a reused Brute body is an ordinary zombie again')
+  director.clear()
 }
 
 // ---- 6. Cost of a full crowd -----------------------------------------------------------------

@@ -83,7 +83,8 @@ export function geometryHash(scene: THREE.Object3D) {
   scene.updateWorldMatrix(true, true)
   const box = new THREE.Box3()
   scene.traverse(object => {
-    for (let p: THREE.Object3D | null = object; p; p = p.parent) if (p.userData.noCollision) return
+    // Not the map: anything without collision, and whatever hangs off a camera (the player's gun).
+    for (let p: THREE.Object3D | null = object; p; p = p.parent) if (p.userData.noCollision || (p as THREE.Camera).isCamera) return
     if (!(object instanceof THREE.Mesh) || object.material instanceof THREE.ShaderMaterial) return
     box.setFromObject(object)
     add(box.min.x); add(box.min.y); add(box.min.z); add(box.max.x); add(box.max.y); add(box.max.z)

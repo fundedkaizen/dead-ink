@@ -32,6 +32,9 @@ export class ZombieHud {
   private powerupsEl = document.createElement('div')
   private powerupCells = new Map<PowerupKind, { cell: HTMLElement; time: HTMLElement }>()
   private perksEl = document.createElement('div')
+  private bossEl = document.createElement('div')
+  private bossFill = document.createElement('div')
+  private shownBoss = -1
   private shownPerks = ''
   private floaters: Floater[] = []
   private flashTimer = 0
@@ -50,7 +53,12 @@ export class ZombieHud {
     this.powerupsEl.className = 'dead-ink-powerups'
     this.perksEl.className = 'dead-ink-perks'
     this.perksEl.setAttribute('aria-label', 'Perks')
-    this.root.append(this.roundEl, this.pointsEl, this.banner, this.powerupsEl, this.perksEl)
+    this.bossEl.className = 'dead-ink-boss'
+    this.bossEl.setAttribute('role', 'meter')
+    this.bossEl.innerHTML = '<span>THE BRUTE</span><div class="dead-ink-boss-bar"></div>'
+    this.bossEl.querySelector('.dead-ink-boss-bar')!.append(this.bossFill)
+    this.bossEl.hidden = true
+    this.root.append(this.roundEl, this.pointsEl, this.banner, this.powerupsEl, this.perksEl, this.bossEl)
     parent.append(this.root)
   }
 
@@ -98,6 +106,17 @@ export class ZombieHud {
       image.alt = image.title = PERKS[kind].name
       return image
     }))
+  }
+
+  /** The Brute's health across the top of the screen while it lives; null hides it. */
+  boss(fraction: number | null) {
+    const shown = fraction === null ? -1 : Math.round(fraction * 200)
+    if (shown === this.shownBoss) return
+    this.shownBoss = shown
+    this.bossEl.hidden = fraction === null
+    if (fraction === null) return
+    this.bossFill.style.width = `${Math.max(0, Math.min(1, fraction)) * 100}%`
+    this.bossEl.setAttribute('aria-label', `The Brute, ${Math.round(fraction * 100)}% health`)
   }
 
   /** The Nuke's blast: the page flashes to a negative for a moment. */
@@ -161,6 +180,7 @@ export class ZombieHud {
     this.bannerTime = 0
     this.powerups([])
     this.perks([])
+    this.boss(null)
     this.flashTimer = 0
     delete document.body.dataset.deadInkNuke
     this.shownRound = -1

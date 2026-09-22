@@ -61,7 +61,8 @@ const fill = new THREE.MeshBasicMaterial({ color: penPalette.character, toneMapp
 
 // Dual-quaternion skinning (Blender "Preserve Volume"): glTF only carries weights and Three.js skins with linear blending,
 // which collapses the elbow/shoulder at 90 deg and candy-wraps the upper arm on twist. Rewrites the three skinning chunks.
-// ponytail: assumes rigid bones (no scale); add column normalisation in dqRotOf if a bone ever scales.
+// Bones are rigid; a uniform scale on the whole character (Dead Ink's Brute) is carried by dqScale: the
+// quaternion takes only the rotation, so bind-space positions are scaled before it is applied.
 /** Per-bone axial stretch (pose length factors): bind-space bone axis and origin, origin.w = current stretch. */
 const DQ_MAX_BONES = 32
 export const dqUniforms = {
@@ -97,6 +98,7 @@ const DQ_BLEND = /* glsl */ `
     dqAcc(boneMatX, skinWeight.x, dqRef, dqR, dqD); dqAcc(boneMatY, skinWeight.y, dqRef, dqR, dqD);
     dqAcc(boneMatZ, skinWeight.z, dqRef, dqR, dqD); dqAcc(boneMatW, skinWeight.w, dqRef, dqR, dqD);
     float dqLen = length(dqR); dqR /= dqLen; dqD /= dqLen;
+    float dqScale = length(boneMatX[0].xyz);
   #endif
 `
 const DQ_NORMAL = /* glsl */ `
@@ -106,7 +108,7 @@ const DQ_NORMAL = /* glsl */ `
 `
 const DQ_VERTEX = /* glsl */ `
   #ifdef USE_SKINNING
-    vec3 dqP = dqRot(dqR, dqStretch((bindMatrix * vec4(transformed, 1.0)).xyz)) + 2.0 * (dqR.w * dqD.xyz - dqD.w * dqR.xyz + cross(dqR.xyz, dqD.xyz));
+    vec3 dqP = dqRot(dqR, dqScale * dqStretch((bindMatrix * vec4(transformed, 1.0)).xyz)) + 2.0 * (dqR.w * dqD.xyz - dqD.w * dqR.xyz + cross(dqR.xyz, dqD.xyz));
     transformed = (bindMatrixInverse * vec4(dqP, 1.0)).xyz;
   #endif
 `
