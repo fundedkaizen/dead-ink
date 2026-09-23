@@ -6,7 +6,9 @@ import { CollisionWorld } from '../src/player/collision'
 import { createCompound } from '../src/world/compound'
 import { createMissionWorld, prepareCompound } from '../src/game/world'
 import { setDoorOpen } from '../src/world/doors'
-import { ATTACK, CORPSE, RISE, ZombieDirector, type ZombieTarget } from '../src/game/zombies/director'
+import { ATTACK, CORPSE, CRAWL, RISE, ZombieDirector, type ZombieTarget } from '../src/game/zombies/director'
+import { GAS, blotShare } from '../src/game/zombies/gas'
+import { GORE } from '../src/game/zombies/gore'
 import { BOSS, PLAYER_HEALTH, ZOMBIE_DAMAGE_SCALE } from '../src/game/zombies/rules'
 import { NavGraph, type NavData } from '../src/game/zombies/navgraph'
 import { pickSpawn } from '../src/game/zombies/spawn'
@@ -440,6 +442,147 @@ const run = (seconds: number, targets: ZombieTarget[], fps = 60) => {
   director.clear()
 }
 
+// ---- 5j. Gore: crawlers, the Blot and its gas, heads, arms, blown-apart bodies, clean reuse ----------
+{
+  const yard = graph.point(graph.nearest(v(-30, 0, -25), 4))
+  const headVolume = (z: ReturnType<typeof director.spawn>) => z!.actor.hitVolumes.volumes().find(h => h.zone === 'head')!
+  const always = () => 0
+  // A blast that does not kill takes the legs: it falls onto its front and crawls.
+  director.random = always
+  const z = director.spawn(yard.clone().add(v(1.5, 0, 0)), 5000, 'walk', 0)!
+  run(0.3, [])
+  const standingHead = headVolume(z).a.y - z.position.y
+  director.blast(yard.clone().setY(yard.y + 0.3), 5, 300)
+  director.random = Math.random
+  assert(z.crawler && z.state === 'chase', 'a blast that does not kill can make a crawler')
+  assert(z.actor.rig.bones['shin.L'].getWorldScale(v()).x < 0.01 && z.actor.rig.bones['shin.R'].getWorldScale(v()).x < 0.01, 'its legs are gone')
+  assert(director.gore.counts.pieces >= 2, `its legs fly off as pieces (${director.gore.counts.pieces})`)
+  run(1, [])
+  const crawlHead = headVolume(z).a.y - z.position.y
+  assert(crawlHead < 0.75 && crawlHead < standingHead - 0.7, `a crawler is low: head ${crawlHead.toFixed(2)} m up, was ${standingHead.toFixed(2)} m`)
+  const top = z.actor.rig.bones.chest.getWorldPosition(v()).y - z.position.y
+  assert(top < 0.5, `its chest is near the ground (${top.toFixed(2)} m)`)
+  // A shot at where its head now is: a headshot.
+  const head = headVolume(z)
+  const aimAt = head.a.clone().add(head.b).multiplyScalar(0.5)
+  const from = aimAt.clone().add(v(Math.sin(z.yaw) * 6, 0.8, Math.cos(z.yaw) * 6))
+  const headshot = director.hit({ origin: from, direction: aimAt.clone().sub(from).normalize(), range: 60, damage: 30, weapon: 'ak' }, 60, ZOMBIE_DAMAGE_SCALE)
+  assert(headshot && headshot.reaction.zone === 'head', `a shot at a crawler's low head is a headshot (${headshot?.reaction.zone})`)
+  // The old head height is empty now.
+  const high = z.position.clone().setY(z.position.y + standingHead)
+  const over = director.hit({ origin: high.clone().add(v(6, 0, 0)), direction: v(-1, 0, 0), range: 60, damage: 30, weapon: 'ak' }, 60, ZOMBIE_DAMAGE_SCALE)
+  assert(!over || over.zombie !== z, 'a shot where its head used to be misses it')
+  director.clear()
+
+  // A crawler still reaches you, slowly, and can still swipe.
+  const player: ZombieTarget = { id: 'p1', feet: v(-23, 0, -29), alive: true }
+  player.feet.y = world.floor(player.feet.clone().setY(0.5), 1, 1.5, 0.28)
+  const crawler = director.spawn(v(-34, 0, -29), 5000, 'sprint', 0)!
+  director.makeCrawler(crawler, v(0, 0, -1))
+  const start = Math.hypot(crawler.position.x - player.feet.x, crawler.position.z - player.feet.z)
+  let t = 0
+  const gap = () => Math.hypot(crawler.position.x - player.feet.x, crawler.position.z - player.feet.z)
+  const heads: number[] = []
+  while (t < 25 && gap() > CRAWL.attack.range) {
+    run(0.25, [player]); t += 0.25
+    if (t > CRAWL.fall + 0.2) heads.push(headVolume(crawler).a.y - crawler.position.y)
+  }
+  assert(gap() <= CRAWL.attack.range + 0.1, `a crawler reaches the player (${gap().toFixed(1)} m left after ${t} s)`)
+  const pace = (start - gap()) / Math.max(0.1, t - CRAWL.fall)
+  assert(pace > 1 && pace <= CRAWL.speed + 0.05, `it crawls at ${pace.toFixed(2)} m/s`)
+  assert(Math.max(...heads) < 0.8, `its head stays low all the way (${Math.max(...heads).toFixed(2)} m)`)
+  swipes.length = 0
+  run(3, [player])
+  assert(swipes.length >= 1 && swipes.every(s => s.amount === PLAYER_HEALTH.zombieHit), `a crawler still swipes (${swipes.length})`)
+  director.clear()
+
+  // Up onto the warehouse slab: a crawler hauls itself over the ledge (or, if it cannot, asks to be moved).
+  {
+    const inside: ZombieTarget = { id: 'p1', feet: graph.point(graph.nearest(v(25.5, 0.7, -6))), alive: true }
+    const c = director.spawn(graph.point(graph.nearest(v(25.5, 0, 7), 6)), 5000, 'run', 0)!
+    director.makeCrawler(c, v(0, 0, 1))
+    let s = 0, climbed = false
+    const close = () => Math.hypot(c.position.x - inside.feet.x, c.position.z - inside.feet.z) <= CRAWL.attack.range + 0.3 && Math.abs(c.position.y - inside.feet.y) < 1.3
+    while (s < 45 && !close() && !c.stranded) { run(0.25, [inside]); s += 0.25; climbed ||= !!c.climb }
+    assert(close() || c.stranded, `a crawler gets up onto the warehouse slab or asks to be moved (${s} s, stranded ${c.stranded})`)
+    console.log(`  crawler onto the warehouse slab: ${close() ? `arrived in ${s} s${climbed ? ', climbing the ledge' : ''}` : 'stranded, to be relocated'}`)
+    director.clear()
+  }
+
+  // The Blot: a swollen belly; its death bursts into gas that hurts only players, and thins away.
+  const blot = director.spawn(yard.clone(), 400, 'walk', 0, false, false, true)!
+  assert(blot.blot && blot.actor.root.userData.bloat?.visible, 'a Blot wears its swollen belly')
+  run(1.5, [])
+  assert(director.gore.counts.drops + director.gore.counts.splats > 0, 'and drips ink')
+  const chest = blot.actor.rig.bones.chest.getWorldPosition(v())
+  const eye = chest.clone().add(v(0, 0, 6))
+  director.hit({ origin: eye, direction: chest.clone().sub(eye).normalize(), range: 60, damage: 500, weapon: 'ak' }, 60, ZOMBIE_DAMAGE_SCALE)
+  assert(blot.state === 'dead', 'the Blot dies')
+  assert.equal(director.gas.count, 1, 'its death bursts into a gas cloud')
+  assert(!blot.actor.root.userData.bloat?.visible, 'its belly is gone')
+  run(0.5, [])
+  const centre = blot.position.clone().setY(blot.position.y + 1.2)
+  assert(director.gas.exposure(centre) > 0.99, `exposure is 1 in the middle (${director.gas.exposure(centre).toFixed(2)})`)
+  assert.equal(director.gas.exposure(centre.clone().add(v(GAS.radius + 1.5, 0, 0))), 0, 'and 0 outside it')
+  assert.equal(director.gas.exposure(centre.clone().setY(centre.y + 6)), 0, 'and 0 high above it')
+  const bystander = director.spawn(yard.clone().add(v(0.8, 0, 0.8)), 400, 'walk', 0)!
+  run(2, [])
+  assert.equal(bystander.health, 400, 'zombies are not hurt by the gas')
+  run(GAS.seconds, [])
+  assert.equal(director.gas.exposure(centre), 0, 'the cloud thins away')
+  assert.equal(director.gas.count, 0)
+  director.clear()
+  assert(blotShare(7) === 0 && Math.abs(blotShare(8) - 0.05) < 1e-9 && Math.abs(blotShare(20) - 0.12) < 1e-9 && blotShare(40) === 0.12,
+    'Blots appear from round 8: 5%, rising to 12% by round 20')
+
+  // A killing headshot pops the head; a heavy hit on an arm tears it off; a close blast blows a body apart.
+  const victim = director.spawn(yard.clone(), 150, 'walk', 0)!
+  run(0.2, [])
+  sounds.length = 0
+  const top2 = victim.actor.rig.bones.head.getWorldPosition(v()).add(v(0, 0.2, 0))
+  const eye2 = top2.clone().add(v(0, 0, 6))
+  const pop = director.hit({ origin: eye2, direction: top2.clone().sub(eye2).normalize(), range: 60, damage: 500, weapon: 'ak' }, 60, ZOMBIE_DAMAGE_SCALE)!
+  assert(pop.lethal && pop.reaction.zone === 'head', 'a killing headshot')
+  assert(victim.lost.head && victim.actor.rig.bones.head.scale.x < 0.01, 'pops the head off')
+  assert(sounds.some(s => s.kind === 'headshot-pop'), 'with its wet pop')
+  const armed = director.spawn(yard.clone().add(v(3, 0, 0)), 5000, 'walk', 0)!
+  run(0.2, [])
+  director.random = always
+  const elbow = armed.actor.rig.bones['forearm.L'].getWorldPosition(v())
+  const side = elbow.clone().add(v(0, 0.05, 6))
+  const armHit = director.hit({ origin: side, direction: elbow.clone().sub(side).normalize(), range: 60, damage: 20, weapon: 'sniper' }, 60, ZOMBIE_DAMAGE_SCALE)
+  assert(armHit?.reaction.zone === 'arm', `a sniper round hits the arm (${armHit?.reaction.zone})`)
+  assert(armed.lost.L || armed.lost.R, 'and tears it off')
+  const gibbed = director.spawn(yard.clone().add(v(-2, 0, 0)), 150, 'walk', 0)!
+  run(0.2, [])
+  director.blast(gibbed.position.clone().add(v(0.5, 0.3, 0)), 5, 1000)
+  director.random = Math.random
+  assert(gibbed.gibbed && !gibbed.actor.root.visible, 'a close blast can blow a body apart')
+  run(0.5, [])
+  assert(director.gore.counts.chunks > 0 && director.gore.counts.splats > 0, 'into ink chunks and splats')
+  // Everything lies there a while, then is gone.
+  run(CORPSE.lie + CORPSE.sink + GORE.splatLife, [])
+  const left = director.gore.counts
+  assert(left.pieces + left.chunks + left.drops + left.splats + left.bursts === 0, `the gore clears away (${JSON.stringify(left)})`)
+  director.clear()
+
+  // Reused from the pool, every body is whole again: head, arms, legs, no belly unless it is a Blot.
+  const everyone: ReturnType<typeof director.spawn>[] = []
+  for (let i = 0; i < director.capacity; i++) everyone.push(director.spawn(yard.clone().add(v((i % 6) * 1.2 - 3, 0, Math.floor(i / 6) * 1.2 - 2)), 150, 'walk', 0))
+  run(0.1, [])
+  for (const zombie of everyone.filter(Boolean)) {
+    const bones = zombie!.actor.rig.bones
+    assert(!zombie!.crawler && !zombie!.gibbed && !zombie!.lost.head && !zombie!.lost.L && !zombie!.lost.R && !zombie!.blot, `${zombie!.id} is whole`)
+    for (const name of ['head', 'upper_arm.L', 'upper_arm.R', 'thigh.L', 'thigh.R', 'shin.L', 'shin.R'] as const) assert.equal(bones[name].scale.x, 1, `${zombie!.id}: ${name} is back`)
+    assert(zombie!.actor.root.visible && !zombie!.actor.root.userData.bloat?.visible, `${zombie!.id} is visible and not bloated`)
+    assert(Math.abs(zombie!.actor.root.rotation.x) < 1e-6, `${zombie!.id} stands upright`)
+    assert(headVolume(zombie).a.y - zombie!.position.y > 1.2, `${zombie!.id} has its head up where it belongs`)
+  }
+  assert(everyone.filter(Boolean).length >= 20, 'the pool revived them')
+  director.clear()
+  console.log('  gore: crawlers, the Blot, gas, head pops, torn arms, gibs and clean reuse checked')
+}
+
 // ---- 6. Cost of a full crowd -----------------------------------------------------------------
 {
   const player: ZombieTarget = { id: 'p1', feet: v(-23, 0, -29), alive: true }
@@ -451,7 +594,14 @@ const run = (seconds: number, targets: ZombieTarget[], fps = 60) => {
   const frames = 180, t0 = performance.now()
   run(frames / 60, [player])
   const ms = (performance.now() - t0) / frames
-  console.log(`zombies director checks passed: pool of 24 loaded in ${loadSeconds.toFixed(1)} s; ${spawned} chasing zombies cost ${ms.toFixed(2)} ms per frame in Node`)
+  // A third of them crawling (each one's arms solved every frame) and a Blot dripping.
+  const living = director.zombies.filter(z => z.state === 'chase')
+  living.forEach((z, i) => { if (i % 3 === 0) director.makeCrawler(z, v(0, 0, 1)) })
+  run(1, [player])
+  const t1 = performance.now()
+  run(frames / 60, [player])
+  const crawlMs = (performance.now() - t1) / frames
+  console.log(`zombies director checks passed: pool of 24 loaded in ${loadSeconds.toFixed(1)} s; ${spawned} chasing zombies cost ${ms.toFixed(2)} ms per frame in Node (${crawlMs.toFixed(2)} ms with ${Math.ceil(living.length / 3)} of them crawling)`)
 }
 director.dispose()
 world.dispose()

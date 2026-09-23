@@ -10,6 +10,8 @@ import type { EmitSound, Shot } from '../types'
 import { zombieEyeMaterial } from '../../render/ink'
 import type { NavGraph } from './navgraph'
 import { BOSS, PLAYER_HEALTH } from './rules'
+import { InkGore, restoreParts, setPartLost } from './gore'
+import { BLOT, GasClouds, bloatCentre, bloatDripPoint, setBloat } from './gas'
 
 /**
  * Dead Ink's zombies. They reuse the game's stickman (rig, walk and run animations, death falls,
@@ -49,6 +51,27 @@ export const CLIMB_SPEED = { up: 3.4, down: 4.5, across: 3 } as const
  * moving zombies that cannot path to you back into play near you.
  */
 export const STRANDED = { seconds: 7, distance: 75, noProgressSeconds: 6, progressMetres: 1.5, near: 18 } as const
+/**
+ * A crawler: legs gone, it drags itself along on its arms (Call of Duty's crawlers). Slower than a walker
+ * is quick, lower, a shorter swipe. `pitch` is how far the body lies forward from upright (radians); each
+ * hand reaches from `back` to `front` metres ahead of its shoulder in the first `swing` of its cycle, then
+ * plants and pulls, and the body moves `stride` metres per full cycle (one pull per arm).
+ */
+export const CRAWL = {
+  speed: 1.6, fall: 0.55, pitch: 1.22, climbPace: 0.55,
+  front: 0.4, back: 0.02, swing: 0.32, stride: 0.56,
+  attack: { range: 1.15, windup: 0.35, reach: 1.55, swing: 0.7, recover: 0.5 },
+} as const
+/**
+ * Gore odds, our own and tuned by play. A blast that does not kill takes the legs (a crawler) or an arm;
+ * one that kills may blow the body apart, surer the closer it was. Heavy guns (shotgun pellets, sniper,
+ * Magnum) can take a leg (a crawler) or tear off the arm they hit. A headshot kill always pops the head.
+ */
+export const GORE_ODDS = {
+  blastCrawl: 0.45, blastArm: 0.25, gib: 0.6, gibEdge: 0.25, lethalArm: 0.3,
+  leg: { shotgun: 0.06, sniper: 0.35, magnum: 0.3 } as Partial<Record<string, number>>,
+  arm: { shotgun: 0.1, sniper: 0.5, magnum: 0.4 } as Partial<Record<string, number>>,
+} as const
 /** How long a bullet's jolt lasts. */
 const FLINCH_SECONDS = 0.22
 /** How often the shared flow field is recomputed. */
@@ -111,6 +134,19 @@ export type Zombie = {
   flinch: number
   flinchBack: number
   flinchSide: number
+  /** Legs gone: it drags itself on its arms. Seconds left of falling onto its front, and metres crawled (its arm cycle). */
+  crawler: boolean
+  crawlFall: number
+  crawled: number
+  /** The crawl pose as shown, eased: body pitch forward from upright (radians) and hip height (metres). */
+  pitch: number
+  lift: number
+  /** The Blot: swollen with ink, it bursts into poison gas when it dies. Seconds to its next drip. */
+  blot: boolean
+  drip: number
+  /** Parts lost to gore (the legs are `crawler`), and whether a blast blew it apart. */
+  lost: { head: boolean; L: boolean; R: boolean }
+  gibbed: boolean
 }
 
 type Carriage = { lean: number; nod: number; tilt: number; droopL: number; droopR: number; limp: number; phase: number }
@@ -161,7 +197,8 @@ export type ZombieHit = { zombie: Zombie; reaction: HitReaction; dealt: number; 
 
 const UP = new THREE.Vector3(0, 1, 0)
 const BODY_CENTRE = new THREE.Vector3(0, 0.75, 0)
-const scratch = { q: new THREE.Quaternion(), p: new THREE.Quaternion(), d: new THREE.Vector3(), v: new THREE.Vector3() }
+const scratch = { q: new THREE.Quaternion(), p: new THREE.Quaternion(), d: new THREE.Vector3(), v: new THREE.Vector3(),
+  f: new THREE.Vector3(), s: new THREE.Vector3(), a: new THREE.Vector3(), b: new THREE.Vector3(), t: new THREE.Vector3(), e: new THREE.Vector3() }
 
 export class ZombieDirector {
   readonly zombies: Zombie[] = []
@@ -172,9 +209,16 @@ export class ZombieDirector {
   private time = 0
   /** Fine route plans, for the rare zombie the flow field cannot step along (a narrow gate, a doorway edge). */
   private plans = new Map<Zombie, Generator<void, THREE.Vector3[]>>()
+  /** Ink chunks, drops, splats and torn-off limbs; the Blots' poison clouds. Both updated with the zombies. */
+  readonly gore: InkGore
+  readonly gas: GasClouds
+  /** Dice for gore; checks swap in their own. */
+  random: () => number = Math.random
 
   constructor(private context: ZombieContext) {
     this.navigation = new EnemyNavigation(context.world, context.doors, context.emit)
+    this.gore = new InkGore(context.scene)
+    this.gas = new GasClouds(context.scene)
   }
 
   /** Build the pool. Sequential loads, as the mission's AI does, so the rig initialises in order. */
@@ -192,6 +236,7 @@ export class ZombieDirector {
         recover: 0, stagger: 0, deadFor: 0, stranded: false, footstep: 0, route: [], routeTimer: 0, routeNode: -1, routeFrom: -1, blocked: -1, avoidTimer: 0, edgeFail: 0, probeFail: -1, probeFails: 0, bestDistance: Infinity, noProgress: 0,
         rise: 0, climb: null, voice: 0, carriage: randomCarriage('walk'), flinch: 0, flinchBack: 0, flinchSide: 0,
         boss: false, slam: 0, slamTimer: 0, direct: false, directTimer: 0, sideBias: 0, sideTimer: 0,
+        crawler: false, crawlFall: 0, crawled: 0, pitch: 0, lift: 0.82, blot: false, drip: 0, lost: { head: false, L: false, R: false }, gibbed: false,
       })
     }
   }
@@ -204,7 +249,7 @@ export class ZombieDirector {
    * Revive a pooled actor at `position`, climbing out of the ground when `rise` is set. Null when the
    * pool is exhausted or there is no floor there.
    */
-  spawn(position: THREE.Vector3, health: number, gait: ZombieGait, facing = 0, rise = false, boss = false): Zombie | null {
+  spawn(position: THREE.Vector3, health: number, gait: ZombieGait, facing = 0, rise = false, boss = false, blot = false): Zombie | null {
     const zombie = this.zombies.find(z => z.state === 'idle')
     if (!zombie) return null
     const floor = this.navigation.floor(position)
@@ -225,10 +270,21 @@ export class ZombieDirector {
     zombie.boss = boss; zombie.slam = 0; zombie.slamTimer = BOSS.slam.every * 0.6
     zombie.direct = false; zombie.directTimer = 0; zombie.sideBias = 0; zombie.sideTimer = 0
     if (boss) zombie.carriage.lean += 0.15
+    // Whole again, whatever happened to this body last time.
+    zombie.crawler = false; zombie.crawlFall = 0; zombie.crawled = 0; zombie.pitch = 0; zombie.lift = 0.82
+    zombie.lost.head = zombie.lost.L = zombie.lost.R = false; zombie.gibbed = false
+    zombie.blot = blot && !boss; zombie.drip = 0.5
+    if (zombie.blot) {
+      // Weighed down by its belly: a heavy lean, a limp, both arms hanging low.
+      const c = zombie.carriage
+      c.lean += 0.12; c.limp = 0.12 + Math.random() * 0.04; c.droopL = 0.3 + Math.random() * 0.2; c.droopR = 0.3 + Math.random() * 0.2
+    }
     this.plans.delete(zombie)
     const { actor } = zombie
     actor.root.scale.setScalar(boss ? BOSS.scale : 1)
     setSpikes(actor, boss)
+    restoreParts(actor)
+    setBloat(actor, zombie.blot)
     actor.root.position.copy(zombie.position)
     if (rise) actor.root.position.y -= RISE.depth
     actor.root.rotation.set(0, zombie.yaw, 0)
@@ -268,13 +324,17 @@ export class ZombieDirector {
       if (sources.length) { graph.flow(sources); this.flowTimer = FLOW_INTERVAL }
     }
     this.advanceFinePlans()
+    this.gore.update(dt)
+    this.gas.update(dt)
     for (const zombie of this.zombies) {
       if (zombie.state === 'idle') continue
       if (zombie.state === 'dead') {
         zombie.deadFor += dt
-        zombie.actor.update(dt, 'dead', false)
+        // A crawler has no death clip: it slumps flat where it lies.
+        if (zombie.crawler) this.crawlPose(zombie, dt, 'dead')
+        else zombie.actor.update(dt, 'dead', false)
         const sinking = zombie.deadFor - CORPSE.lie
-        if (sinking > 0) zombie.actor.root.position.y = zombie.position.y - CORPSE.depth * Math.min(1, sinking / CORPSE.sink)
+        if (sinking > 0) zombie.actor.root.position.y = (zombie.crawler ? zombie.actor.root.position.y : zombie.position.y) - CORPSE.depth * Math.min(1, sinking / CORPSE.sink)
         if (sinking >= CORPSE.sink) { zombie.state = 'idle'; zombie.actor.root.visible = false }
         continue
       }
@@ -283,10 +343,15 @@ export class ZombieDirector {
       zombie.voice -= dt
       if (zombie.voice <= 0) {
         // Groans carry; sprinters scream, and more often.
-        const sprint = zombie.gait === 'sprint' && !zombie.boss
+        const sprint = zombie.gait === 'sprint' && !zombie.boss && !zombie.crawler && !zombie.blot
         zombie.voice = sprint ? 2.5 + Math.random() * 3 : 3.5 + Math.random() * 5
-        this.context.emit({ kind: zombie.boss ? 'boss-growl' : sprint ? 'zombie-scream' : 'zombie-groan',
-          position: zombie.position.clone().setY(zombie.position.y + 1.6), radius: zombie.boss ? 70 : 32 })
+        this.context.emit({ kind: zombie.boss ? 'boss-growl' : zombie.blot ? 'blot-gurgle' : sprint ? 'zombie-scream' : 'zombie-groan',
+          position: zombie.position.clone().setY(zombie.position.y + (zombie.crawler ? 0.4 : 1.6)), radius: zombie.boss ? 70 : 32 })
+      }
+      if (zombie.blot && (zombie.drip -= dt) <= 0) {
+        // Ink dripping off the belly leaves a trail of spots behind it.
+        zombie.drip = 0.14 + this.random() * 0.2
+        this.gore.drip(bloatDripPoint(zombie.actor, scratch.t), zombie.position.y)
       }
       if (zombie.climb) { this.climbStep(zombie, dt); continue }
       let moving = false
@@ -319,7 +384,7 @@ export class ZombieDirector {
             zombie.swingLanded = true
             const now = Math.hypot(target.feet.x - zombie.position.x, target.feet.z - zombie.position.z)
             if (target.alive && now <= attack.reach && Math.abs(target.feet.y - zombie.position.y) < 1.3)
-              this.context.damagePlayer(target.id, attack.damage, zombie.position.clone().add(new THREE.Vector3(0, 1.3, 0)))
+              this.context.damagePlayer(target.id, attack.damage, zombie.position.clone().add(new THREE.Vector3(0, zombie.crawler ? 0.4 : 1.3, 0)))
             this.context.emit({ kind: 'zombie-swipe', position: zombie.position.clone(), radius: 10 })
           }
           if (zombie.swing <= 0) zombie.recover = attack.recover
@@ -342,6 +407,14 @@ export class ZombieDirector {
           || zombie.noProgress > STRANDED.noProgressSeconds)
       }
       zombie.flinch = Math.max(0, zombie.flinch - dt)
+      if (zombie.crawler) {
+        zombie.crawlFall = Math.max(0, zombie.crawlFall - dt)
+        // The clips only keep the actor's bookkeeping going: the crawl pose owns every bone that shows.
+        zombie.actor.update(dt, 'patrol', false, undefined, 0)
+        zombie.actor.gun.visible = false
+        this.crawlPose(zombie, dt, 'crawl', target?.feet)
+        continue
+      }
       zombie.actor.root.position.copy(zombie.position)
       // A limp rocks the whole body in step with the walk.
       const roll = moving ? zombie.carriage.limp * Math.sin(this.time * 5.2 + zombie.carriage.phase) : 0
@@ -419,7 +492,8 @@ export class ZombieDirector {
   /** Along the climb's fixed path. */
   private climbStep(zombie: Zombie, dt: number) {
     const climb = zombie.climb!
-    const pace = zombie.gait === 'walk' ? 0.85 : zombie.gait === 'sprint' ? 1.25 : 1
+    // A crawler pulls itself up hand over hand, slowly; the Blot is slow too.
+    const pace = zombie.crawler ? CRAWL.climbPace : zombie.blot ? 0.75 : zombie.gait === 'walk' ? 0.85 : zombie.gait === 'sprint' ? 1.25 : 1
     let budget = dt, vertical = false
     while (budget > 1e-6 && climb.index < climb.points.length) {
       const goal = climb.points[climb.index]
@@ -441,6 +515,13 @@ export class ZombieDirector {
       zombie.route.length = 0; zombie.routeTimer = 0; zombie.stuck = 0; zombie.edgeFail = 0
     }
     const { actor } = zombie
+    if (zombie.crawler) {
+      if (!vertical) zombie.crawled += CLIMB_SPEED.across * pace * dt
+      actor.update(dt, 'patrol', false, undefined, 0)
+      actor.gun.visible = false
+      this.crawlPose(zombie, dt, vertical ? 'climb' : 'crawl')
+      return
+    }
     actor.root.position.copy(zombie.position)
     actor.root.rotation.set(0, zombie.yaw, 0)
     actor.update(dt, 'patrol', true, undefined, vertical ? 1.2 : CLIMB_SPEED.across * pace)
@@ -467,6 +548,114 @@ export class ZombieDirector {
     bend(bones.chest, c.lean * 0.5 + lunge * 0.15 - jolt * zombie.flinchBack * 0.22, lunge * 0.3, 0)
     bend(bones.head, c.nod - lunge * 0.45 - jolt * zombie.flinchBack * 0.4, sway * 1.5, c.tilt + sway)
     if (lunge > 0) zombie.actor.root.position.addScaledVector(scratch.v.set(Math.sin(zombie.yaw), 0, Math.cos(zombie.yaw)), lunge * 0.3)
+  }
+
+  /**
+   * A crawler's whole body, every frame. Flat on its front with the chest propped up, it drags itself
+   * along: each hand reaches out ahead, plants, and pulls the body up to it while the other reaches, the
+   * chest heaving and rolling with each pull, head craned up at its prey. `climb` hangs it upright from
+   * its hands on a ladder; `dead` lets it slump flat. Posed absolutely (from the rest pose), so nothing
+   * accumulates frame to frame.
+   */
+  private crawlPose(zombie: Zombie, dt: number, mode: 'crawl' | 'climb' | 'dead', prey?: THREE.Vector3) {
+    const { actor } = zombie, bones = actor.rig.bones, rest = actor.rig.rest, c = zombie.carriage
+    const scale = zombie.boss ? BOSS.scale : 1
+    const forward = scratch.f.set(Math.sin(zombie.yaw), 0, Math.cos(zombie.yaw))
+    // The character's left (.L bones), whichever way it faces.
+    const left = scratch.s.set(Math.cos(zombie.yaw), 0, -Math.sin(zombie.yaw))
+    const attack = attackOf(zombie)
+    const swingPhase = mode === 'crawl' && zombie.swing > 0 ? 1 - zombie.swing / attack.swing : -1
+    const lunge = swingPhase >= 0 ? Math.sin(Math.PI * Math.min(1, swingPhase / 0.75)) : 0
+    const jolt = zombie.flinch > 0 ? Math.sin(Math.PI * zombie.flinch / FLINCH_SECONDS) : 0
+    const cycle = zombie.crawled / CRAWL.stride
+    // One pull per arm per cycle: the chest heaves up with each pull and rolls toward the pulling arm.
+    const crawling = mode === 'crawl' && zombie.crawlFall <= 0
+    const heave = crawling ? 0.5 - 0.5 * Math.cos(cycle * Math.PI * 4) : 0
+    const roll = crawling ? 0.1 * Math.sin(cycle * Math.PI * 2) : 0
+    let pitch = CRAWL.pitch - 0.07 * heave - 0.28 * lunge - 0.15 * jolt, lift = 0.11 + 0.035 * heave + 0.08 * lunge
+    if (mode === 'climb') { pitch = 0; lift = 0.82 }
+    if (mode === 'dead') { pitch = Math.PI / 2 - 0.03; lift = 0.085 }
+    if (mode === 'crawl' && zombie.crawlFall > 0) {
+      // Dropping onto its front as the legs go: falls like a weight, pitching forward as it drops.
+      const fall = 1 - zombie.crawlFall / CRAWL.fall, drop = fall * fall
+      zombie.pitch = THREE.MathUtils.lerp(0, pitch, Math.min(1, fall * 1.3))
+      zombie.lift = THREE.MathUtils.lerp(0.82, lift, drop)
+    } else {
+      const k = 1 - Math.exp(-dt * (mode === 'dead' ? 6 : 12))
+      zombie.pitch += (pitch - zombie.pitch) * k
+      zombie.lift += (lift - zombie.lift) * k
+    }
+    // The hips (the stump) trail a little behind where it stands; the chest is over that point.
+    const behind = 0.22 * Math.min(1, zombie.pitch / CRAWL.pitch) - 0.05 * heave - 0.14 * lunge
+    const hips = scratch.b.copy(zombie.position).addScaledVector(forward, -behind * scale)
+    hips.y = zombie.position.y + zombie.lift * scale
+    actor.root.rotation.set(zombie.pitch, zombie.yaw, roll, 'YXZ')
+    actor.root.position.copy(hips).sub(scratch.a.copy(rest.hips.pos).multiplyScalar(scale).applyEuler(actor.root.rotation))
+    // The torso from its rest pose: the clips' walk and look never show on a crawler.
+    bones.hips.position.copy(rest.hips.pos)
+    for (const name of ['hips', 'spine', 'chest', 'neck', 'head'] as const) bones[name].quaternion.copy(rest[name].quat)
+    bend(bones.spine, 0, 0, roll * 0.6)
+    // The thigh stumps drag behind, a little apart, twitching with each pull.
+    for (const [key, sign] of [['L', 1], ['R', -1]] as const) {
+      bones[`thigh.${key}`].quaternion.copy(rest[`thigh.${key}`].quat)
+      bend(bones[`thigh.${key}`], 0.25 + (crawling ? 0.12 * Math.sin(cycle * Math.PI * 4 + sign) : 0), 0, -0.2 * sign)
+    }
+    bend(bones.chest, -0.1 * heave - 0.12 * lunge, crawling ? 0.16 * Math.sin(cycle * Math.PI * 2) : 0, 0)
+    // Head up at its prey: the face points `pitch` below level before the neck bends, so crane it back.
+    let raise = 0.35, turn = 0
+    if (mode === 'dead') { raise = 0.25; turn = c.tilt > 0 ? 0.9 : -0.9 }
+    else if (mode === 'crawl') {
+      const head = scratch.t.copy(hips).addScaledVector(forward, 0.62 * scale * Math.sin(zombie.pitch)).setY(hips.y + 0.62 * scale * Math.cos(zombie.pitch))
+      let look = -0.1
+      if (prey) {
+        look = Math.atan2(prey.y + 1.5 - head.y, Math.max(0.3, Math.hypot(prey.x - head.x, prey.z - head.z)))
+        const toward = Math.atan2(prey.x - head.x, prey.z - head.z)
+        turn = THREE.MathUtils.clamp(Math.atan2(Math.sin(toward - zombie.yaw), Math.cos(toward - zombie.yaw)), -0.6, 0.6)
+      }
+      raise = Math.min(1.5, zombie.pitch + look - 0.25 * lunge)
+    }
+    bend(bones.neck, -raise * 0.45, turn * 0.4, 0)
+    bend(bones.head, -raise * 0.55 + c.nod * 0.25, turn * 0.6, c.tilt * 0.5)
+    actor.root.updateMatrixWorld(true)
+    if (mode === 'climb') {
+      // Hand over hand, as a climbing walker does.
+      const phase = zombie.climb ? zombie.climb.travelled * 4.2 : 0
+      poseArms(zombie, 2.2 + 1.4 * Math.sin(phase), 2.2 + 1.4 * Math.sin(phase + Math.PI))
+      return
+    }
+    // The arms, each hand placed on the ground (or in the air) and the arm solved to reach it.
+    const ground = zombie.position.y + 0.05 * scale
+    const striker: 'L' | 'R' | null = !zombie.lost.R ? 'R' : !zombie.lost.L ? 'L' : null
+    for (const [key, sign, offset] of [['L', 1, 0], ['R', -1, 0.5]] as const) {
+      if (zombie.lost[key]) continue
+      const upper = bones[`upper_arm.${key}`]
+      const shoulder = upper.getWorldPosition(scratch.a)
+      const target = scratch.e.set(shoulder.x, ground, shoulder.z).addScaledVector(left, sign * 0.07 * scale)
+      let reach: number, up = 0
+      if (mode === 'dead') { reach = 0.3; target.addScaledVector(left, sign * 0.14 * scale) }
+      else if (zombie.crawlFall > 0) {
+        // Thrown out ahead to break the fall.
+        reach = 0.36; up = 0.35 * zombie.crawlFall / CRAWL.fall
+      } else {
+        const u = ((cycle + offset) % 1 + 1) % 1
+        if (u < CRAWL.swing) {
+          const t = u / CRAWL.swing, s = t * t * (3 - 2 * t)
+          reach = CRAWL.back + (CRAWL.front - CRAWL.back) * s; up = Math.sin(Math.PI * t) * 0.2
+        } else reach = CRAWL.front - (CRAWL.front - CRAWL.back) * (u - CRAWL.swing) / (1 - CRAWL.swing)
+      }
+      target.addScaledVector(forward, reach * scale).y += up * scale
+      if (key === striker && swingPhase >= 0) {
+        // The swipe: the arm rears up over the shoulder, then claws down at the feet in front.
+        const windup = attack.windup / attack.swing
+        const high = scratch.t.copy(shoulder).addScaledVector(forward, 0.16 * scale).setY(shoulder.y + 0.42 * scale)
+        if (swingPhase < windup) target.lerp(high, THREE.MathUtils.smoothstep(swingPhase / windup, 0, 1))
+        else {
+          const strike = target.set(shoulder.x, ground, shoulder.z).addScaledVector(forward, 0.52 * scale)
+          strike.lerpVectors(high, strike, Math.min(1, (swingPhase - windup) / 0.18))
+        }
+      }
+      solveArm(upper, bones[`forearm.${key}`], bones[`hand.${key}`], target, left.clone().multiplyScalar(sign * 0.8).addScaledVector(UP, 0.55).addScaledVector(forward, -0.25), forward)
+    }
   }
 
   /** The Brute's fists come down: everyone close is hurt, the nearer the worse. */
@@ -560,7 +749,7 @@ export class ZombieDirector {
     if (!waypoint) return false
     const remaining = Math.hypot(waypoint.x - zombie.position.x, waypoint.z - zombie.position.z)
     if (remaining <= stopShort) return false
-    const turn = this.face(zombie, waypoint, dt, zombie.gait === 'walk' ? 4 : 7)
+    const turn = this.face(zombie, waypoint, dt, zombie.crawler ? 3.5 : zombie.gait === 'walk' || zombie.blot ? 4 : 7)
     // The walk and run clips only travel forward: finish a sharp turn before moving.
     if (turn > 0.7) return false
     const step = Math.min(speedOf(zombie) * dt, Math.max(0.01, remaining - stopShort))
@@ -608,9 +797,11 @@ export class ZombieDirector {
     zombie.blocked = -1
     zombie.edgeFail = 0
     zombie.stuck = 0
-    zombie.footstep += zombie.position.distanceTo(next)
+    const travelled = zombie.position.distanceTo(next)
+    zombie.footstep += travelled
+    if (zombie.crawler) zombie.crawled += travelled
     zombie.position.copy(next)
-    if (zombie.footstep > 0.9) { zombie.footstep = 0; this.context.emit({ kind: 'enemy-footstep', position: zombie.position.clone(), radius: 6 }) }
+    if (zombie.footstep > (zombie.crawler ? CRAWL.stride / 2 : 0.9)) { zombie.footstep = 0; this.context.emit({ kind: 'enemy-footstep', position: zombie.position.clone(), radius: zombie.crawler ? 4 : 6 }) }
     return true
   }
 
@@ -804,7 +995,7 @@ export class ZombieDirector {
       const distance = chest.distanceTo(centre)
       if (distance > radius || !this.context.world.visible(from, chest, zombie.actor.root)) continue
       const outward = chest.clone().sub(centre).setY(0.3).normalize()
-      hits.push(this.applyHit(zombie, damage * (1 - 0.5 * distance / radius), 'torso', chest, outward, undefined, 'shotgun'))
+      hits.push(this.applyHit(zombie, damage * (1 - 0.5 * distance / radius), 'torso', chest, outward, undefined, 'shotgun', distance / radius))
     }
     return hits
   }
@@ -827,8 +1018,9 @@ export class ZombieDirector {
     return this.applyHit(best, instaKill && !best.boss ? best.health : damage, 'torso', point, flatForward, undefined, undefined)
   }
 
+  /** `blast`: for a blast, how far out this zombie was (0 at the centre, 1 at the edge). */
   private applyHit(zombie: Zombie, damage: number, zone: HitZone, point: THREE.Vector3, direction: THREE.Vector3,
-    bone: BoneName | undefined, weapon: Shot['weapon']): ZombieHit {
+    bone: BoneName | undefined, weapon: Shot['weapon'], blast?: number): ZombieHit {
     const before = zombie.health
     // Whole points, as in Call of Duty: fractional damage left zombies on 0.3 health, and the shot that
     // finished them showed "0".
@@ -837,6 +1029,7 @@ export class ZombieDirector {
     const lethal = zombie.health === 0
     const reaction: HitReaction = { zone, point: point.clone(), direction: direction.clone(), lethal, bone, weapon, targetId: zombie.id }
     const fromBehind = direction.x * Math.sin(zombie.yaw) + direction.z * Math.cos(zombie.yaw) > 0.25
+    this.wound(zombie, lethal, zone, direction, bone, weapon, blast)
     if (lethal) {
       zombie.actor.react(reactionClipName(reaction, fromBehind), true, direction)
       this.kill(zombie)
@@ -863,13 +1056,131 @@ export class ZombieDirector {
     }
     // Shot while climbing out: it falls back where it was, half in the ground.
     if (zombie.rise > 0) { zombie.position.y = zombie.actor.root.position.y; zombie.rise = 0 }
-    zombie.actor.root.rotation.set(0, zombie.yaw, 0)
+    if (!zombie.crawler) zombie.actor.root.rotation.set(0, zombie.yaw, 0)
     zombie.state = 'dead'
     zombie.deadFor = 0
     zombie.swing = 0
     zombie.route.length = 0
-    zombie.actor.update(0, 'dead', false)
+    if (!zombie.crawler) zombie.actor.update(0, 'dead', false)
     this.context.emit({ kind: 'enemy-down', position: zombie.position.clone(), radius: 5 })
+    if (zombie.blot) {
+      // The belly bursts: a pop of ink, a shower of it, and the poison cloud where it fell.
+      zombie.blot = false
+      const actor = zombie.actor
+      actor.root.updateMatrixWorld(true)
+      const belly = bloatCentre(actor)
+      if (zombie.gibbed) belly.copy(zombie.position).setY(zombie.position.y + 0.9)
+      setBloat(actor, false)
+      this.gore.pop(belly, 1.4, 0.4)
+      this.gore.fling(belly, UP, 10, zombie.position.y, 1.2, 2.6, 1.3)
+      this.gore.spray(belly, UP, 36, zombie.position.y, 3.4)
+      this.gore.splat(zombie.position.clone(), 1)
+      this.gas.emit(zombie.position.clone())
+      this.context.emit({ kind: 'gas-burst', position: belly, radius: 45 })
+    }
+  }
+
+  // ---------------------------------------------------------------- gore
+
+  /** The floor under a zombie, even one shot off a ladder or halfway out of the ground. */
+  private groundUnder(zombie: Zombie) {
+    if (!zombie.climb && zombie.rise <= 0) return zombie.position.y
+    const below = this.context.world.floor(zombie.position.clone().setY(zombie.position.y + 0.3), 0.3, 40)
+    return Number.isFinite(below) ? below : zombie.position.y
+  }
+
+  /**
+   * What a hit does to the body: heads pop on a killing headshot, heavy guns tear arms and legs off, blasts
+   * take the legs or blow the body apart. Runs before the death clip is chosen, so a body that loses its
+   * legs falls as a crawler.
+   */
+  private wound(zombie: Zombie, lethal: boolean, zone: HitZone, direction: THREE.Vector3, bone: BoneName | undefined, weapon: Shot['weapon'], blast?: number) {
+    const roll = this.random, heavy = weapon ? GORE_ODDS.arm[weapon] : undefined
+    const side: 'L' | 'R' = bone?.endsWith('.L') ? 'L' : 'R'
+    if (blast !== undefined) {
+      if (zombie.boss) return
+      if (lethal) {
+        if (roll() < (blast < 0.6 ? GORE_ODDS.gib : GORE_ODDS.gibEdge)) { this.gib(zombie, direction); return }
+        if (roll() < GORE_ODDS.lethalArm) this.loseArm(zombie, roll() < 0.5 ? 'L' : 'R', direction)
+        return
+      }
+      if (!zombie.crawler && zombie.rise <= 0 && !zombie.climb && roll() < GORE_ODDS.blastCrawl) this.makeCrawler(zombie, direction)
+      else if (roll() < GORE_ODDS.blastArm) this.loseArm(zombie, roll() < 0.5 ? 'L' : 'R', direction)
+      return
+    }
+    if (lethal && zone === 'head') { this.popHead(zombie, direction); return }
+    if (zombie.boss) return
+    if (zone === 'arm' && heavy && roll() < (lethal ? Math.max(heavy, GORE_ODDS.lethalArm) : heavy)) this.loseArm(zombie, side, direction)
+    const leg = weapon ? GORE_ODDS.leg[weapon] : undefined
+    if (!lethal && zone === 'leg' && leg && !zombie.crawler && zombie.rise <= 0 && !zombie.climb && roll() < leg) this.makeCrawler(zombie, direction)
+  }
+
+  /** The legs go: they fly off, and the zombie drops onto its front and crawls on. */
+  makeCrawler(zombie: Zombie, direction: THREE.Vector3) {
+    if (zombie.crawler || zombie.state !== 'chase') return
+    const { actor } = zombie, bones = actor.rig.bones, floor = zombie.position.y
+    const away = direction.clone().setY(0)
+    if (away.lengthSq() < 1e-4) away.set(-Math.sin(zombie.yaw), 0, -Math.cos(zombie.yaw))
+    away.normalize()
+    for (const [key, sign] of [['L', 1], ['R', -1]] as const) {
+      const out = new THREE.Vector3(Math.cos(zombie.yaw), 0, -Math.sin(zombie.yaw)).multiplyScalar(sign * 1.2)
+      this.gore.limb('leg', bones[`shin.${key}`], away.clone().multiplyScalar(2 + this.random() * 1.5).add(out).setY(2.4 + this.random() * 1.5), floor, 0.75)
+    }
+    setPartLost(actor, 'legs', true)
+    zombie.crawler = true
+    zombie.crawlFall = CRAWL.fall
+    zombie.pitch = 0; zombie.lift = 0.82
+    zombie.stagger = Math.max(zombie.stagger, CRAWL.fall + 0.1)
+    zombie.swing = 0; zombie.recover = 0.3
+    this.gore.spray(zombie.position.clone().setY(floor + 0.75), away, 22, floor, 3)
+    this.gore.splat(zombie.position.clone(), 0.6)
+    this.context.emit({ kind: 'gore-rip', position: zombie.position.clone().setY(floor + 0.7), radius: 30 })
+  }
+
+  /** An arm torn off at the shoulder, thrown along `direction`. */
+  loseArm(zombie: Zombie, side: 'L' | 'R', direction: THREE.Vector3) {
+    if (zombie.lost[side] || zombie.gibbed) return
+    const bone = zombie.actor.rig.bones[`upper_arm.${side}`]
+    // Out to its own side as much as along the hit, so it spins off clear of the body where you can see it.
+    const out = new THREE.Vector3(Math.cos(zombie.yaw), 0, -Math.sin(zombie.yaw)).multiplyScalar(side === 'L' ? 1 : -1)
+    const away = direction.clone().setY(0).normalize().multiplyScalar(1 + this.random()).addScaledVector(out, 1.8 + this.random() * 1.2).setY(2.4 + this.random() * 1.2)
+    this.gore.limb('arm', bone, away, this.groundUnder(zombie), zombie.boss ? BOSS.scale : 1)
+    setPartLost(zombie.actor, side === 'L' ? 'arm.L' : 'arm.R', true)
+    zombie.lost[side] = true
+    this.context.emit({ kind: 'gore-rip', position: bone.getWorldPosition(new THREE.Vector3()), radius: 30 })
+  }
+
+  /** A killing headshot: the head bursts in ink and is gone. The wet pop plays for the shooter, not in the world. */
+  private popHead(zombie: Zombie, direction: THREE.Vector3) {
+    if (zombie.lost.head) return
+    const { head, neck } = zombie.actor.rig.bones
+    const scale = zombie.boss ? BOSS.scale : 1
+    head.updateWorldMatrix(true, false)
+    const centre = head.localToWorld(new THREE.Vector3(0, 0.2, 0))
+    this.gore.headPop(centre, direction.clone().normalize(), this.groundUnder(zombie), neck, scale)
+    setPartLost(zombie.actor, 'head', true)
+    zombie.lost.head = true
+    this.context.emit({ kind: 'headshot-pop', radius: 60 })
+  }
+
+  /** A body blown apart by a blast: limbs flung out, the rest a shower of ink chunks. */
+  private gib(zombie: Zombie, direction: THREE.Vector3) {
+    const { actor } = zombie, bones = actor.rig.bones, floor = this.groundUnder(zombie)
+    actor.root.updateMatrixWorld(true)
+    const centre = bones.chest.getWorldPosition(new THREE.Vector3())
+    const out = direction.clone().setY(0)
+    if (out.lengthSq() < 1e-4) out.set(0, 0, 1)
+    out.normalize()
+    const throwOut = (spread: number) => out.clone().multiplyScalar(3 + this.random() * 3)
+      .add(new THREE.Vector3(this.random() - 0.5, 0, this.random() - 0.5).multiplyScalar(spread)).setY(3 + this.random() * 3.5)
+    for (const side of ['L', 'R'] as const) if (!zombie.lost[side]) this.gore.limb('arm', bones[`upper_arm.${side}`], throwOut(6), floor)
+    if (!zombie.crawler) for (const side of ['L', 'R'] as const) this.gore.limb('leg', bones[`thigh.${side}`], throwOut(5), floor)
+    if (!zombie.lost.head) this.gore.fling(bones.head.localToWorld(new THREE.Vector3(0, 0.2, 0)), out, 5, floor, 1.6, 4.5)
+    this.gore.gib(centre, out, floor)
+    zombie.gibbed = true
+    zombie.lost.head = zombie.lost.L = zombie.lost.R = true
+    actor.root.visible = false
+    this.context.emit({ kind: 'gib', position: centre, radius: 50 })
   }
 
   /** Zombies near `centre` stagger and stop swiping for a moment (Second Draft getting you back up). */
@@ -898,11 +1209,15 @@ export class ZombieDirector {
   clear() {
     this.plans.clear()
     for (const zombie of this.zombies) { zombie.state = 'idle'; zombie.actor.root.visible = false }
+    this.gore.clear()
+    this.gas.clear()
   }
 
   dispose() {
     this.disposed = true
     this.plans.clear()
+    this.gore.dispose()
+    this.gas.dispose()
     for (const zombie of this.zombies) { zombie.actor.root.removeFromParent(); zombie.actor.dispose() }
     this.zombies.length = 0
   }
@@ -945,15 +1260,19 @@ function reachArms(zombie: Zombie, time = -1) {
     right = swingPhase < windup ? THREE.MathUtils.lerp(right, 1.6, swingPhase / windup) : THREE.MathUtils.lerp(1.6, -1.2, Math.min(1, (swingPhase - windup) / 0.25))
     left = Math.max(left, swingPhase < windup ? 0.3 : -0.1)
   }
+  // Right arm torn off: the left one swipes.
+  if (zombie.lost.R && !zombie.lost.L) [left, right] = [right, left]
   poseArms(zombie, left, right)
 }
 
-/** Swipe numbers for this zombie: the Brute's are slower, longer and heavier. */
+/** Swipe numbers for this zombie: the Brute's are slower, longer and heavier; a crawler's shorter. */
 function attackOf(zombie: Zombie) {
-  return zombie.boss ? BOSS.attack : { ...ATTACK, damage: PLAYER_HEALTH.zombieHit }
+  return zombie.boss ? BOSS.attack : { ...(zombie.crawler ? CRAWL.attack : ATTACK), damage: PLAYER_HEALTH.zombieHit }
 }
 
-function speedOf(zombie: Zombie) { return zombie.boss ? BOSS.speed : ZOMBIE_SPEED[zombie.gait] }
+function speedOf(zombie: Zombie) {
+  return zombie.boss ? BOSS.speed : zombie.crawler ? CRAWL.speed : zombie.blot ? BLOT.speed : ZOMBIE_SPEED[zombie.gait]
+}
 
 /**
  * The Brute's crown of ink spikes, so it reads as something else from across the yard. Made once per
@@ -979,6 +1298,25 @@ function setSpikes(actor: EnemyActor, on: boolean) {
     actor.root.userData.spikes = spikes
   }
   spikes.visible = on
+}
+
+/**
+ * Two-bone reach: the upper arm and forearm placed so the wrist lands on `target` (or as near as the arm
+ * reaches), the elbow bending out toward `pole`, the fist pointing along `forward` and down.
+ */
+function solveArm(upper: THREE.Bone, fore: THREE.Bone, hand: THREE.Bone, target: THREE.Vector3, pole: THREE.Vector3, forward: THREE.Vector3) {
+  const shoulder = upper.getWorldPosition(new THREE.Vector3())
+  const a = shoulder.distanceTo(fore.getWorldPosition(scratch.d)), b = scratch.d.distanceTo(hand.getWorldPosition(scratch.v))
+  const toward = target.clone().sub(shoulder)
+  const distance = THREE.MathUtils.clamp(toward.length(), Math.abs(a - b) + 1e-3, (a + b) * 0.995)
+  toward.normalize()
+  const cos = (a * a + distance * distance - b * b) / (2 * a * distance), sin = Math.sqrt(Math.max(0, 1 - cos * cos))
+  const out = pole.clone().addScaledVector(toward, -pole.dot(toward)).normalize()
+  const elbow = shoulder.clone().addScaledVector(toward, a * cos).addScaledVector(out, a * sin)
+  aimBone(upper, elbow.clone().sub(shoulder))
+  const wrist = shoulder.addScaledVector(toward, distance)
+  aimBone(fore, wrist.sub(fore.getWorldPosition(scratch.d)))
+  aimBone(hand, forward.clone().setY(-0.7))
 }
 
 /** Both arms toward the facing direction, each lifted by its own amount (0 level, positive up). */

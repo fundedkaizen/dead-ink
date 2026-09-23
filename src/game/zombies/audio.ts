@@ -38,7 +38,8 @@ export class DeadInkAudio extends MissionAudio {
   play(event: SoundEvent) {
     const context = this.context
     const handled = ['zombie-groan', 'zombie-scream', 'zombie-snarl', 'zombie-swipe', 'zombie-rise', 'powerup-drop', 'powerup-grab', 'nuke', 'round-start', 'round-end',
-      'perk-drink', 'perk-jingle', 'pack-work', 'pack-ready', 'boss-roar', 'boss-growl', 'boss-slam', 'box-leave', 'box-open', 'box-spin', 'box-offer', 'ink-burst', 'grenade-blast', 'grenade-throw']
+      'perk-drink', 'perk-jingle', 'pack-work', 'pack-ready', 'boss-roar', 'boss-growl', 'boss-slam', 'box-leave', 'box-open', 'box-spin', 'box-offer', 'ink-burst', 'grenade-blast', 'grenade-throw',
+      'headshot-pop', 'gore-rip', 'gib', 'gas-burst', 'blot-gurgle']
     if (event.kind === 'door' && this.context && this.active && !this.muted) this.slam(event)
     if (!handled.includes(event.kind)) { super.play(FOOTSTEP_VOLUME[event.kind] ? { ...event, volume: FOOTSTEP_VOLUME[event.kind] } : event); return }
     if (!context || !this.master || !this.active || this.muted || this.volume <= 0 || this.disposed || this.dying) return
@@ -79,7 +80,107 @@ export class DeadInkAudio extends MissionAudio {
       // The spin: a wind-up music box, original tune, the length of the spin.
       case 'box-spin': this.melody(event, BOX_TUNE, 0.13, 0.08); break
       case 'box-offer': this.arpeggio(event, [880, 1108.7, 1318.5, 1760], 0.05, 'triangle', 0.2, 0.8); break
+      // Gore: a headshot's wet pop, a limb tearing off, a body blown apart, the Blot bursting and gurgling.
+      case 'headshot-pop': this.pop(event, 1); this.splatter(event, 4, 0.09); break
+      case 'gore-rip': this.tear(event); this.splatter(event, 3, 0.2); break
+      case 'gib': this.pop(event, 0.55); this.tear(event); this.splatter(event, 7, 0.15); break
+      case 'gas-burst': this.pop(event, 0.4); this.splatter(event, 5, 0.12); this.hiss(event); break
+      case 'blot-gurgle': this.gurgle(event); break
     }
+  }
+
+  /**
+   * A wet pop: a cork-like thump that drops in pitch, a slap of bright noise, a low body. `pitch` 1 is a
+   * head; lower is bigger and wetter.
+   */
+  private pop(event: SoundEvent, pitch: number) {
+    const context = this.context!, t = context.currentTime
+    const { gain, panner } = this.output(event)
+    const cork = context.createOscillator()
+    cork.type = 'sine'
+    cork.frequency.setValueAtTime(820 * pitch, t); cork.frequency.exponentialRampToValueAtTime(120 * pitch, t + 0.07)
+    gain.gain.setValueAtTime(0.0001, t); gain.gain.exponentialRampToValueAtTime(0.75, t + 0.004); gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.12)
+    cork.connect(gain)
+    this.track(cork, [gain, ...(panner ? [panner] : [])]); cork.start(t); cork.stop(t + 0.13)
+    const { gain: slap, panner: slapPanner } = this.output(event)
+    const wet = context.createBufferSource(), band = context.createBiquadFilter()
+    wet.buffer = this.noise; wet.playbackRate.value = 1.2
+    band.type = 'bandpass'; band.Q.value = 1.6
+    band.frequency.setValueAtTime(2600 * pitch, t); band.frequency.exponentialRampToValueAtTime(700 * pitch, t + 0.14)
+    slap.gain.setValueAtTime(0.0001, t); slap.gain.exponentialRampToValueAtTime(0.9, t + 0.003); slap.gain.exponentialRampToValueAtTime(0.0001, t + 0.18)
+    wet.connect(band).connect(slap)
+    this.track(wet, [band, slap, ...(slapPanner ? [slapPanner] : [])]); wet.start(t); wet.stop(t + 0.2)
+    const { gain: body, panner: bodyPanner } = this.output(event)
+    const low = context.createOscillator()
+    low.type = 'sine'; low.frequency.setValueAtTime(110 * Math.sqrt(pitch), t); low.frequency.exponentialRampToValueAtTime(45, t + 0.16)
+    body.gain.setValueAtTime(0.0001, t); body.gain.exponentialRampToValueAtTime(0.6, t + 0.006); body.gain.exponentialRampToValueAtTime(0.0001, t + 0.2)
+    low.connect(body)
+    this.track(low, [body, ...(bodyPanner ? [bodyPanner] : [])]); low.start(t); low.stop(t + 0.22)
+  }
+
+  /** Ink landing: short wet ticks scattered over the next moment. */
+  private splatter(event: SoundEvent, count: number, delay: number) {
+    const context = this.context!, t = context.currentTime
+    for (let i = 0; i < count; i++) {
+      const at = t + delay + Math.random() * 0.45
+      const { gain, panner } = this.output(event)
+      const drop = context.createBufferSource(), band = context.createBiquadFilter()
+      drop.buffer = this.noise; drop.playbackRate.value = 1.8
+      band.type = 'bandpass'; band.frequency.value = 900 + Math.random() * 1500; band.Q.value = 4
+      gain.gain.setValueAtTime(0.0001, at); gain.gain.exponentialRampToValueAtTime(0.28, at + 0.004); gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.06)
+      drop.connect(band).connect(gain)
+      this.track(drop, [band, gain, ...(panner ? [panner] : [])], 'incidental'); drop.start(at); drop.stop(at + 0.07)
+    }
+  }
+
+  /** Something torn: a ripping band of noise sweeping up, over a thud. */
+  private tear(event: SoundEvent) {
+    const context = this.context!, t = context.currentTime
+    const { gain, panner } = this.output(event)
+    const rip = context.createBufferSource(), band = context.createBiquadFilter(), shaper = this.waveshaper(4)
+    rip.buffer = this.noise; rip.playbackRate.value = 0.9
+    band.type = 'bandpass'; band.Q.value = 2.2
+    band.frequency.setValueAtTime(380, t); band.frequency.exponentialRampToValueAtTime(1900, t + 0.16)
+    gain.gain.setValueAtTime(0.0001, t); gain.gain.exponentialRampToValueAtTime(0.55, t + 0.02); gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.24)
+    rip.connect(band).connect(shaper).connect(gain)
+    this.track(rip, [band, shaper, gain, ...(panner ? [panner] : [])]); rip.start(t); rip.stop(t + 0.26)
+    const { gain: thud, panner: thudPanner } = this.output(event)
+    const low = context.createOscillator()
+    low.type = 'sine'; low.frequency.setValueAtTime(90, t); low.frequency.exponentialRampToValueAtTime(40, t + 0.2)
+    thud.gain.setValueAtTime(0.0001, t); thud.gain.exponentialRampToValueAtTime(0.6, t + 0.01); thud.gain.exponentialRampToValueAtTime(0.0001, t + 0.25)
+    low.connect(thud)
+    this.track(low, [thud, ...(thudPanner ? [thudPanner] : [])]); low.start(t); low.stop(t + 0.27)
+  }
+
+  /** Gas escaping: a long hiss that settles, low and breathy. */
+  private hiss(event: SoundEvent) {
+    const context = this.context!, t = context.currentTime
+    const { gain, panner } = this.output(event)
+    const air = context.createBufferSource(), band = context.createBiquadFilter()
+    air.buffer = this.noise; air.loop = true; air.playbackRate.value = 1.3
+    band.type = 'bandpass'; band.Q.value = 0.8
+    band.frequency.setValueAtTime(3800, t + 0.05); band.frequency.exponentialRampToValueAtTime(900, t + 1.8)
+    gain.gain.setValueAtTime(0.0001, t); gain.gain.exponentialRampToValueAtTime(0.32, t + 0.08); gain.gain.exponentialRampToValueAtTime(0.0001, t + 2.2)
+    air.connect(band).connect(gain)
+    this.track(air, [band, gain, ...(panner ? [panner] : [])]); air.start(t); air.stop(t + 2.25)
+  }
+
+  /** The Blot's voice: a throat full of ink, bubbling. */
+  private gurgle(event: SoundEvent) {
+    const context = this.context!, t = context.currentTime, length = 1 + Math.random() * 0.6
+    const { gain, panner } = this.output(event)
+    const throat = context.createOscillator(), bubbles = context.createOscillator(), depth = context.createGain(), bubbling = context.createGain(), low = context.createBiquadFilter()
+    throat.type = 'sawtooth'
+    throat.frequency.setValueAtTime(70 + Math.random() * 25, t); throat.frequency.exponentialRampToValueAtTime(48, t + length)
+    // Bubbles: the throat chopped on and off a dozen times a second.
+    bubbles.type = 'square'; bubbles.frequency.value = 9 + Math.random() * 6
+    bubbling.gain.value = 0.55; depth.gain.value = 0.45
+    bubbles.connect(depth).connect(bubbling.gain)
+    low.type = 'lowpass'; low.frequency.value = 520; low.Q.value = 6
+    gain.gain.setValueAtTime(0.0001, t); gain.gain.exponentialRampToValueAtTime(0.4, t + 0.1); gain.gain.setValueAtTime(0.4, t + length * 0.6); gain.gain.exponentialRampToValueAtTime(0.0001, t + length)
+    throat.connect(low).connect(bubbling).connect(gain)
+    this.track(throat, [low, bubbling, gain, ...(panner ? [panner] : [])]); this.track(bubbles, [depth])
+    for (const source of [throat, bubbles]) { source.start(t); source.stop(t + length + 0.02) }
   }
 
   /** A music-box tune from a point in the world: a perk machine's jingle. */

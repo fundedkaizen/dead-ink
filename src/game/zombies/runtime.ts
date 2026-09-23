@@ -44,6 +44,7 @@ import { POWERUP_INFO, PowerupDrops, PowerupDropper } from './powerups'
 import { SEALED, ZONE_GATES, ZoneGates, type ZoneGate } from './zones'
 import { InkTrap, TRAP, TRAP_GATES } from './traps'
 import { INKWELL_PLACES, Inkwell, QUEST, SoulStreams, questHint, type QuestStep } from './quest'
+import { BLOT, GAS, rollBlot } from './gas'
 import { MACHINE_PLACES, PACK, PERKS, PERK_EFFECT, PERK_LIMIT, PackAPunch, PackedLook, PerkBottle, PerkMachine, type PerkKind } from './perks'
 
 export type ZombieState = {
@@ -234,6 +235,9 @@ export class ZombiesRuntime {
   private bottles = 0
   editor: Zombie | null = null
   private editorTimer = -1
+  /** 0..1: how deep in a Blot's gas the player is (it drives the screen effect); damage owed, paid in whole points. */
+  gasExposure = 0
+  private gasDamage = 0
   /** Throws waiting for the hand to let go, so the grenade leaves the screen as it leaves the hand. */
   private pendingThrows: { timer: number; launch: () => void }[] = []
   private uninstallCosmetics: () => void
@@ -704,6 +708,7 @@ export class ZombiesRuntime {
     for (const site of this.sites.values()) site.reset()
     for (const trap of this.traps) trap.reset()
     this.questStep = 'power'; this.bottles = 0; this.editor = null; this.editorTimer = -1
+    this.gasExposure = 0; this.gasDamage = 0; document.body.style.removeProperty('--dead-ink-gas')
     for (const well of this.wells) well.reset()
     this.soulStreams?.clear()
     this.packBuilt = false
@@ -839,7 +844,7 @@ export class ZombiesRuntime {
         }
       }
       if (tick) {
-        if (trap.inside(this.player.body.position)) this.damage(Math.round(TRAP.playerDps * 0.25), 'zombie')
+        if (trap.inside(this.player.body.position)) this.damage(Math.round(TRAP.playerDps * 0.25), 'gas')
         if (Math.random() < 0.5) this.emit({ kind: 'ink-burst', position: trap.centre.clone().setY(trap.centre.y + 0.6), radius: 30 })
       }
     }
@@ -1432,7 +1437,7 @@ export class ZombiesRuntime {
     return true
   }
 
-  damage(amount: number, cause: 'zombie' | 'fall', source?: THREE.Vector3) {
+  damage(amount: number, cause: 'zombie' | 'fall' | 'gas', source?: THREE.Vector3) {
     if (this.invincible || this.reviveGrace > 0 || !this.isActive() || !(amount > 0)) return
     // The shield on your back takes what comes from behind, until it breaks.
     if (this.shield && source && cause === 'zombie') {
@@ -1455,7 +1460,8 @@ export class ZombiesRuntime {
     this.state.health = Math.max(0, this.state.health - amount)
     this.lastHurt = this.state.elapsed
     const dead = this.state.health === 0
-    if (!dead && !this.hud.reducedMotion) {
+    // Gas and traps burn steadily: no knock-back on every tick, just the hurt.
+    if (!dead && !this.hud.reducedMotion && cause !== 'gas') {
       const point = this.player.body.position.clone().add(new THREE.Vector3(0, 1.17, 0))
       this.playerHits.hit({ region: source ? 'torso' : 'leg', side: 0, point,
         direction: source ? point.clone().sub(source) : new THREE.Vector3(0, 1, 0) },
@@ -1463,7 +1469,7 @@ export class ZombiesRuntime {
     }
     if (source) this.indicator.hit(source, amount)
     this.hud.hurt(); this.audio.play({ kind: 'damage' })
-    this.audio.play({ kind: 'bullet-hit', intensity: Math.min(1, amount / 50) })
+    if (cause !== 'gas') this.audio.play({ kind: 'bullet-hit', intensity: Math.min(1, amount / 50) })
     if (cause === 'fall') this.hud.notify('You fell.', 2)
     if (dead && this.perks.has('secondDraft')) this.selfRevive()
     else if (dead) this.gameOver(source)
@@ -1509,8 +1515,10 @@ export class ZombiesRuntime {
     const spot = pickSpawn(graph, this.player.world, { near: 14, far: 42, eyes: [] }, this.random)
     if (!spot) return false
     const feet = this.player.body.position
-    const health = Math.round(zombieHealth(this.rounds.round) * DIFFICULTY[this.difficulty].health * (this.storm ? STORM.health : 1))
-    return !!director.spawn(spot, health, this.storm ? 'sprint' : this.gait(), Math.atan2(feet.x - spot.x, feet.z - spot.z), true)
+    // From round 8 a few are Blots: bloated, slower, tougher, and they burst into poison gas.
+    const blot = !this.storm && rollBlot(this.rounds.round, this.random)
+    const health = Math.round(zombieHealth(this.rounds.round) * DIFFICULTY[this.difficulty].health * (this.storm ? STORM.health : 1) * (blot ? BLOT.health : 1))
+    return !!director.spawn(spot, health, this.storm ? 'sprint' : this.gait(), Math.atan2(feet.x - spot.x, feet.z - spot.z), true, false, blot)
   }
 
   /** The Ink Storm darkens the page while it lasts. */
@@ -1631,6 +1639,13 @@ export class ZombiesRuntime {
         if (this.storm) this.stormReward()
       }
       this.director.update(dt, target())
+      // A Blot's gas: damage while you are in it, deeper in hurts more; the screen darkens with it.
+      this.gasExposure = this.director.gas.exposure(this.camera.perspective.position)
+      if (this.gasExposure > 0) {
+        this.gasDamage += GAS.damagePerSecond * this.gasExposure * DIFFICULTY[this.difficulty].damage * dt
+        if (this.gasDamage >= 5) { const amount = Math.floor(this.gasDamage); this.gasDamage -= amount; this.damage(amount, 'gas') }
+      } else this.gasDamage = 0
+      document.body.style.setProperty('--dead-ink-gas', this.gasExposure.toFixed(3))
       // The last zombie of a round always comes at a sprint, as in every Call of Duty map.
       if (this.rounds.phase === 'active' && this.rounds.toSpawn === 0 && this.director.aliveCount === 1) {
         const last = this.director.zombies.find(z => z.state === 'chase' && !z.boss)
@@ -1767,6 +1782,7 @@ export class ZombiesRuntime {
     for (const trap of this.traps) trap.dispose()
     for (const well of this.wells) well.dispose()
     this.soulStreams?.dispose()
+    document.body.style.removeProperty('--dead-ink-gas')
     this.audio.dispose(); this.music.dispose(); this.hud.dispose()
     this.player.movementLocked = false; this.player.onPlayingChange = () => {}; this.player.lookSensitivity = () => 1
     this.player.actions.extraTargets = () => []; this.player.actions.onAction = () => {}

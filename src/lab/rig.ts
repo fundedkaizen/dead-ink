@@ -61,8 +61,9 @@ const fill = new THREE.MeshBasicMaterial({ color: penPalette.character, toneMapp
 
 // Dual-quaternion skinning (Blender "Preserve Volume"): glTF only carries weights and Three.js skins with linear blending,
 // which collapses the elbow/shoulder at 90 deg and candy-wraps the upper arm on twist. Rewrites the three skinning chunks.
-// Bones are rigid; a uniform scale on the whole character (Dead Ink's Brute) is carried by dqScale: the
-// quaternion takes only the rotation, so bind-space positions are scaled before it is applied.
+// Bones are rigid; a uniform scale on the whole character (Dead Ink's Brute), or on one bone (Dead Ink's
+// lost limbs, shrunk to nothing), is carried by dqScale, blended by weight: the quaternion takes only
+// the rotation, so bind-space positions are scaled before it is applied.
 /** Per-bone axial stretch (pose length factors): bind-space bone axis and origin, origin.w = current stretch. */
 const DQ_MAX_BONES = 32
 export const dqUniforms = {
@@ -78,7 +79,9 @@ const DQ_FUNCS = /* glsl */ `
          + dqStretch1(p, int(skinIndex.z)) * skinWeight.z + dqStretch1(p, int(skinIndex.w)) * skinWeight.w;
   }
   vec4 dqMul(vec4 a, vec4 b) { return vec4(a.w * b.xyz + b.w * a.xyz + cross(a.xyz, b.xyz), a.w * b.w - dot(a.xyz, b.xyz)); }
-  vec4 dqRotOf(mat4 m) {
+  vec4 dqRotOf(mat4 bone) {
+    // Rotation only: divide out the bone's (uniform) scale, so a shrunk or enlarged bone still turns true.
+    mat3 m = mat3(bone) / max(length(bone[0].xyz), 1e-6);
     float t = m[0][0] + m[1][1] + m[2][2]; vec4 q;
     if (t > 0.0) { float s = sqrt(t + 1.0) * 2.0; q = vec4((m[1][2] - m[2][1]) / s, (m[2][0] - m[0][2]) / s, (m[0][1] - m[1][0]) / s, 0.25 * s); }
     else if (m[0][0] > m[1][1] && m[0][0] > m[2][2]) { float s = sqrt(1.0 + m[0][0] - m[1][1] - m[2][2]) * 2.0; q = vec4(0.25 * s, (m[1][0] + m[0][1]) / s, (m[2][0] + m[0][2]) / s, (m[1][2] - m[2][1]) / s); }
@@ -98,7 +101,10 @@ const DQ_BLEND = /* glsl */ `
     dqAcc(boneMatX, skinWeight.x, dqRef, dqR, dqD); dqAcc(boneMatY, skinWeight.y, dqRef, dqR, dqD);
     dqAcc(boneMatZ, skinWeight.z, dqRef, dqR, dqD); dqAcc(boneMatW, skinWeight.w, dqRef, dqR, dqD);
     float dqLen = length(dqR); dqR /= dqLen; dqD /= dqLen;
-    float dqScale = length(boneMatX[0].xyz);
+    // Scale blends like the weights: a bone shrunk to nothing (a lost limb) pulls its vertices onto its
+    // joint, and a vertex shared with an unshrunk bone stays on that bone instead of flying off.
+    float dqScale = skinWeight.x * length(boneMatX[0].xyz) + skinWeight.y * length(boneMatY[0].xyz)
+                  + skinWeight.z * length(boneMatZ[0].xyz) + skinWeight.w * length(boneMatW[0].xyz);
   #endif
 `
 const DQ_NORMAL = /* glsl */ `
