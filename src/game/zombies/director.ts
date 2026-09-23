@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { Capsule } from 'three/addons/math/Capsule.js'
 import type { CollisionWorld } from '../../player/collision'
 import { EnemyActor } from '../actors'
 import { EnemyNavigation } from '../navigation'
@@ -166,6 +167,7 @@ export class ZombieDirector {
   readonly zombies: Zombie[] = []
   readonly navigation: EnemyNavigation
   private disposed = false
+  private stepCapsule = new Capsule(new THREE.Vector3(), new THREE.Vector3(), 0.27)
   private flowTimer = 0
   private time = 0
   /** Fine route plans, for the rare zombie the flow field cannot step along (a narrow gate, a doorway edge). */
@@ -564,7 +566,7 @@ export class ZombieDirector {
     // Movement allows a slightly slimmer body than planning does. Stepping into that margin wedges a
     // zombie somewhere no plan can start from, so only move where planning clearance also holds.
     const candidate = this.navigation.step(zombie.position, waypoint, step)
-    const stepped = candidate && this.navigation.floor(candidate) ? candidate : null
+    const stepped = candidate && this.navigation.floor(candidate) ? candidate : this.stepOver(zombie.position, waypoint, step)
     // Chairs, table corners, a doorframe, another zombie: slide around it rather than stall against it.
     const next = stepped && this.clearOfOthers(zombie, stepped) ? stepped : this.sidestep(zombie, waypoint, step)
     zombie.sideTimer = Math.max(0, zombie.sideTimer - dt)
@@ -609,6 +611,22 @@ export class ZombieDirector {
     zombie.position.copy(next)
     if (zombie.footstep > 0.9) { zombie.footstep = 0; this.context.emit({ kind: 'enemy-footstep', position: zombie.position.clone(), radius: 6 }) }
     return true
+  }
+
+  /**
+   * Over something ankle-high (a rail, a kerb, a pipe): the guards' step refuses anything the lower body
+   * touches, but a zombie lifts its feet. The body is tested from knee height, and the ground under the
+   * new spot may be up to half a metre up or down.
+   */
+  private stepOver(from: THREE.Vector3, goal: THREE.Vector3, distance: number) {
+    const dx = goal.x - from.x, dz = goal.z - from.z, flat = Math.hypot(dx, dz)
+    if (flat < 1e-4) return null
+    const next = scratch.v.set(from.x + dx / flat * distance, from.y + 0.55, from.z + dz / flat * distance)
+    const floor = this.context.world.floor(next, 0.05, 1.1, 0.2)
+    if (!Number.isFinite(floor) || Math.abs(floor - from.y) > 0.5) return null
+    this.stepCapsule.start.set(next.x, floor + 0.35 + 0.27, next.z)
+    this.stepCapsule.end.set(next.x, floor + 1.74 - 0.27, next.z)
+    return this.context.world.fits(this.stepCapsule) ? new THREE.Vector3(next.x, floor + 0.024, next.z) : null
   }
 
   /**

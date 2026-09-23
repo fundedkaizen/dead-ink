@@ -351,6 +351,24 @@ const run = (seconds: number, targets: ZombieTarget[], fps = 60) => {
   director.clear()
 }
 
+// ---- 5i. The railway: ankle-high rails are stepped over, not walls -------------------------------------
+{
+  const cases: [string, THREE.Vector3, THREE.Vector3][] = [
+    ['across the rails', v(45, 0, -36.8), v(45, 0.13, -30.4)],
+    ['back across', v(52, 0.13, -30.4), v(52, 0, -36.8)],
+    ['along the rails', v(40, 0.28, -33.6), v(60, 0.28, -33.6)],
+  ]
+  for (const [label, a, b] of cases) {
+    const player: ZombieTarget = { id: 'p1', feet: graph.point(graph.nearest(b, 2)), alive: true }
+    const z = director.spawn(graph.point(graph.nearest(a, 2)), 5000, 'run', 0)!
+    let t = 0
+    const gap = () => Math.hypot(z.position.x - player.feet.x, z.position.z - player.feet.z)
+    while (t < 15 && gap() > ATTACK.range + 0.2) { run(0.25, [player]); t += 0.25 }
+    assert(gap() <= ATTACK.range + 0.2, `${label}: the zombie gets over the rails (${gap().toFixed(1)} m after ${t} s)`)
+    director.clear()
+  }
+}
+
 // ---- 5f. The Brute -------------------------------------------------------------------------------
 {
   swipes.length = 0
