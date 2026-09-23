@@ -33,7 +33,7 @@ export const WEAPON_TIERS: readonly WeaponTier[] = [
   { tier: 4, metric: 'deepKills', goal: 200, camo: 'black-gold', label: n => `${n.toLocaleString('en-GB')} kills at round ${DEEP_ROUND} or later` },
 ]
 
-export type AccountMetric = 'bestRound' | 'bruteKills' | 'storms' | 'kills' | 'headshots'
+export type AccountMetric = 'bestRound' | 'bruteKills' | 'storms' | 'kills' | 'headshots' | 'editions'
 export type AccountChallenge = { id: string; metric: AccountMetric; goal: number; ink: number; title: string; label: string }
 export const ACCOUNT_CHALLENGES: readonly AccountChallenge[] = [
   { id: 'round-10', metric: 'bestRound', goal: 10, ink: 250, title: 'Double Digits', label: 'Reach round 10' },
@@ -43,6 +43,7 @@ export const ACCOUNT_CHALLENGES: readonly AccountChallenge[] = [
   { id: 'storm-5', metric: 'storms', goal: 5, ink: 500, title: 'Storm Chaser', label: 'Survive 5 Ink Storms' },
   { id: 'headshots-1000', metric: 'headshots', goal: 1000, ink: 1000, title: 'Headhunter', label: '1,000 headshot kills' },
   { id: 'kills-5000', metric: 'kills', goal: 5000, ink: 1500, title: 'Marathon', label: '5,000 kills' },
+  { id: 'last-edition', metric: 'editions', goal: 1, ink: 2000, title: 'The Last Edition', label: 'Finish the main quest' },
 ]
 
 export type WeaponStats = Record<WeaponMetric, number>
@@ -69,7 +70,7 @@ const zeroStats = (): WeaponStats => ({ kills: 0, headshots: 0, packedKills: 0, 
 export function freshChallenges(): ChallengeState {
   return {
     weapons: Object.fromEntries(CHALLENGE_WEAPONS.map(name => [name, zeroStats()])) as Record<WeaponName, WeaponStats>,
-    account: { bestRound: 0, bruteKills: 0, storms: 0, kills: 0, headshots: 0 },
+    account: { bestRound: 0, bruteKills: 0, storms: 0, kills: 0, headshots: 0, editions: 0 },
     done: [],
   }
 }

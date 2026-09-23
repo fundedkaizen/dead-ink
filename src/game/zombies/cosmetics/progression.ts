@@ -70,6 +70,12 @@ export function recordBruteKill(): ChallengeUnlock[] {
   return settleNow(true)
 }
 
+/** The main quest finished: the Editor is dead. */
+export function recordQuestComplete(): ChallengeUnlock[] {
+  loadProfile().challenges.account.editions++
+  return settleNow(true)
+}
+
 export function recordStormSurvived(): ChallengeUnlock[] {
   loadProfile().challenges.account.storms++
   return settleNow(true)

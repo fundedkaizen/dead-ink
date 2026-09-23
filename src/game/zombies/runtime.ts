@@ -37,7 +37,7 @@ import { REVIVE, SecondDraftRevive } from './revive'
 import { DECOY, DollBuy, animateDoll, inkDoll } from './decoy'
 import { THROW_RELEASE } from '../weapons'
 import { BENCH_PLACE, BUILDS, BuildSite, PARTS, POWER_PLACE, PartPickup, PowerSwitch, SHIELD, fromBehind, type BuildId, type PartId } from './buildables'
-import { ARMORY_PAGE, beginGame, deadInkHome, installCosmetics, recordBruteKill, recordGameEnd, recordKill, recordRound, recordStormSurvived, type ChallengeUnlock } from './cosmetics'
+import { ARMORY_PAGE, beginGame, deadInkHome, installCosmetics, recordBruteKill, recordGameEnd, recordKill, recordQuestComplete, recordRound, recordStormSurvived, type ChallengeUnlock } from './cosmetics'
 import { DEAD_INK_GAME_OVER } from './summary'
 import { LowHealthWarning } from './lowhealth'
 import { getSettings, lookScale, subscribeSettings, volumeFor } from '../settings'
@@ -939,6 +939,7 @@ export class ZombiesRuntime {
     this.zombieHud.announce('The Last Edition is printed', 6, 'powerup')
     this.hud.notify('You finished Dead Ink\'s story. Every perk is yours.', 6)
     this.music.sting('song')
+    this.toastUnlocks(recordQuestComplete())
   }
 
   private removeSolid(owner: THREE.Object3D) {
