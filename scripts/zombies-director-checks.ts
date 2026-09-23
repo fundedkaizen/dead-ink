@@ -583,6 +583,30 @@ const run = (seconds: number, targets: ZombieTarget[], fps = 60) => {
   console.log('  gore: crawlers, the Blot, gas, head pops, torn arms, gibs and clean reuse checked')
 }
 
+// ---- 5k. Co-op: the guest's puppets follow the host's zombies -----------------------------------------
+{
+  const guestScene = new THREE.Scene()
+  const guest = new ZombieDirector({ scene: guestScene, world, doors, graph, emit: () => {}, damagePlayer: () => {} })
+  await guest.init(24)
+  const player: ZombieTarget = { id: 'p1', feet: v(-30, 0, -25), alive: true }
+  player.feet.y = world.floor(player.feet.clone().setY(0.6), 1, 1.5, 0.28)
+  const a = director.spawn(v(-34, 0, -35), 5000, 'run', 0)!, b = director.spawn(v(-24, 0, -35), 5000, 'walk', 0)!
+  for (let i = 0; i < 60; i++) { director.update(1 / 60, [player]); guest.puppet(1 / 60, director.snapshot()) }
+  const twin = (z: typeof a) => guest.zombies[director.zombies.indexOf(z)]
+  assert(twin(a).state === 'chase' && twin(b).state === 'chase', 'the guest has both bodies up')
+  assert(twin(a).position.distanceTo(a.position) < 0.3, `and in the host's places (${twin(a).position.distanceTo(a.position).toFixed(2)} m off)`)
+  director.makeCrawler(b, v(0, 0, 1))
+  for (let i = 0; i < 10; i++) { director.update(1 / 60, [player]); guest.puppet(1 / 60, director.snapshot()) }
+  assert(twin(b).crawler, 'a crawler on the host crawls on the guest')
+  director.blast(a.position.clone().setY(a.position.y + 1.1), 0.5, 1e6)
+  for (let i = 0; i < 10; i++) { director.update(1 / 60, [player]); guest.puppet(1 / 60, director.snapshot()) }
+  assert(twin(a).state === 'dead', 'a kill on the host is a death on the guest')
+  director.clear()
+  for (let i = 0; i < 5; i++) guest.puppet(1 / 60, director.snapshot())
+  assert(guest.zombies.every(z => z.state !== 'chase'), 'bodies the host no longer has are gone from the guest')
+  guest.dispose()
+}
+
 // ---- 6. Cost of a full crowd -----------------------------------------------------------------
 {
   const player: ZombieTarget = { id: 'p1', feet: v(-23, 0, -29), alive: true }

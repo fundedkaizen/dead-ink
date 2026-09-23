@@ -22,6 +22,10 @@ import { BLOT, GasClouds, bloatCentre, bloatDripPoint, setBloat } from './gas'
  * spawn. A zombie is 'idle' in the pool, 'chase' while alive, and 'dead' while its body lies there.
  */
 export type ZombieGait = 'walk' | 'run' | 'sprint'
+const GAITS: readonly ZombieGait[] = ['walk', 'run', 'sprint']
+/** One zombie in a co-op snapshot: see ZombieDirector.snapshot(). */
+export type ZombieSnap = [number, number, number, number, number, number, number, number, number, number, number, number]
+const round2 = (n: number) => Math.round(n * 100) / 100
 /** Metres per second. Players walk at 4.2 and sprint at 7.6: a sprinter keeps up with a walking player and only a sprint gets away. */
 export const ZOMBIE_SPEED: Record<ZombieGait, number> = { walk: 1.2, run: 4.4, sprint: 6.2 }
 
@@ -82,6 +86,8 @@ export type Zombie = {
   actor: EnemyActor
   position: THREE.Vector3
   yaw: number
+  /** Walking this frame (for co-op snapshots: the guest animates the walk from it). */
+  moving: boolean
   health: number
   maxHealth: number
   gait: ZombieGait
@@ -231,7 +237,7 @@ export class ZombieDirector {
       addEyes(actor)
       this.context.scene.add(actor.root)
       this.zombies.push({
-        id: `zombie-${i + 1}`, actor, position: new THREE.Vector3(), yaw: 0, health: 0, maxHealth: 0, gait: 'walk',
+        id: `zombie-${i + 1}`, actor, position: new THREE.Vector3(), yaw: 0, moving: false, health: 0, maxHealth: 0, gait: 'walk',
         state: 'idle', stuck: 0, unreachable: 0, swing: 0, swingLanded: false,
         recover: 0, stagger: 0, deadFor: 0, stranded: false, footstep: 0, route: [], routeTimer: 0, routeNode: -1, routeFrom: -1, blocked: -1, avoidTimer: 0, edgeFail: 0, probeFail: -1, probeFails: 0, bestDistance: Infinity, noProgress: 0,
         rise: 0, climb: null, voice: 0, carriage: randomCarriage('walk'), flinch: 0, flinchBack: 0, flinchSide: 0,
@@ -254,8 +260,16 @@ export class ZombieDirector {
     if (!zombie) return null
     const floor = this.navigation.floor(position)
     if (!floor) return null
-    zombie.position.copy(floor)
+    this.wake(zombie, floor, health, gait, facing, rise, boss, blot)
+    if (rise) this.context.onRise?.(zombie.position.clone())
+    return zombie
+  }
+
+  /** Bring a pooled body into play at `at`, whole and fresh (spawn, and co-op puppets on the guest). */
+  private wake(zombie: Zombie, at: THREE.Vector3, health: number, gait: ZombieGait, facing: number, rise: boolean, boss: boolean, blot: boolean) {
+    zombie.position.copy(at)
     zombie.yaw = facing
+    zombie.moving = false
     zombie.health = zombie.maxHealth = health
     zombie.gait = gait
     zombie.state = 'chase'
@@ -292,8 +306,6 @@ export class ZombieDirector {
     // restore() puts the guard's gun back in its hand; a zombie never carries one.
     actor.gun.visible = false
     actor.root.visible = true
-    if (rise) this.context.onRise?.(zombie.position.clone())
-    return zombie
   }
 
   /** Move a living zombie somewhere else (a stranded one, back into play). Keeps its health. */
@@ -406,6 +418,7 @@ export class ZombieDirector {
         zombie.stranded = flat > STRANDED.near && (zombie.unreachable > STRANDED.seconds || flat > STRANDED.distance
           || zombie.noProgress > STRANDED.noProgressSeconds)
       }
+      zombie.moving = moving
       zombie.flinch = Math.max(0, zombie.flinch - dt)
       if (zombie.crawler) {
         zombie.crawlFall = Math.max(0, zombie.crawlFall - dt)
@@ -424,6 +437,110 @@ export class ZombieDirector {
       this.carry(zombie, moving)
       reachArms(zombie, moving ? this.time : -1)
     }
+  }
+
+  /**
+   * Co-op, the host's side: every body in play as a row of numbers for the guest (see ZombieSnap):
+   * [pool index, state (1 up, 2 dead), x, y, z, yaw, gait, moving, swing left, flags, rise left, health].
+   */
+  snapshot(): ZombieSnap[] {
+    const rows: ZombieSnap[] = []
+    this.zombies.forEach((z, i) => {
+      if (z.state === 'idle') return
+      const flags = (z.crawler ? 1 : 0) | (z.blot ? 2 : 0) | (z.boss ? 4 : 0) | (z.lost.head ? 8 : 0) | (z.lost.L ? 16 : 0) | (z.lost.R ? 32 : 0)
+        | (z.gibbed ? 64 : 0) | (z.climb ? 128 : 0) | (z.slam > 0 ? 256 : 0)
+      const p = z.climb || z.rise > 0 ? z.actor.root.position : z.position
+      rows.push([i, z.state === 'dead' ? 2 : 1, round2(p.x), round2(z.rise > 0 ? z.position.y : p.y), round2(p.z), round2(z.yaw), GAITS.indexOf(z.gait),
+        z.moving ? 1 : 0, round2(z.swing), flags, round2(z.rise), z.maxHealth > 0 ? round2(z.health / z.maxHealth) : 0])
+    })
+    return rows
+  }
+
+  /**
+   * Co-op, the guest's side: no thinking at all. Each body goes where the host's snapshot says, eases
+   * toward it between snapshots, and is drawn exactly as the host draws it: the walk, the swipe, the climb
+   * out of the ground, the crawl, the Blot's belly, the Brute, heads and arms coming off, and death.
+   */
+  puppet(dt: number, rows: readonly ZombieSnap[], look?: THREE.Vector3) {
+    this.time += dt
+    this.gore.update(dt)
+    this.gas.update(dt)
+    const seen = new Set<number>()
+    const follow = 1 - Math.exp(-dt * 14)
+    for (const row of rows) {
+      const [index, state, x, y, z, yaw, gait, moving, swing, flags, rise, health] = row
+      const zombie = this.zombies[index]
+      if (!zombie) continue
+      seen.add(index)
+      const goal = scratch.t.set(x, y, z)
+      if (zombie.state === 'idle') {
+        if (state !== 1) continue
+        this.wake(zombie, goal, 1, GAITS[gait] ?? 'walk', yaw, rise > 0, !!(flags & 4), !!(flags & 2))
+        zombie.rise = rise
+      }
+      if (zombie.state === 'chase') {
+        const away = scratch.v.set(-Math.sin(zombie.yaw), 0, -Math.cos(zombie.yaw))
+        if (flags & 1 && !zombie.crawler) this.makeCrawler(zombie, away)
+        if (flags & 16) this.loseArm(zombie, 'L', away)
+        if (flags & 32) this.loseArm(zombie, 'R', away)
+        if (flags & 64 && !zombie.gibbed) this.gib(zombie, away)
+        else if (flags & 8 && !zombie.lost.head) this.popHead(zombie, away)
+        if (state === 2) { zombie.position.copy(goal); this.kill(zombie) }
+      }
+      if (zombie.state === 'dead') { this.lieDead(zombie, dt); continue }
+      // Ease toward the host's place; a big jump (a relocated body) snaps.
+      if (zombie.position.distanceToSquared(goal) > 9) zombie.position.copy(goal)
+      else zombie.position.lerp(goal, follow)
+      const turn = Math.atan2(Math.sin(yaw - zombie.yaw), Math.cos(yaw - zombie.yaw))
+      zombie.yaw += turn * follow
+      zombie.gait = GAITS[gait] ?? zombie.gait
+      zombie.health = health * zombie.maxHealth
+      const swingStarted = swing > 0 && zombie.swing <= 0
+      zombie.swing = swing
+      zombie.slam = flags & 256 ? 1 : 0
+      if (swingStarted) this.context.emit({ kind: zombie.boss ? 'boss-growl' : 'zombie-snarl', position: zombie.position.clone().setY(zombie.position.y + 1.6), radius: 14 })
+      zombie.voice -= dt
+      if (zombie.voice <= 0) {
+        const sprint = zombie.gait === 'sprint' && !zombie.boss && !zombie.crawler && !zombie.blot
+        zombie.voice = sprint ? 2.5 + Math.random() * 3 : 3.5 + Math.random() * 5
+        this.context.emit({ kind: zombie.boss ? 'boss-growl' : zombie.blot ? 'blot-gurgle' : sprint ? 'zombie-scream' : 'zombie-groan',
+          position: zombie.position.clone().setY(zombie.position.y + (zombie.crawler ? 0.4 : 1.6)), radius: zombie.boss ? 70 : 32 })
+      }
+      if (rise > 0) { zombie.rise = rise; this.rise(zombie, null, 0); continue }
+      zombie.rise = 0
+      if (zombie.crawler) {
+        zombie.crawlFall = Math.max(0, zombie.crawlFall - dt)
+        zombie.actor.update(dt, 'patrol', false, undefined, 0)
+        zombie.actor.gun.visible = false
+        this.crawlPose(zombie, dt, flags & 128 ? 'climb' : 'crawl', look)
+        continue
+      }
+      const walking = moving === 1 || !!(flags & 128)
+      zombie.moving = walking
+      zombie.actor.root.position.copy(zombie.position)
+      const roll = walking ? zombie.carriage.limp * Math.sin(this.time * 5.2 + zombie.carriage.phase) : 0
+      zombie.actor.root.rotation.set(0, zombie.yaw, roll, 'YXZ')
+      zombie.actor.update(dt, 'patrol', walking, undefined, walking ? speedOf(zombie) : 0)
+      zombie.actor.gun.visible = false
+      this.carry(zombie, walking)
+      reachArms(zombie, walking ? this.time : -1)
+    }
+    // Bodies the host no longer has: the dead finish sinking here, anything else is gone.
+    this.zombies.forEach((zombie, index) => {
+      if (seen.has(index) || zombie.state === 'idle') return
+      if (zombie.state === 'dead') this.lieDead(zombie, dt)
+      else { zombie.state = 'idle'; zombie.actor.root.visible = false }
+    })
+  }
+
+  /** A body on the ground: its death pose, then it sinks into the paper and goes back to the pool. */
+  private lieDead(zombie: Zombie, dt: number) {
+    zombie.deadFor += dt
+    if (zombie.crawler) this.crawlPose(zombie, dt, 'dead')
+    else zombie.actor.update(dt, 'dead', false)
+    const sinking = zombie.deadFor - CORPSE.lie
+    if (sinking > 0) zombie.actor.root.position.y = (zombie.crawler ? zombie.actor.root.position.y : zombie.position.y) - CORPSE.depth * Math.min(1, sinking / CORPSE.sink)
+    if (sinking >= CORPSE.sink) { zombie.state = 'idle'; zombie.actor.root.visible = false }
   }
 
   /** Clawing out of the ground: it cannot walk or swipe until it is out, but it can be shot. */

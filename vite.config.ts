@@ -1,5 +1,7 @@
 import { defineConfig, type Plugin } from 'vite'
 import preact from '@preact/preset-vite'
+// @ts-expect-error plain JavaScript module, shared with the standalone relay
+import { attachRelay } from './server/coop-relay.mjs'
 
 /**
  * The game entry is a tiny bootstrap that import()s the real game so a failed load can show a fallback.
@@ -30,8 +32,18 @@ const preloadGameChunks: Plugin = {
   },
 }
 
+/** Dead Ink co-op: the relay rides on the dev server, at /coop. */
+const coopRelay: Plugin = {
+  name: 'dead-ink-coop-relay',
+  configureServer(server) { if (server.httpServer) attachRelay(server.httpServer) },
+  configurePreviewServer(server) { if (server.httpServer) attachRelay(server.httpServer) },
+}
+
 export default defineConfig({
-  plugins: [preact(), preloadGameChunks],
+  plugins: [preact(), preloadGameChunks, coopRelay],
+  // A full-page hot reload erases an in-progress game in every connected tab.
+  // Pick up source edits on manual refresh, so pausing to use a coding agent is safe.
+  server: { hmr: false },
   build: {
     rolldownOptions: {
       input: { main: 'index.html', lab: 'lab.html' },
