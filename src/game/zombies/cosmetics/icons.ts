@@ -57,7 +57,32 @@ const CAMOS: Record<string, string> = {
       .map(([x, y, c]) => `<rect x="${x}" y="${y}" width="4" height="4" fill="${c}"/>`).join('')}</g>`,
   obsidian: `<rect x="4" y="8" width="40" height="32" rx="3" fill="#18141f"/><path d="M8 16l10 6 4 10 12 4M22 22l14-8M30 36l6 2" stroke="#d7cbe6" stroke-width="1.3" fill="none"/>`,
   gold: `<rect x="4" y="8" width="40" height="32" rx="3" fill="${GOLD}"/><path d="M10 14l28 20M16 12l24 17M8 21l22 17" stroke="#fff3c9" stroke-width="1.2" opacity="0.8"/>`,
+  crosshatch: `<defs><clipPath id="camo-f"><rect x="4" y="8" width="40" height="32" rx="3"/></clipPath></defs><g clip-path="url(#camo-f)"><rect x="4" y="8" width="40" height="32" fill="#fff"/>
+    <path d="${Array.from({ length: 12 }, (_, i) => `M${i * 5 - 10} 40l26 -32`).join('')}" stroke="#111" stroke-width="1.1"/>
+    <path d="${Array.from({ length: 7 }, (_, i) => `M${i * 5 + 14} 8l24 32`).join('')}" stroke="#111" stroke-width="1.1"/>
+    <path d="M22 24h24M22 28h24M24 32h22M26 36h20" stroke="#111" stroke-width="1"/></g>`,
+  blueprint: `<defs><clipPath id="camo-g"><rect x="4" y="8" width="40" height="32" rx="3"/></clipPath></defs><g clip-path="url(#camo-g)"><rect x="4" y="8" width="40" height="32" fill="#153e8f"/>
+    <path d="M4 14h40M4 26h40M4 32h40M4 38h40M10 8v32M16 8v32M28 8v32M34 8v32M40 8v32" stroke="#9fc3ff" stroke-width="0.4" opacity="0.7"/>
+    <path d="M4 20h40M22 8v32" stroke="#e8f1ff" stroke-width="1.2"/><circle cx="31" cy="27" r="7.5" fill="none" stroke="#e8f1ff" stroke-width="1.2"/>
+    <path d="M9 34l9-9 4 4" fill="none" stroke="#e8f1ff" stroke-width="1.2"/></g>`,
+  'red-ink': `<defs><clipPath id="camo-h"><rect x="4" y="8" width="40" height="32" rx="3"/></clipPath></defs><g clip-path="url(#camo-h)"><rect x="4" y="8" width="40" height="32" fill="#fbf4f1"/>
+    <path d="M4 22c6-6 12-2 16-8s12-4 14 2 8 6 10 4v20H4z" fill="#d4332a"/><path d="M12 40c2-6 8-8 12-5s10-2 12 5z" fill="#5a0a08"/>
+    <circle cx="11" cy="14" r="1.6" fill="#d4332a"/><circle cx="38" cy="13" r="1.2" fill="#d4332a"/><circle cx="30" cy="11" r="0.9" fill="#d4332a"/></g>`,
+  'black-gold': `<rect x="4" y="8" width="40" height="32" rx="3" fill="#0d0d0d"/>
+    <path d="M6 30c6-2 8-10 14-10s8 8 14 6 6-10 10-12M14 40c2-6 6-8 10-8M28 8c0 6 4 8 8 12" fill="none" stroke="${GOLD}" stroke-width="1.6" stroke-linecap="round"/>
+    <path d="M20 20l-4-8M34 26l6 8" stroke="${GOLD}" stroke-width="0.8" opacity="0.8"/>`,
+  diamond: `<defs><clipPath id="camo-i"><rect x="4" y="8" width="40" height="32" rx="3"/></clipPath></defs><g clip-path="url(#camo-i)">
+    <rect x="4" y="8" width="40" height="32" fill="#cfe0f7"/>
+    <path d="M4 8h16l-6 12z" fill="#e6f0ff"/><path d="M20 8h14l-8 14z" fill="#9fbde6"/><path d="M34 8h10v14l-12-2z" fill="#eef6ff"/>
+    <path d="M4 8l10 12-10 8z" fill="#b8cfee"/><path d="M14 20l12 2-6 12z" fill="#f7fbff"/><path d="M26 22l8-14-2 12z" fill="#c9dcf6"/>
+    <path d="M32 20l12 2v18l-12-4z" fill="#a9c4ea"/><path d="M4 28l10-8 6 14-16 6z" fill="#e7f1ff"/><path d="M20 34l6-12 6-2v16l-12 4z" fill="#bcd3f2"/>
+    <path d="M4 8h16l-6 12zM20 8h14l-8 14zM14 20l12 2-6 12zM26 22l6-2 12 2M32 20v16M4 28l10-8M20 34l12 2" fill="none" stroke="#56688a" stroke-width="0.6"/>
+    <g class="camo-glint" fill="#fff"><path d="M16 17l1 3 3 1-3 1-1 3-1-3-3-1 3-1z"/><path d="M36 29l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"/><path d="M25 32l.6 1.6 1.6.6-1.6.6-.6 1.6-.6-1.6-1.6-.6 1.6-.6z"/></g></g>
+    <rect x="4" y="8" width="40" height="32" rx="3" fill="none" stroke="#56688a" stroke-width="1"/>`,
 }
+
+/** A camo swatch by id, for the Challenges tab and the game-over summary. */
+export const camoSwatch = (camo: string) => `<svg viewBox="0 4 48 40" aria-hidden="true">${CAMOS[camo] ?? ''}</svg>`
 
 const KNIVES: Record<string, string> = {
   combat: `<path d="M4 30h14v6H4z" ${paper}/><path d="M18 27v12" ${stroke}/><path d="M20 30h18l6-4v-2c-6 1-14 2-24 2z" ${paper}/><path d="M8 30v6M12 30v6" stroke="currentColor" stroke-width="1.2"/>`,

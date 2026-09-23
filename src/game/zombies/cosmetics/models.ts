@@ -280,8 +280,15 @@ export const buildCharm = (id: CharmId) => charm(id)
 
 // ---------------------------------------------------------------- camos
 
-const CAMO_CODE: Record<CamoId, number> = { stripes: 0, woodland: 1, digital: 2, obsidian: 3, gold: 4 }
+const CAMO_CODE: Record<CamoId, number> = { stripes: 0, woodland: 1, digital: 2, obsidian: 3, gold: 4,
+  crosshatch: 5, blueprint: 6, 'red-ink': 7, 'black-gold': 8, diamond: 9 }
 const camoMaterials = new Map<CamoId, THREE.MeshBasicMaterial>()
+/**
+ * Seconds for the animated camos (Diamond's glints), shared by every copy. Advanced as the material draws,
+ * so it costs nothing while no Diamond gun is on screen; held still under reduced motion.
+ */
+const camoTime = { value: 0 }
+const reducedMotion = () => typeof document !== 'undefined' && document.body?.dataset.reducedMotion === 'true'
 
 /**
  * A camo replaces a gun's paper faces. Batched gun faces carry no UVs, so the pattern is projected from
@@ -294,6 +301,7 @@ export function camoMaterial(id: CamoId) {
   material.defines = { CAMO: CAMO_CODE[id] }
   material.onBeforeCompile = shader => {
     shader.uniforms.camoGold = { value: new THREE.Color(RARITY_INFO.legendary.color) }
+    shader.uniforms.camoTime = camoTime
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>
         varying vec3 vCamoPosition;
@@ -306,6 +314,7 @@ export function camoMaterial(id: CamoId) {
         varying vec3 vCamoPosition;
         varying vec3 vCamoNormal;
         uniform vec3 camoGold;
+        uniform float camoTime;
         float camoHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
         float camoNoise(vec2 p) {
           vec2 i = floor(p), f = fract(p);
@@ -335,10 +344,68 @@ export function camoMaterial(id: CamoId) {
             float vein = abs(camoFbm(p * 26.0) - 0.5);
             vec3 glass = mix(vec3(0.004, 0.003, 0.006), vec3(0.03, 0.018, 0.045), camoNoise(p * 12.0));
             return mix(vec3(0.62, 0.52, 0.78), glass, smoothstep(0.012, 0.03, vein));
-          #else
+          #elif CAMO == 4
             float leaf = camoFbm(p * 40.0);
             float hatch = step(0.82, fract((p.x + p.y) * 260.0)) * 0.25;
             return camoGold * (0.82 + leaf * 0.35) - hatch * 0.2;
+          #elif CAMO == 5
+            // Crosshatch: pen hatching laid in three passes, darker where the noise says shade.
+            float shade = camoFbm(p * 26.0 + 1.7);
+            float wob = camoNoise(p * 90.0) * 0.5;
+            float a = step(0.74, fract((p.x + p.y) * 170.0 + wob)) * step(0.34, shade);
+            float b = step(0.74, fract((p.x - p.y) * 170.0 + wob)) * step(0.5, shade);
+            float c = step(0.76, fract(p.y * 190.0 + wob)) * step(0.66, shade);
+            return mix(vec3(0.96), vec3(0.015), max(a, max(b, c)));
+          #elif CAMO == 6
+            // Blueprint: blue paper, a faint fine grid, bold lines every fifth and construction circles.
+            vec3 blue = vec3(0.012, 0.085, 0.36);
+            vec2 fine = abs(fract(p / 0.012) - 0.5);
+            vec2 bold = abs(fract(p / 0.06) - 0.5);
+            float circle = 1.0 - smoothstep(0.0, 0.02, abs(length(fract(p / 0.09 + 0.25) - 0.5) - 0.32));
+            float line = max(step(0.43, max(fine.x, fine.y)) * 0.3, max(step(0.47, max(bold.x, bold.y)), circle * 0.75));
+            return mix(blue * (0.9 + camoNoise(p * 20.0) * 0.2), vec3(0.8, 0.9, 1.0), line);
+          #elif CAMO == 7
+            // Red Ink: paper soaked through, dark where it pooled, spattered at the edges.
+            float n = camoFbm(p * 24.0 + 11.0);
+            float m = camoFbm(p * 66.0 - 4.0);
+            vec3 red = vec3(0.6, 0.028, 0.02), deep = vec3(0.16, 0.0, 0.004);
+            vec3 c = vec3(0.97, 0.94, 0.92);
+            float soak = smoothstep(0.44, 0.48, n);
+            c = mix(c, red, soak);
+            c = mix(c, deep, smoothstep(0.6, 0.64, n) * smoothstep(0.45, 0.5, m));
+            float spatter = step(0.94, camoHash(floor(p / 0.005))) * step(0.36, n);
+            return mix(c, red, spatter * (1.0 - soak));
+          #elif CAMO == 8
+            // Black Gold: black lacquer veined with gold leaf.
+            float vein = abs(camoFbm(p * 20.0) - 0.5);
+            float fine = abs(camoFbm(p * 46.0 + 5.0) - 0.5);
+            vec3 lacquer = vec3(0.004) + vec3(0.012) * camoNoise(p * 36.0);
+            float g = 1.0 - smoothstep(0.01, 0.026, vein);
+            g = max(g, (1.0 - smoothstep(0.005, 0.012, fine)) * 0.75);
+            return mix(lacquer, camoGold * 1.08, g);
+          #else
+            // Diamond: cut facets (the nearest of scattered points), each its own shade of ice, dark
+            // girdle lines between them, glints that flash facet by facet and a slow sweep of light.
+            vec2 q = p / 0.017;
+            vec2 i = floor(q), f = fract(q);
+            float d1 = 8.0, d2 = 8.0; vec2 cell = vec2(0.0);
+            for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+              vec2 o = vec2(float(x), float(y));
+              vec2 r = o + vec2(camoHash(i + o), camoHash(i + o + 17.3)) - f;
+              float d = dot(r, r);
+              if (d < d1) { d2 = d1; d1 = d; cell = i + o; } else if (d < d2) d2 = d;
+            }
+            float h = camoHash(cell);
+            float tone = pow(h, 1.6) * 0.7 + 0.3 * camoHash(cell + 5.1);
+            vec3 ice = mix(vec3(0.22, 0.36, 0.66), vec3(1.0), tone);
+            float edge = smoothstep(0.02, 0.09, sqrt(d2) - sqrt(d1));
+            ice = mix(vec3(0.07, 0.1, 0.2), ice, edge);
+            float phase = camoTime * (0.8 + h * 1.8) + h * 6.2831;
+            float glint = pow(max(0.0, sin(phase)), 14.0) * step(0.42, camoHash(cell + 3.1));
+            float sweep = pow(max(0.0, sin((p.x + p.y) * 18.0 - camoTime * 1.4)), 30.0);
+            // Fire: each glint catches a little of the spectrum, washed toward white.
+            vec3 fire = mix(vec3(1.0), 0.5 + 0.5 * cos(6.2831 * (h + vec3(0.0, 0.33, 0.67))), 0.35);
+            return ice + fire * (glint * 1.5 + sweep * 0.6 * edge);
           #endif
         }`)
       .replace('#include <color_fragment>', `#include <color_fragment>
@@ -350,6 +417,7 @@ export function camoMaterial(id: CamoId) {
           + camoPattern(vCamoPosition.xy + 0.71) * camoWeights.z;`)
   }
   material.customProgramCacheKey = () => `dead-ink-camo:${id}`
+  if (id === 'diamond') material.onBeforeRender = () => { camoTime.value = reducedMotion() ? 1.2 : performance.now() / 1000 % 1000 }
   camoMaterials.set(id, material)
   return material
 }

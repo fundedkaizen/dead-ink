@@ -9,6 +9,7 @@ import { EnemyDirector } from './ai'
 import { FirstPersonWeapons } from './weapons'
 import { MissionAudio } from './audio'
 import { MissionHUD } from './hud'
+import { getSettings, lookScale, volumeFor } from './settings'
 import { MissionBlood, type BloodSnapshot } from './hit-reactions'
 import { MissionImpacts } from './impacts'
 import { PlayerHitReactions, type PlayerBulletHit } from './player-hit-reactions'
@@ -77,7 +78,7 @@ export class MissionRuntime {
     this.impacts = new MissionImpacts(scene, player.world)
     this.bulletTrails = new BulletTrails(scene, 'Player bullet')
     this.escapeDust = new EscapeDust(scene)
-    player.lookSensitivity = () => this.weapons.lookSensitivity
+    player.lookSensitivity = () => lookScale(this.weapons.lookSensitivity, this.aiming)
     this.ai = new EnemyDirector({ scene, world: player.world, doors: player.actions.doors, specs: world.enemies,
       emit: event => this.emit(event, false), damagePlayer: (amount, source, hit) => this.damage(amount, source, hit),
       onSurfaceHit: (point, direction, surface, weapon) => this.impacts.emit(point, direction, surface, weapon),
@@ -87,7 +88,7 @@ export class MissionRuntime {
     this.hud = new MissionHUD(world, {
       retry: () => { this.restart(); void this.audio.unlock(); this.player.requestControl() },
       restart: () => { this.restart(); void this.audio.unlock(); this.player.requestControl() },
-      volume: value => this.audio.setVolume(value), mute: value => this.audio.setMuted(value) })
+      volume: () => this.audio.setVolume(volumeFor(getSettings(), 'effects')), mute: value => this.audio.setMuted(value) })
     player.onPlayingChange = playing => {
       this.hud.setPlaying(playing)
       if (this.escape.active) this.hud.setEscape(this.escape)
@@ -508,6 +509,9 @@ export class MissionRuntime {
       this.hud.setDeath(this.death)
     } else {
       if (this.death.active) { this.death.reset(); this.weapons.resetDeath(); this.hud.clearDeath() }
+      // The field of view from settings, except while the escape cinematic or a scope owns it.
+      const fov = getSettings().fov, cam = this.camera.perspective
+      if (this.player.playing && !this.escape.active && !this.weapons.scoped && cam.fov !== fov) { cam.fov = fov; cam.updateProjectionMatrix() }
       this.weapons.update(dt,{active:reactionActive&&this.interactionTime===0,climbing:this.player.actions.traversing,
         moving:this.player.body.velocity.length(),aiming:this.aiming,reducedMotion:this.hud.reducedMotion,feet:this.player.body.position,hitPose})
     }

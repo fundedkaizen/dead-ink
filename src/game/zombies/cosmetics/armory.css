@@ -73,3 +73,52 @@ body[data-reduced-motion="true"] .armory-item:hover:not([aria-disabled]) { trans
   .dead-ink-record { grid-template-columns: 1fr 1fr; }
 }
 body[data-mission="true"] .walk-card .armory-result:empty { display: none; }
+
+/* Challenge camos in the Camos grid: a locked one still shows its swatch and what earns it. */
+body[data-mission="true"] .walk-card .armory-item.challenge[aria-disabled] { opacity: 0.62; filter: grayscale(0.85); }
+body[data-mission="true"] .walk-card .armory-item.challenge[aria-disabled] .armory-rarity { font-size: 10.5px; line-height: 1.25; }
+.armory-item.diamond:not([aria-disabled]) { border-bottom-color: #9fc3ff; background: linear-gradient(135deg, #fff 0 40%, #eef5ff 50%, #fff 60%) 0 0 / 300% 300%; animation: diamond-sheen 4s linear infinite; }
+.armory-guns button.mastered::after { content: ' ◆'; font-size: 10px; }
+.camo-glint { animation: camo-glint 2.4s ease-in-out infinite; transform-origin: center; transform-box: fill-box; }
+.camo-glint path:nth-child(2) { animation: camo-glint 2.4s 0.8s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+.camo-glint path:nth-child(3) { animation: camo-glint 2.4s 1.6s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+@keyframes camo-glint { 0%, 100% { opacity: 0.15; transform: scale(0.6); } 50% { opacity: 1; transform: scale(1.15); } }
+@keyframes diamond-sheen { from { background-position: 100% 100%; } to { background-position: 0 0; } }
+body[data-reduced-motion="true"] :is(.camo-glint, .camo-glint path, .armory-item.diamond) { animation: none; }
+
+/* The Challenges tab. The same room as the grid, so switching tabs never moves the page. */
+.armory-challenges { display: grid; gap: 10px; min-height: 246px; align-content: start; }
+.armory-challenges[hidden] { display: none; }
+.challenge-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.challenge-row { display: grid; grid-template-columns: 64px minmax(0, 1fr) minmax(150px, 34%); align-items: center; gap: 14px; min-height: 52px; padding: 6px 12px 6px 6px;
+  border: 1.5px solid var(--ink-rule); border-radius: 4px 3px 5px 3px; background: var(--paper); color: var(--ink); }
+.challenge-row.account { grid-template-columns: minmax(0, 1fr) auto minmax(150px, 34%); padding-left: 14px; }
+.challenge-row[data-status="done"] { border-color: var(--ink); }
+.challenge-row[data-status="blocked"] { background: var(--paper-shade); }
+.challenge-swatch { display: block; width: 64px; height: 40px; }
+.challenge-swatch svg { width: 100%; height: 100%; display: block; }
+.challenge-swatch.locked { filter: grayscale(1) opacity(0.45); }
+.challenge-text { display: grid; gap: 2px; min-width: 0; }
+.challenge-text b { font: 700 14px/1.2 var(--notes); }
+body[data-mission="true"] .walk-card .challenge-text small { margin: 0; font: 12px/1.3 var(--notes); color: var(--ink-muted); }
+.challenge-reward { font: 700 13px/1 var(--notes); white-space: nowrap; }
+.challenge-progress { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.challenge-bar { position: relative; flex: 1; height: 10px; border: 1.5px solid var(--ink); border-radius: 2px 3px 2px 3px; background: var(--paper); overflow: hidden; }
+.challenge-bar i { position: absolute; inset: 0 auto 0 0; background: var(--ink); }
+.challenge-bar.done i { background: var(--ink); }
+.challenge-count { min-width: 76px; text-align: right; font: 600 12px/1 var(--notes); font-variant-numeric: tabular-nums; }
+.challenge-diamond { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 10px 14px 10px 6px;
+  border: 2px solid var(--ink); border-radius: 5px 3px 6px 4px; background: linear-gradient(120deg, var(--paper) 0 45%, #eef5ff 55%, var(--paper) 65%); box-shadow: 3px 4px 0 var(--ink); color: var(--ink); }
+.challenge-pips { display: flex; align-items: center; gap: 5px; }
+.challenge-pips i { width: 12px; height: 12px; transform: rotate(45deg); border: 1.5px solid var(--ink); background: var(--paper); }
+.challenge-pips i.on { background: #9fc3ff; }
+.challenge-pips em { margin-left: 8px; font: 700 13px/1 var(--notes); font-style: normal; font-variant-numeric: tabular-nums; }
+body[data-mission="true"] .walk-card .challenge-heading { margin: 10px 0 0; font: 700 22px/1.1 var(--hand); color: var(--ink); }
+@media (max-width: 640px) {
+  .challenge-row, .challenge-row.account { grid-template-columns: 52px minmax(0, 1fr); row-gap: 6px; }
+  .challenge-row.account { grid-template-columns: minmax(0, 1fr) auto; }
+  .challenge-swatch { width: 52px; height: 34px; }
+  .challenge-progress { grid-column: 1 / -1; }
+  .challenge-diamond { grid-template-columns: 52px minmax(0, 1fr); }
+  .challenge-pips { grid-column: 1 / -1; }
+}

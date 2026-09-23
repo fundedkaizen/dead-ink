@@ -2,10 +2,12 @@ import assert from 'node:assert/strict'
 import * as THREE from 'three'
 import { CollisionWorld } from '../src/player/collision'
 import { FirstPersonWeapons } from '../src/game/weapons'
-import { CATALOGUE } from '../src/game/zombies/cosmetics/catalogue'
-import { buildCharm } from '../src/game/zombies/cosmetics/models'
+import { CATALOGUE, CHALLENGE_CAMOS, cosmeticKey } from '../src/game/zombies/cosmetics/catalogue'
+import { buildCharm, camoMaterial } from '../src/game/zombies/cosmetics/models'
 import { metal } from '../src/lab/weapons/models/common'
-import { CASE, STRIP_WIN_INDEX, awardGame, inkForGame, loadProfile, openCase, resetProfileCache, rollCaseItem, toggleEquip } from '../src/game/zombies/cosmetics/profile'
+import { CASE, STRIP_WIN_INDEX, awardGame, casePool, inkForGame, loadProfile, openCase, resetProfileCache, rollCaseItem, toggleEquip } from '../src/game/zombies/cosmetics/profile'
+import { CHALLENGE_WEAPONS, WEAPON_TIERS, challengeCamoUnlocked, countKill, diamondUnlocked, freshChallenges, masteredCount, sanitizeChallenges, settle, type KillRecord } from '../src/game/zombies/cosmetics/challenges'
+import { beginGame, lastReport, recordGameEnd, recordKill, recordRound } from '../src/game/zombies/cosmetics/progression'
 import type { WeaponFrame, WeaponItem } from '../src/game/types'
 
 let failures = 0
@@ -264,6 +266,129 @@ test('A roll lost under a camera overlay that restores the view is levelled out 
   r.step(2)
   assert(Math.abs(new THREE.Euler().setFromQuaternion(r.camera.quaternion, 'YXZ').z) < 1e-9, 'the view ends level')
   r.weapons.dispose(); r.world.dispose()
+})
+
+// ---------------------------------------------------------------- challenges and progression
+
+test('Challenge camos are never in a case and are owned per gun, not outright', () => {
+  assert(casePool().every(item => !item.challenge), 'no challenge camo in the case pool')
+  assert.equal(CATALOGUE.filter(item => item.challenge).map(item => cosmeticKey(item.id)).join(), CHALLENGE_CAMOS.join())
+  store.clear(); resetProfileCache()
+  const profile = loadProfile()
+  profile.owned.push('camo:crosshatch')
+  assert(!toggleEquip('camo:crosshatch', 'ak'), 'putting a challenge camo in `owned` does not unlock it')
+  profile.challenges.done.push('ak:1')
+  assert(toggleEquip('camo:crosshatch', 'ak'))
+  assert.equal(loadProfile().equipped.camos.ak, 'crosshatch')
+  assert(!toggleEquip('camo:crosshatch', 'smg'), 'only on the gun that earned it')
+})
+
+test('Tiers count from the first kill but complete in order, and many games are needed', () => {
+  const state = freshChallenges()
+  const kill = (patch: Partial<KillRecord> = {}) => countKill(state, { weapon: 'ak', round: 5, ...patch })
+  for (let i = 0; i < 120; i++) kill({ headshot: true })
+  assert.deepEqual(settle(state), [], '120 headshot kills: Tier 2 goal met but Tier 1 is not done')
+  for (let i = 0; i < 179; i++) kill()
+  assert.deepEqual(settle(state), [])
+  kill()
+  const unlocked = settle(state).map(u => u.id)
+  assert.deepEqual(unlocked, ['ak:1', 'ak:2'], 'the 300th kill completes Tier 1 and the waiting Tier 2 at once')
+  assert(challengeCamoUnlocked(state, 'blueprint', 'ak') && !challengeCamoUnlocked(state, 'blueprint', 'smg'))
+  assert.equal(state.weapons.smg.kills, 0, 'kills count only for the gun that made them')
+  // Scale: a solo game to round 15 is about 430 kills; one gun's four tiers need at least 750 of its own kills.
+  const minimumKills = WEAPON_TIERS.filter(t => t.metric !== 'headshots').reduce((sum, t) => sum + t.goal, 0)
+  assert(minimumKills >= 750 && CHALLENGE_WEAPONS.length * minimumKills >= 5000, `${minimumKills} kills per gun`)
+})
+
+test('Special weapons, the knife, Pack-a-Punch and deep-round kills count where they should', () => {
+  const state = freshChallenges()
+  countKill(state, { weapon: 'ak', special: true, round: 30, headshot: true })
+  countKill(state, { weapon: null, round: 3 })
+  countKill(state, { weapon: 'lmg', packed: true, packLevel: 2, round: 21 })
+  assert.equal(state.account.kills, 3); assert.equal(state.account.headshots, 1)
+  assert.equal(state.weapons.ak.kills, 0, 'a wonder weapon or Death Machine kill is not the AK’s')
+  assert.deepEqual(state.weapons.lmg, { kills: 1, headshots: 0, packedKills: 1, deepKills: 1 })
+})
+
+test('Diamond unlocks once every gun has Tier 4, and then works on every gun', () => {
+  const state = freshChallenges()
+  for (const weapon of CHALLENGE_WEAPONS.slice(0, -1)) state.done.push(`${weapon}:1`, `${weapon}:2`, `${weapon}:3`, `${weapon}:4`)
+  assert.deepEqual(settle(state), [])
+  assert(!diamondUnlocked(state) && masteredCount(state) === CHALLENGE_WEAPONS.length - 1)
+  const last = CHALLENGE_WEAPONS[CHALLENGE_WEAPONS.length - 1]
+  state.weapons[last] = { kills: 300, headshots: 100, packedKills: 250, deepKills: 200 }
+  const unlocked = settle(state).map(u => u.id)
+  assert.deepEqual(unlocked, [`${last}:1`, `${last}:2`, `${last}:3`, `${last}:4`, 'diamond'])
+  assert(CHALLENGE_WEAPONS.every(w => challengeCamoUnlocked(state, 'diamond', w)))
+  // Out-of-order stored progress is repaired: Tier 3 without Tier 2 does not count; junk is dropped.
+  const repaired = sanitizeChallenges({ done: ['smg:1', 'smg:3', 'nonsense'], weapons: { smg: { kills: -4, headshots: 2.7 } } })
+  assert.deepEqual(repaired.done, ['smg:1'])
+  assert.deepEqual(repaired.weapons.smg, { kills: 0, headshots: 2, packedKills: 0, deepKills: 0 })
+})
+
+test('Diamond is its own animated camo, and it paints a plain gun', () => {
+  const material = camoMaterial('diamond')
+  assert.equal(material.customProgramCacheKey(), 'dead-ink-camo:diamond')
+  assert.equal(material.defines!.CAMO, 9)
+  const shader = { uniforms: {} as Record<string, { value: unknown }>, vertexShader: '#include <common>\n#include <begin_vertex>', fragmentShader: '#include <common>\n#include <color_fragment>' }
+  material.onBeforeCompile(shader as never, undefined as never)
+  assert('camoTime' in shader.uniforms && shader.fragmentShader.includes('uniform float camoTime'), 'a time uniform drives the glints')
+  const time = shader.uniforms.camoTime as { value: number }
+  const before = time.value
+  material.onBeforeRender(undefined as never, undefined as never, undefined as never, undefined as never, undefined as never, undefined as never)
+  assert.notEqual(time.value, before, 'drawing Diamond advances its clock')
+  const r = rig([{ id: 'a', name: 'ak', magazine: 30, reserve: 90 }])
+  r.weapons.setCosmetics({ watch: null, charm: null, camos: { ak: 'diamond' }, knife: 'combat' })
+  r.step(0.2)
+  assert(materials(r.gun()).includes(material), 'the AK wears Diamond')
+  r.weapons.dispose(); r.world.dispose()
+})
+
+test('A version 1 profile keeps its Ink, items and equipment, gains challenges and is paid for past rounds', () => {
+  store.set('dead-ink-profile', JSON.stringify({ ink: 1234, owned: ['knife:combat', 'watch:diver', 'camo:gold'], games: 9, bestRound: 22, opened: 4,
+    equipped: { watch: 'diver', charm: null, knife: 'combat', camos: { lmg: 'gold', magnum: 'gold' } }, last: { round: 22, kills: 500, headshots: 90, ink: 790 } }))
+  resetProfileCache()
+  const profile = loadProfile()
+  assert.equal(profile.version, 2)
+  assert.equal(profile.ink, 1234 + 250 + 750, 'the round 10 and round 20 challenges pay out on migration')
+  assert.deepEqual(profile.owned, ['knife:combat', 'watch:diver', 'camo:gold'])
+  assert.deepEqual([profile.games, profile.bestRound, profile.opened], [9, 22, 4])
+  assert.equal(profile.equipped.watch, 'diver')
+  assert.equal(profile.equipped.camos.lmg, 'gold', 'LMG and Magnum camos survive a reload')
+  assert.equal(profile.equipped.camos.magnum, 'gold')
+  assert(profile.challenges.done.includes('account:round-20') && !profile.challenges.done.includes('account:round-30'))
+  // Saved as version 2; loading it again does not pay twice.
+  toggleEquip('watch:diver'); resetProfileCache()
+  assert.equal(loadProfile().ink, 1234 + 1000)
+  assert.equal(JSON.parse(store.get('dead-ink-profile')!).version, 2)
+})
+
+test('A game reports rounds, kills, accuracy, best weapon, Ink line by line and new records', () => {
+  store.clear(); resetProfileCache()
+  const start = loadProfile().ink
+  beginGame()
+  assert.deepEqual(recordRound(1), [])
+  for (let i = 0; i < 40; i++) recordKill({ weapon: 'smg', round: 4, headshot: i % 4 === 0 })
+  for (let i = 0; i < 25; i++) recordKill({ weapon: 'shotgun', round: 6 })
+  recordKill({ weapon: null, round: 6 })
+  const round10 = recordRound(10)
+  assert.equal(round10.length, 1); assert.equal(round10[0].ink, 250)
+  assert.equal(loadProfile().ink, start + 250, 'account challenge Ink is paid when it completes')
+  const report = recordGameEnd({ round: 10, kills: 66, headshots: 10, shotsFired: 200, shotsHit: 150, elapsed: 754.2 })
+  assert.equal(report.accuracy, 0.75)
+  assert.deepEqual(report.bestWeapon, { weapon: 'smg', kills: 40 })
+  assert.deepEqual(report.inkLines.map(line => line.ink), [100, 66, 20, 250])
+  assert.equal(report.inkTotal, 436)
+  assert(report.newRecord && report.previousBest === 0)
+  assert.deepEqual(report.challenges.map(c => c.id), ['account:round-10'])
+  assert.equal(loadProfile().ink, start + 436, 'Ink paid once: the game’s at the end plus the challenge’s during the game')
+  assert.equal(loadProfile().last!.ink, 436)
+  assert.equal(lastReport(), report)
+  resetProfileCache()
+  assert.equal(loadProfile().challenges.weapons.smg.kills, 40, 'progress is saved')
+  beginGame()
+  const second = recordGameEnd({ round: 4, kills: 0, headshots: 0 })
+  assert(!second.newRecord && second.previousBest === 10 && second.accuracy === null && second.bestWeapon === null)
 })
 
 if (failures) { console.error(`${failures} cosmetics check(s) failed`); process.exit(1) }

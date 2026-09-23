@@ -39,7 +39,7 @@ export class DeadInkAudio extends MissionAudio {
     const context = this.context
     const handled = ['zombie-groan', 'zombie-scream', 'zombie-snarl', 'zombie-swipe', 'zombie-rise', 'powerup-drop', 'powerup-grab', 'nuke', 'round-start', 'round-end',
       'perk-drink', 'perk-jingle', 'pack-work', 'pack-ready', 'boss-roar', 'boss-growl', 'boss-slam', 'box-leave', 'box-open', 'box-spin', 'box-offer', 'ink-burst', 'grenade-blast', 'grenade-throw',
-      'headshot-pop', 'gore-rip', 'gib', 'gas-burst', 'blot-gurgle']
+      'headshot-pop', 'gore-rip', 'gib', 'gas-burst', 'blot-gurgle', 'storm', 'doll-clap', 'heartbeat']
     if (event.kind === 'door' && this.context && this.active && !this.muted) this.slam(event)
     if (!handled.includes(event.kind)) { super.play(FOOTSTEP_VOLUME[event.kind] ? { ...event, volume: FOOTSTEP_VOLUME[event.kind] } : event); return }
     if (!context || !this.master || !this.active || this.muted || this.volume <= 0 || this.disposed || this.dying) return
@@ -60,6 +60,8 @@ export class DeadInkAudio extends MissionAudio {
       case 'storm': this.boom(event); this.dirt(event); break
       // The Ink Doll's cymbals: a bright, short crash of hiss.
       case 'doll-clap': this.clash(event); break
+      // Low health: two low thumps, lub-dub, louder the closer you are to going down.
+      case 'heartbeat': this.heartbeat(event.intensity ?? 1); break
       case 'round-start': this.bell(event, [55, 82.4, 110], 3.2, 0.5); break
       // The round is over, not won: a low minor chord under a tolling, slightly sour bell.
       case 'round-end': this.bell(event, [73.4, 87.3, 110, 103.8], 4.2, 0.55); break
@@ -356,6 +358,21 @@ export class DeadInkAudio extends MissionAudio {
   }
 
   /** Ground breaking: a thud, then clods pattering down. */
+  private heartbeat(strength: number) {
+    const context = this.context!, t = context.currentTime
+    for (const [delay, level] of [[0, 1], [0.14, 0.6]] as const) {
+      const { gain } = this.output({ kind: 'heartbeat' })
+      const thump = context.createOscillator(), low = context.createBiquadFilter()
+      thump.type = 'sine'
+      thump.frequency.setValueAtTime(55, t + delay); thump.frequency.exponentialRampToValueAtTime(40, t + delay + 0.09)
+      low.type = 'lowpass'; low.frequency.value = 200
+      const peak = Math.max(0.0002, 0.55 * level * Math.min(1, strength))
+      gain.gain.setValueAtTime(0.0001, t + delay); gain.gain.exponentialRampToValueAtTime(peak, t + delay + 0.012); gain.gain.exponentialRampToValueAtTime(0.0001, t + delay + 0.11)
+      thump.connect(low).connect(gain)
+      this.track(thump, [low, gain]); thump.start(t + delay); thump.stop(t + delay + 0.12)
+    }
+  }
+
   /** A small cymbal: a bright band of hiss that rings off quickly, with a metallic ping on top. */
   private clash(event: SoundEvent) {
     const context = this.context!, t = context.currentTime

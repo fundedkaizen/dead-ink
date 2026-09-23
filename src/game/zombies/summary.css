@@ -1,0 +1,39 @@
+/* Dead Ink's game-over summary. Ink on paper; red for the round (the round counter's colour) and the record stamp. */
+.summary { display: grid; gap: 18px; align-content: start; color: var(--ink); }
+.summary-hero { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 20px; padding-bottom: 14px; border-bottom: 2px solid var(--ink); }
+.summary-label { display: block; font: 700 11px/1.4 var(--notes); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-muted); }
+.summary-round { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 18px; }
+.summary-round .summary-label { flex-basis: 100%; }
+.summary-round b { font: 700 76px/0.9 var(--hand); color: #d4332a; font-variant-numeric: tabular-nums; }
+.summary-record { display: inline-block; padding: 4px 12px 5px; border: 3px solid #d4332a; border-radius: 4px 2px 5px 3px; color: #d4332a;
+  font: 700 22px/1 var(--hand); font-style: normal; text-transform: uppercase; letter-spacing: 0.04em; transform: rotate(-6deg); align-self: center; }
+.summary-best { text-align: right; }
+.summary-best strong { display: block; font: 700 36px/1 var(--hand); font-variant-numeric: tabular-nums; }
+body[data-mission="true"] .walk-card .summary-best small { margin: 2px 0 0; font: 12px/1.3 var(--notes); color: var(--ink-muted); }
+.summary-stats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin: 0; }
+.summary-stats > div { min-width: 0; padding: 10px 12px; border: 1.5px solid var(--ink); border-radius: 4px 3px 5px 3px; }
+.summary-stats dt { font: 700 11px/1.3 var(--notes); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-muted); }
+.summary-stats dd { margin: 4px 0 0; font: 700 24px/1.1 var(--notes); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.summary-stats dd.summary-note { margin-top: 2px; font: 12px/1.3 var(--notes); color: var(--ink-muted); }
+.summary-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 26px; }
+body[data-mission="true"] .walk-card .summary h3 { margin: 0 0 8px; font: 700 22px/1.1 var(--hand); color: var(--ink); }
+.summary-ink table { width: 100%; border-collapse: collapse; font: 14px/1.3 var(--notes); font-variant-numeric: tabular-nums; }
+.summary-ink th { text-align: left; font-weight: 600; padding: 5px 0; }
+.summary-ink td { text-align: right; padding: 5px 0; white-space: nowrap; }
+.summary-ink td.summary-detail { padding-right: 14px; color: var(--ink-muted); white-space: normal; }
+.summary-ink tbody tr { border-bottom: 1px solid var(--ink-rule); }
+.summary-ink tfoot th, .summary-ink tfoot td { padding-top: 8px; font: 700 20px/1.1 var(--notes); }
+.summary-ink tfoot tr { border-top: 2px solid var(--ink); }
+.summary-challenge-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.summary-challenge-list li { display: grid; grid-template-columns: 52px minmax(0, 1fr); align-items: center; gap: 12px; padding: 6px 10px 6px 6px; border: 1.5px solid var(--ink); border-radius: 4px 3px 5px 3px; }
+.summary-challenge-list b { display: block; font: 700 14px/1.25 var(--notes); }
+body[data-mission="true"] .walk-card .summary-challenge-list small { margin: 1px 0 0; font: 12px/1.3 var(--notes); color: var(--ink-muted); }
+.summary-swatch { display: grid; place-items: center; width: 52px; height: 34px; }
+.summary-swatch svg { width: 100%; height: 100%; }
+body[data-mission="true"] .walk-card p.summary-empty { margin: 0; font: 14px/1.5 var(--notes); color: var(--ink-muted); }
+@media (max-width: 760px) {
+  .summary-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .summary-stats > div:first-child { grid-column: 1 / -1; }
+  .summary-columns { grid-template-columns: minmax(0, 1fr); gap: 18px; }
+  .summary-round b { font-size: 60px; }
+}

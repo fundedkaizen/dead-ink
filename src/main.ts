@@ -8,6 +8,7 @@ import { VRWalkthrough } from './vr/walkthrough'
 import { createMissionWorld, prepareCompound } from './game/world'
 import { MissionRuntime } from './game/runtime'
 import { ZombiesRuntime } from './game/zombies/runtime'
+import { getSettings, pixelRatioFor, subscribeSettings } from './game/settings'
 import './style.css'
 
 const canvas = document.querySelector<HTMLCanvasElement>('#world')!
@@ -15,7 +16,8 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false
 // A small supersampling floor keeps sub-pixel details clean on non-Retina displays.
 // 1.25 is indistinguishable from 1.5 at 100% zoom and shades 31% fewer pixels; 1.0 visibly hardens far strokes.
 let resolutionScale = 1
-const pixelRatio = () => Math.max(1, Math.min(Math.max(window.devicePixelRatio, 1.25), 2) * resolutionScale)
+// The quality setting caps the pixel ratio (High is the old cap); the frame-time check can lower it further.
+const pixelRatio = () => Math.max(1, pixelRatioFor(window.devicePixelRatio, getSettings().quality) * resolutionScale)
 renderer.setPixelRatio(pixelRatio())
 renderer.outputColorSpace = THREE.SRGBColorSpace
 renderer.toneMapping = THREE.NoToneMapping
@@ -116,6 +118,9 @@ function adaptResolution() {
   else return
   resize()
 }
+
+// A new quality setting: start the resolution check over from the new cap.
+subscribeSettings((_, changed) => { if (changed.includes('quality')) { resolutionScale = 1; resolutionSettled = false; resolutionTrial = 0; resize() } })
 
 function resize() {
   if (renderer.xr.isPresenting) return

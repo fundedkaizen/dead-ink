@@ -4,17 +4,20 @@ import { RARITIES, RARITY_INFO } from '../../loot'
 import type { MenuExtraPage } from '../../menu'
 import type { WeaponName } from '../../types'
 import { tallySvg } from '../hud'
-import { CATALOGUE, cosmeticKey, type CosmeticItem, type CosmeticKind, type EquippedCosmetics } from './catalogue'
-import { cosmeticIcon } from './icons'
-import { CASE, CASE_WEIGHTS, casePool, equippedCosmetics, loadProfile, onProfileChange, openCase, toggleEquip, type Profile } from './profile'
+import { CATALOGUE, cosmeticKey, type CamoId, type ChallengeCamoId, type CosmeticItem, type CosmeticKind, type EquippedCosmetics } from './catalogue'
+import { ACCOUNT_CHALLENGES, CHALLENGE_WEAPONS, WEAPON_LABELS, WEAPON_TIERS, accountProgress, masteredCount, tierProgress, weaponMastered, type ChallengeState } from './challenges'
+import { camoSwatch, cosmeticIcon } from './icons'
+import { CASE, CASE_WEIGHTS, casePool, equippedCosmetics, loadProfile, onProfileChange, openCase, ownsCamo, toggleEquip, type Profile } from './profile'
 
 /**
  * The Armory page of the Dead Ink menu (open cases, wear what you own) and the home page's record of
  * your last game. Pure DOM; the viewmodel learns about changes through installCosmetics.
  */
 
-const KINDS: { kind: CosmeticKind; label: string }[] = [
+type Tab = CosmeticKind | 'challenges'
+const KINDS: { kind: Tab; label: string }[] = [
   { kind: 'watch', label: 'Watches' }, { kind: 'charm', label: 'Charms' }, { kind: 'camo', label: 'Camos' }, { kind: 'knife', label: 'Knives' },
+  { kind: 'challenges', label: 'Challenges' },
 ]
 const GUNS: { name: WeaponName; label: string }[] = [
   { name: 'pistol', label: 'Pistol' }, { name: 'smg', label: 'SMG' }, { name: 'ak', label: 'AK' }, { name: 'shotgun', label: 'Shotgun' }, { name: 'sniper', label: 'Sniper' },
@@ -24,6 +27,54 @@ const TILE = 120
 const reducedMotion = () => document.body.dataset.reducedMotion === 'true'
 const ink = (value: number) => value.toLocaleString('en-GB')
 const escape = (text: string) => text.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!)
+const number = (value: number) => value.toLocaleString('en-GB')
+
+/** What unlocks a challenge camo on a gun, for its locked tile: "Tier 2: 100 headshot kills". */
+function unlockHint(camo: ChallengeCamoId) {
+  if (camo === 'diamond') return 'Tier 4 on every gun'
+  const tier = WEAPON_TIERS.find(t => t.camo === camo)!
+  return `Tier ${tier.tier}: ${tier.label(tier.goal)}`
+}
+
+/** A progress bar: ink fill on paper, the count beside it. `aria` names what it measures. */
+function bar(value: number, goal: number, aria: string, done: boolean) {
+  const pct = goal ? Math.min(100, value / goal * 100) : 0
+  return `<span class="challenge-bar${done ? ' done' : ''}" role="progressbar" aria-label="${escape(aria)}" aria-valuemin="0" aria-valuemax="${goal}" aria-valuenow="${value}">
+    <i style="width:${pct.toFixed(1)}%"></i></span><span class="challenge-count">${done ? 'Done' : `${number(value)} / ${number(goal)}`}</span>`
+}
+
+/** The Challenges tab: the chosen gun's four tiers, Diamond, and the account challenges that pay Ink. */
+function challengesHtml(state: ChallengeState, gun: WeaponName) {
+  const tiers = WEAPON_TIERS.map(tier => {
+    const p = tierProgress(state, gun, tier)
+    const status = p.done ? 'done' : p.blocked ? 'blocked' : 'open'
+    return `<li class="challenge-row" data-status="${status}">
+      <span class="challenge-swatch${p.done ? '' : ' locked'}">${camoSwatch(tier.camo)}</span>
+      <span class="challenge-text"><b>Tier ${tier.tier} · ${escape(CATALOGUE.find(i => i.id === `camo:${tier.camo}`)!.name)}</b>
+        <small>${escape(tier.label(tier.goal))}${p.blocked && !p.done ? ` · after Tier ${tier.tier - 1}` : ''}</small></span>
+      <span class="challenge-progress">${bar(p.value, p.goal, `${WEAPON_LABELS[gun]} tier ${tier.tier}`, p.done)}</span>
+    </li>`
+  }).join('')
+  const mastered = masteredCount(state), all = CHALLENGE_WEAPONS.length
+  const diamondDone = state.done.includes('diamond')
+  const pips = CHALLENGE_WEAPONS.map(name => `<i class="${weaponMastered(state, name) ? 'on' : ''}" title="${WEAPON_LABELS[name]}${weaponMastered(state, name) ? ': mastered' : ''}"></i>`).join('')
+  const account = ACCOUNT_CHALLENGES.map(challenge => {
+    const p = accountProgress(state, challenge)
+    return `<li class="challenge-row account" data-status="${p.done ? 'done' : 'open'}">
+      <span class="challenge-text"><b>${escape(challenge.title)}</b><small>${escape(challenge.label)}</small></span>
+      <span class="challenge-reward">+${number(challenge.ink)} Ink</span>
+      <span class="challenge-progress">${bar(p.value, p.goal, challenge.label, p.done)}</span>
+    </li>`
+  }).join('')
+  return `<ol class="challenge-list" aria-label="${WEAPON_LABELS[gun]} camo challenges">${tiers}</ol>
+    <div class="challenge-diamond${diamondDone ? ' done' : ''}">
+      <span class="challenge-swatch${diamondDone ? '' : ' locked'}">${camoSwatch('diamond')}</span>
+      <span class="challenge-text"><b>Diamond</b><small>Finish Tier 4 on every gun. Diamond then works on all of them.</small></span>
+      <span class="challenge-pips" role="img" aria-label="${mastered} of ${all} guns mastered">${pips}<em>${mastered} / ${all}</em></span>
+    </div>
+    <h3 class="challenge-heading">Account</h3>
+    <ol class="challenge-list">${account}</ol>`
+}
 
 function isEquipped(item: CosmeticItem, equipped: EquippedCosmetics, gun: WeaponName) {
   const key = cosmeticKey(item.id)
@@ -45,7 +96,7 @@ function odds() {
 
 class Armory {
   private body!: HTMLElement
-  private kind: CosmeticKind = 'watch'
+  private kind: Tab = 'watch'
   private gun: WeaponName = 'ak'
   private spinning = false
   private strip!: HTMLElement
@@ -74,14 +125,15 @@ class Armory {
       <div class="armory-tabs" role="tablist">${KINDS.map(({ kind, label }) => `<button type="button" role="tab" data-kind="${kind}">${label}</button>`).join('')}</div>
       <div class="armory-guns" hidden>${GUNS.map(({ name, label }) => `<button type="button" data-gun="${name}">${label}</button>`).join('')}</div>
       <p class="armory-hint"></p>
-      <div class="armory-grid"></div>`
+      <div class="armory-grid"></div>
+      <div class="armory-challenges" hidden></div>`
     this.strip = body.querySelector('.armory-strip')!
     this.reel = body.querySelector('.armory-reel')!
     this.result = body.querySelector('.armory-result')!
     this.openButton = body.querySelector('.armory-open')!
     this.balance = body.querySelector('.armory-ink strong')!
     this.openButton.addEventListener('click', () => this.open())
-    body.querySelectorAll<HTMLElement>('[data-kind]').forEach(button => button.addEventListener('click', () => { this.kind = button.dataset.kind as CosmeticKind; this.render() }))
+    body.querySelectorAll<HTMLElement>('[data-kind]').forEach(button => button.addEventListener('click', () => { this.kind = button.dataset.kind as Tab; this.render() }))
     body.querySelectorAll<HTMLElement>('[data-gun]').forEach(button => button.addEventListener('click', () => { this.gun = button.dataset.gun as WeaponName; this.render() }))
     body.querySelector('.armory-grid')!.addEventListener('click', event => {
       const card = (event.target as HTMLElement).closest<HTMLElement>('[data-item]')
@@ -99,19 +151,32 @@ class Armory {
     this.openButton.title = profile.ink < CASE.price ? `You need ${CASE.price - profile.ink} more Ink` : ''
     this.body.querySelectorAll<HTMLElement>('[data-kind]').forEach(button => button.setAttribute('aria-selected', String(button.dataset.kind === this.kind)))
     const guns = this.body.querySelector<HTMLElement>('.armory-guns')!
-    guns.hidden = this.kind !== 'camo'
-    guns.querySelectorAll<HTMLElement>('[data-gun]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.gun === this.gun)))
+    guns.hidden = this.kind !== 'camo' && this.kind !== 'challenges'
+    guns.querySelectorAll<HTMLElement>('[data-gun]').forEach(button => {
+      button.setAttribute('aria-pressed', String(button.dataset.gun === this.gun))
+      button.classList.toggle('mastered', weaponMastered(profile.challenges, button.dataset.gun as WeaponName))
+    })
     this.body.querySelector('.armory-hint')!.textContent = this.kind === 'camo'
-      ? 'A camo covers one gun type. Pack-a-Punched guns always wear the Pack-a-Punch camo.'
+      ? 'A camo covers one gun type. Challenge camos are earned per gun. Pack-a-Punched guns wear the Pack-a-Punch camo.'
+      : this.kind === 'challenges' ? `Each gun's tiers unlock a camo for that gun, in order. Tier 4 on all ${CHALLENGE_WEAPONS.length} guns unlocks Diamond.`
       : this.kind === 'knife' ? 'Your knife slashes with V and shows off when you stand still.' : 'Click something you own to wear it; click again to take it off.'
+    const grid = this.body.querySelector<HTMLElement>('.armory-grid')!, challenges = this.body.querySelector<HTMLElement>('.armory-challenges')!
+    grid.hidden = this.kind === 'challenges'
+    challenges.hidden = this.kind !== 'challenges'
+    if (this.kind === 'challenges') { challenges.innerHTML = challengesHtml(profile.challenges, this.gun); grid.innerHTML = ''; return }
     const items = CATALOGUE.filter(entry => entry.kind === this.kind)
-    this.body.querySelector('.armory-grid')!.innerHTML = items.map(item => {
-      const owned = profile.owned.includes(item.id), worn = owned && isEquipped(item, profile.equipped, this.gun)
-      return `<button type="button" class="armory-item${worn ? ' worn' : ''}" data-item="${item.id}" style="--rarity:${RARITY_INFO[item.rarity].css}"
+    grid.innerHTML = items.map(item => {
+      const key = cosmeticKey(item.id)
+      const owned = item.kind === 'camo' ? ownsCamo(profile, key as CamoId, this.gun) : profile.owned.includes(item.id)
+      const worn = owned && isEquipped(item, profile.equipped, this.gun)
+      // A locked challenge camo says what earns it; a locked case item stays a mystery.
+      const name = owned || item.challenge ? escape(item.name) : 'Locked'
+      const line = !owned && item.challenge ? escape(unlockHint(key as ChallengeCamoId)) : `${RARITY_INFO[item.rarity].label}${worn ? ' · worn' : ''}`
+      return `<button type="button" class="armory-item${worn ? ' worn' : ''}${item.challenge ? ' challenge' : ''}${key === 'diamond' ? ' diamond' : ''}" data-item="${item.id}" style="--rarity:${RARITY_INFO[item.rarity].css}"
         ${owned ? '' : 'aria-disabled="true"'} aria-pressed="${worn}" title="${escape(item.blurb)}">
         ${cosmeticIcon(item)}
-        <span class="armory-name">${owned ? escape(item.name) : 'Locked'}</span>
-        <span class="armory-rarity">${RARITY_INFO[item.rarity].label}${worn ? ' · worn' : ''}</span>
+        <span class="armory-name">${name}</span>
+        <span class="armory-rarity">${line}</span>
       </button>`
     }).join('')
   }

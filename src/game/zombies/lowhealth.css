@@ -1,0 +1,18 @@
+/*
+ * Low-health ink: a red wash and blots of red ink at the page's edges. --low-health (0 to 1) says how far
+ * in it has crept, --low-health-beat the heartbeat's push, --low-health-flash a hit. Multiplied onto the page
+ * like ink on paper. Below the HUD, above the world.
+ */
+.low-health { position: fixed; inset: 0; z-index: 1; pointer-events: none; overflow: hidden; color: #a8160e;
+  --low-health: 0; --low-health-beat: 0; --low-health-flash: 0; }
+.low-health[hidden] { display: none; }
+.low-health > div { position: absolute; inset: 0; mix-blend-mode: multiply; }
+.low-health-wash {
+  background: radial-gradient(ellipse 72% 68% at 50% 50%, transparent calc(38% + (1 - var(--low-health)) * 44% - var(--low-health-beat) * 6%), #a8160ecc 100%);
+  opacity: calc(var(--low-health) * 0.75 + var(--low-health-beat) * 0.2);
+}
+.low-health-blots { will-change: transform, opacity;
+  transform: scale(calc(1.5 - var(--low-health) * 0.4 - var(--low-health-beat) * 0.06));
+  opacity: calc(var(--low-health) * 0.85 + var(--low-health-beat) * 0.1); }
+.low-health-blots svg { display: block; width: 100%; height: 100%; }
+.low-health-flash { background: radial-gradient(ellipse 80% 75% at 50% 50%, transparent 55%, #c21d12 100%); opacity: var(--low-health-flash); }

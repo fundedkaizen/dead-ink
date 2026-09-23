@@ -37,7 +37,10 @@ import { REVIVE, SecondDraftRevive } from './revive'
 import { DECOY, DollBuy, animateDoll, inkDoll } from './decoy'
 import { THROW_RELEASE } from '../weapons'
 import { BENCH_PLACE, BUILDS, BuildSite, PARTS, POWER_PLACE, PartPickup, PowerSwitch, SHIELD, fromBehind, type BuildId, type PartId } from './buildables'
-import { ARMORY_PAGE, awardGame, deadInkHome, installCosmetics } from './cosmetics'
+import { ARMORY_PAGE, beginGame, deadInkHome, installCosmetics, recordBruteKill, recordGameEnd, recordKill, recordRound, recordStormSurvived, type ChallengeUnlock } from './cosmetics'
+import { DEAD_INK_GAME_OVER } from './summary'
+import { LowHealthWarning } from './lowhealth'
+import { getSettings, lookScale, subscribeSettings, volumeFor } from '../settings'
 import { addDressing } from './dressing'
 import { Explosion, MushroomCloud, createGrenadeModel } from './vfx'
 import { POWERUP_INFO, PowerupDrops, PowerupDropper } from './powerups'
@@ -138,7 +141,7 @@ export const DEAD_INK_COPY: MenuCopy = {
   missionPage: false,
   modeLink: { label: 'Hostage mission', href: './' },
   controls: [['Knife', 'V'], ['Grenade', 'Q or G'], ['Ink Doll', 'T'], ['Switch weapon', 'Wheel']],
-  pages: [ARMORY_PAGE], home: deadInkHome,
+  pages: [ARMORY_PAGE], home: deadInkHome, mode: 'zombies', gameOver: DEAD_INK_GAME_OVER,
 }
 
 /**
@@ -238,6 +241,13 @@ export class ZombiesRuntime {
   /** 0..1: how deep in a Blot's gas the player is (it drives the screen effect); damage owed, paid in whole points. */
   gasExposure = 0
   private gasDamage = 0
+  /** Accuracy for the game-over page: trigger pulls, and pulls that hit a zombie (a shotgun blast counts once). */
+  private shotsFired = 0
+  private shotsHit = 0
+  private pullHit = false
+  /** Ink creeping in from the edges as your health runs low, with a heartbeat. */
+  readonly lowHealth = new LowHealthWarning({ onBeat: strength => this.audio.play({ kind: 'heartbeat', intensity: strength }) })
+  private stopSettings = () => {}
   /** Throws waiting for the hand to let go, so the grenade leaves the screen as it leaves the hand. */
   private pendingThrows: { timer: number; launch: () => void }[] = []
   private uninstallCosmetics: () => void
@@ -299,12 +309,14 @@ export class ZombiesRuntime {
     this.bottle = new PerkBottle(camera.perspective)
     this.dropper = new PowerupDropper(this.random)
     this.bulletTrails = new BulletTrails(scene, 'Player bullet')
-    player.lookSensitivity = () => this.weapons.lookSensitivity
+    player.lookSensitivity = () => lookScale(this.weapons.lookSensitivity, this.aiming)
     this.hud = new MissionHUD(world, {
       retry: () => { this.restart(); void this.audio.unlock(); this.player.requestControl() },
       restart: () => { this.restart(); void this.audio.unlock(); this.player.requestControl() },
-      volume: value => { this.audio.setVolume(value); this.music.setVolume(value) },
-      mute: value => { this.audio.setMuted(value); this.music.setMuted(value) } }, DEAD_INK_COPY)
+      volume: () => this.applySettings(),
+      mute: () => this.applySettings() }, DEAD_INK_COPY)
+    this.stopSettings = subscribeSettings(() => this.applySettings())
+    this.applySettings()
     document.querySelector('#world')?.setAttribute('aria-label', 'Dead Ink, round-based zombies. Mouse to look, WASD move, left click fire, right click aim, mouse wheel switch weapon, V knife, F buy or use, R reload, Escape pause.')
     const hudRoot = document.querySelector<HTMLElement>('#mission-hud')!
     this.zombieHud = new ZombieHud(hudRoot)
@@ -487,6 +499,7 @@ export class ZombiesRuntime {
     this.perks.clear(); this.pendingPerk = null; this.reviveGrace = 0; this.applyPerks(); this.zombieHud.perks([])
     this.resetBuildables()
     this.revive.reset(); this.player.movementLocked = false
+    beginGame(); this.shotsFired = 0; this.shotsHit = 0; this.lowHealth.clear()
     this.setStorm(false)
     this.brute = null; this.bruteTimer = -1
     for (const skull of this.skulls) { skull.found = false; skull.object.userData.found = false }
@@ -935,6 +948,16 @@ export class ZombiesRuntime {
     this.solids.delete(owner)
   }
 
+  /** A challenge done: a short toast with what it unlocked. */
+  private toastUnlocks(list: ChallengeUnlock[]) { if (list.length) this.hud.notify(list.map(u => u.title).join(' · '), 4, true) }
+
+  /** Volumes and mute from the settings store: master x music for the songs, master x effects for the rest. */
+  private applySettings() {
+    const s = getSettings()
+    this.audio.setMuted(s.muted); this.music.setMuted(s.muted)
+    this.audio.setVolume(volumeFor(s, 'effects')); this.music.setVolume(volumeFor(s, 'music'))
+  }
+
   private useDollWall(buy: DollBuy) {
     if (!this.isActive() || !this.canReach(buy.point, buy.root) || this.dollCount >= DECOY.carry || !this.spend(DECOY.price)) return false
     this.dollCount = DECOY.carry
@@ -1252,7 +1275,9 @@ export class ZombiesRuntime {
   }
 
   /** A kill by the player: the Brute pays and always leaves a Max Ammo; others may drop a power-up. */
-  private killed(position: THREE.Vector3, zombie?: Zombie, weapon?: WeaponItem | null) {
+  private killed(position: THREE.Vector3, zombie?: Zombie, weapon?: WeaponItem | null, headshot = false) {
+    this.toastUnlocks(recordKill({ weapon: weapon && !weapon.special ? weapon.name : null, headshot, packed: !!weapon?.packed,
+      packLevel: weapon?.packLevel, round: this.rounds.round, special: !!weapon?.special }))
     this.lastKillAt = position.clone()
     if (this.questStep === 'wells' && zombie && !zombie.boss) {
       // The nearest thirsty inkwell in reach takes this one's ink.
@@ -1266,6 +1291,7 @@ export class ZombiesRuntime {
     if (zombie && zombie === this.editor) { this.finishQuest(position); return }
     if (weapon?.packed) this.inkBurst(position, weapon.packLevel ?? 1)
     if (zombie && zombie === this.brute) {
+      this.toastUnlocks(recordBruteKill())
       this.brute = null
       this.award(BOSS.points)
       const at = position.clone(), floor = this.player.world.floor(at.clone().setY(at.y + 2.2), 0.1, 3)
@@ -1291,6 +1317,7 @@ export class ZombiesRuntime {
       case 'nuke': {
         const killed = this.director?.killAll() ?? 0
         this.state.kills += killed
+        for (let i = 0; i < killed; i++) recordKill({ round: this.rounds.round })
         this.award(POWERUPS.nukePoints)
         if (!this.hud.reducedMotion) this.zombieHud.flash()
         // The mushroom cloud, far off ahead of you on the horizon.
@@ -1345,6 +1372,7 @@ export class ZombiesRuntime {
   private shot(shot: Shot) {
     if (!this.isActive() || !this.director) return
     // One burst per trigger pull, not one per shotgun pellet.
+    if (!shot.pelletIndex) { this.shotsFired++; this.pullHit = false }
     if (!shot.pelletIndex) this.sparks.emit(shot.origin, shot.direction, this.weapons.current?.special ? 2 : 4)
     const surface = this.player.world.raySurface(shot.origin, shot.direction, shot.range)
     const distance = surface?.distance ?? shot.range
@@ -1357,12 +1385,13 @@ export class ZombiesRuntime {
       return
     }
     const struck = this.director.hitAll(shot, distance, scale, !!this.timers.instaKill, held ? pierceOf(held) : 1)
+    if (struck.length && !this.pullHit) { this.shotsHit++; this.pullHit = true }
     const hit = struck[0] ?? null
     for (const each of struck) {
       this.hitFlash = 0.15
       this.award(pointsForHit({ lethal: each.lethal, zone: each.reaction.zone }))
       this.hits.hit(each.reaction.point, each.dealt, each.zombie.id, each.reaction.zone === 'head', each.lethal)
-      if (each.lethal) { this.state.kills++; if (each.reaction.zone === 'head') this.state.headshots++; this.killed(each.zombie.position, each.zombie, held) }
+      if (each.lethal) { this.state.kills++; if (each.reaction.zone === 'head') this.state.headshots++; this.killed(each.zombie.position, each.zombie, held, each.reaction.zone === 'head') }
     }
     const end = this.impactPoint ?? shot.origin.clone().addScaledVector(shot.direction, distance)
     const impact = !hit && surface ? () => {
@@ -1468,6 +1497,7 @@ export class ZombiesRuntime {
         amount, this.player.body.grounded && !this.player.actions.traversing)
     }
     if (source) this.indicator.hit(source, amount)
+    if (!dead) this.lowHealth.hit(amount / this.maxHealth())
     this.hud.hurt(); this.audio.play({ kind: 'damage' })
     if (cause !== 'gas') this.audio.play({ kind: 'bullet-hit', intensity: Math.min(1, amount / 50) })
     if (cause === 'fall') this.hud.notify('You fell.', 2)
@@ -1486,9 +1516,11 @@ export class ZombiesRuntime {
     this.player.body.velocity.set(0, 0, 0)
     this.audio.beginDeath()
     this.hud.setScoped(false); this.hud.clearThreat(); this.hud.setDeath(this.death)
-    // Ink for the Armory: round x 10 + kills + headshots x 2.
-    const ink = awardGame({ round: this.state.round, kills: this.state.kills, headshots: this.state.headshots })
-    this.hud.notify(`+${ink} Ink`, 3)
+    // Ink for the Armory (round x 10 + kills + headshots x 2 + challenge rewards), and the game-over page's report.
+    const report = recordGameEnd({ round: this.state.round, kills: this.state.kills, headshots: this.state.headshots,
+      shotsFired: this.shotsFired, shotsHit: this.shotsHit, elapsed: this.state.elapsed })
+    this.hud.notify(`+${report.inkTotal} Ink`, 3)
+    this.lowHealth.clear()
   }
 
   // ---------------------------------------------------------------- zombies
@@ -1531,6 +1563,7 @@ export class ZombiesRuntime {
 
   /** The storm is cleared: a Max Ammo where the last one fell, and the light comes back. */
   private stormReward() {
+    this.toastUnlocks(recordStormSurvived())
     const at = (this.lastKillAt ?? this.player.body.position).clone()
     const floor = this.player.world.floor(at.clone().setY(at.y + 2.2), 0.1, 3)
     if (Number.isFinite(floor)) at.y = floor
@@ -1616,6 +1649,7 @@ export class ZombiesRuntime {
       this.state.round = this.rounds.round
       if (events.roundStarted) {
         this.dropper.newRound(); this.music.sting('roundStart')
+        this.toastUnlocks(recordRound(events.roundStarted))
         this.setStorm(isStormRound(events.roundStarted))
         if (this.storm) {
           // A smaller pack: this step may already have fed some in.
@@ -1656,6 +1690,9 @@ export class ZombiesRuntime {
       // Health comes back after a few seconds without being hit, as in Call of Duty.
       if (this.state.phase === 'active' && this.state.elapsed - this.lastHurt > PLAYER_HEALTH.regenDelay)
         this.state.health = Math.min(this.maxHealth(), this.state.health + PLAYER_HEALTH.regenPerSecond * dt)
+      this.lowHealth.update(this.player.playing ? dt : 0, this.state.phase === 'active' ? this.state.health / this.maxHealth() : 1)
+      const fov = getSettings().fov, cam = this.camera.perspective
+      if (this.player.playing && !this.weapons.scoped && cam.fov !== fov) { cam.fov = fov; cam.updateProjectionMatrix() }
       this.reviveGrace = Math.max(0, this.reviveGrace - dt)
       if (this.revive.active) {
         const wasDown = this.revive.down
@@ -1773,7 +1810,7 @@ export class ZombiesRuntime {
     this.pack?.dispose(); this.bottle.dispose(); this.packedLook.dispose()
     this.director?.dispose()
     this.hits.dispose(); this.indicator.dispose(); this.hotbar.dispose(); this.zombieHud.dispose()
-    this.uninstallCosmetics(); this.bulletTrails.dispose(); this.weapons.dispose(); this.blood.dispose(); this.impacts.dispose(); this.riseMarks.dispose(); this.sparks.dispose(); this.shockwaves.dispose(); this.explosions.dispose(); this.nukeCloud.dispose(); this.undress?.(); this.grenades.dispose(); this.dolls.dispose(); this.dollBuy?.dispose(); this.bolts.dispose(); this.powerups.dispose()
+    this.uninstallCosmetics(); this.lowHealth.dispose(); this.stopSettings(); this.bulletTrails.dispose(); this.weapons.dispose(); this.blood.dispose(); this.impacts.dispose(); this.riseMarks.dispose(); this.sparks.dispose(); this.shockwaves.dispose(); this.explosions.dispose(); this.nukeCloud.dispose(); this.undress?.(); this.grenades.dispose(); this.dolls.dispose(); this.dollBuy?.dispose(); this.bolts.dispose(); this.powerups.dispose()
     for (const skull of this.skulls) skull.object.removeFromParent()
     delete document.body.dataset.deadInkStorm
     for (const part of this.parts) part.dispose()

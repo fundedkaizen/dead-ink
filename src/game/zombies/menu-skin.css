@@ -62,9 +62,14 @@ body[data-dead-ink][data-mission="true"] .walk-card .menu-primary:focus-visible,
 body[data-dead-ink][data-mission="true"] #walk-start:focus-visible { background-position: left; color: var(--paper); }
 /* The first thing to press is already inked. */
 body[data-dead-ink][data-mission="true"] #walk-start:not(:disabled),
-body[data-dead-ink][data-mission="true"] #mission-retry { background-position: left; color: var(--paper); box-shadow: 4px 4px 0 #d4332a; }
+body[data-dead-ink][data-mission="true"] #mission-retry,
+body[data-dead-ink][data-mission="true"] #menu-play-again:not(:disabled) { background-position: left; color: var(--paper); box-shadow: 4px 4px 0 #d4332a; }
 body[data-dead-ink][data-mission="true"] #walk-start:not(:disabled):hover,
-body[data-dead-ink][data-mission="true"] #mission-retry:hover { box-shadow: 6px 6px 0 #d4332a; transform: translate(-1px, -1px); }
+body[data-dead-ink][data-mission="true"] #mission-retry:hover,
+body[data-dead-ink][data-mission="true"] #menu-play-again:not(:disabled):hover { box-shadow: 6px 6px 0 #d4332a; transform: translate(-1px, -1px); }
+/* The game-over page's heading gets the same torn-ink title as the title screen, smaller. */
+body[data-dead-ink][data-mission="true"] .walk-card[data-page="gameover"] h2 { display: inline-block; align-self: flex-start; margin: 0 0 16px -6px; padding: 8px 22px 10px 16px; color: var(--paper); transform: rotate(-1.5deg);
+  font: 700 36px/1 var(--hand); background: var(--ink); border-radius: 12px 4px 14px 6px; }
 body[data-dead-ink][data-mission="true"] .walk-card button:disabled { background: var(--paper-shade); color: var(--ink-muted); border-color: var(--ink-rule); box-shadow: none; }
 body[data-dead-ink][data-mission="true"] .walk-card .menu-quiet { font-weight: 600; color: var(--ink); }
 
