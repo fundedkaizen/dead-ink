@@ -9,6 +9,7 @@ import { createMissionWorld, prepareCompound } from './game/world'
 import { MissionRuntime } from './game/runtime'
 import { ZombiesRuntime } from './game/zombies/runtime'
 import { getSettings, pixelRatioFor, subscribeSettings } from './game/settings'
+import { installUiSounds } from './game/ui-sound'
 import './style.css'
 
 const canvas = document.querySelector<HTMLCanvasElement>('#world')!
@@ -118,6 +119,8 @@ function adaptResolution() {
   else return
   resize()
 }
+
+installUiSounds()
 
 // A new quality setting: start the resolution check over from the new cap.
 subscribeSettings((_, changed) => { if (changed.includes('quality')) { resolutionScale = 1; resolutionSettled = false; resolutionTrial = 0; resize() } })
