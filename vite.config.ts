@@ -43,7 +43,9 @@ export default defineConfig({
   plugins: [preact(), preloadGameChunks, coopRelay],
   // A full-page hot reload erases an in-progress game in every connected tab.
   // Pick up source edits on manual refresh, so pausing to use a coding agent is safe.
-  server: { hmr: false },
+  server: { hmr: false, allowedHosts: ['.trycloudflare.com'] },
+  // A built copy served for co-op through a Cloudflare quick tunnel (a public trycloudflare.com link).
+  preview: { allowedHosts: ['.trycloudflare.com'] },
   build: {
     rolldownOptions: {
       input: { main: 'index.html', lab: 'lab.html' },

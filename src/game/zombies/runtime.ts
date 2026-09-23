@@ -48,6 +48,7 @@ import { SEALED, ZONE_GATES, ZoneGates, type ZoneGate } from './zones'
 import { InkTrap, TRAP, TRAP_GATES } from './traps'
 import { INKWELL_PLACES, Inkwell, QUEST, SoulStreams, questHint, type QuestStep } from './quest'
 import { BLOT, GAS, rollBlot } from './gas'
+import { POWER_ICON, WorldMarker } from './markers'
 import { CoopLink, PartnerAvatar, PartnerTag, toVector, vec, type CoopMessage, type CoopStatus, type PlayerState } from './coop'
 import type { Shot as ShotType } from '../types'
 import type { Rarity } from '../loot'
@@ -95,6 +96,8 @@ const LATE_WALL_WEAPONS: { name: 'magnum' | 'lmg'; near: [number, number, number
 
 /** The Ink Doll wall is in the warehouse, the first zone past the start worth fighting for. */
 const DOLL_PLACE: [number, number, number] = [26, 0.7, -10]
+
+const PACKED_TRACER = 0xd4332a
 
 /** Co-op: how close and how long a revive takes, how long you can wait on the floor, how often we send. */
 const COOP = { reviveReach: 2.2, reviveSeconds: 3, revivePoints: 100, bleedSeconds: 45, sendRate: 15 } as const
@@ -255,6 +258,8 @@ export class ZombiesRuntime {
   coop: CoopLink
   partner: PartnerAvatar
   private partnerTag: PartnerTag
+  /** Where the power switch is, until the power is on. */
+  private powerMarker: WorldMarker
   partnerState: PlayerState | null = null
   private lastTick: Extract<CoopMessage, { t: 'tick' }> | null = null
   private sendTimer = 0
@@ -350,6 +355,7 @@ export class ZombiesRuntime {
     this.zombieHud = new ZombieHud(hudRoot)
     this.hits = new HitMarkers(hudRoot)
     this.partnerTag = new PartnerTag(hudRoot, 'Partner')
+    this.powerMarker = new WorldMarker(hudRoot, POWER_ICON, 'The power switch')
     this.indicator = new DamageIndicator(hudRoot)
     // One more cell than you start with, for Spare Nib's third gun; the hotbar hides cells you do not have.
     this.hotbar = new Hotbar(hudRoot, ZOMBIE_SLOTS + 1)
@@ -1058,6 +1064,7 @@ export class ZombiesRuntime {
     const partner = this.paired ? this.partnerState : null
     this.partner.update(dt, partner)
     this.partnerTag.update(this.camera.perspective, partner ? this.partner.head() : null, !!partner?.dn)
+    this.powerMarker.update(this.camera.perspective, this.player.playing && !this.power && this.powerSwitch ? this.powerSwitch.point : null)
     if (partner) this.partnerTag.name(partner.name)
     this.zombieHud.scoreboard(this.paired ? [{ name: this.playerName, points: this.state.points, me: true, down: !!this.down },
       { name: partner?.name ?? 'Partner', points: partner?.pts ?? 0, me: false, down: !!partner?.dn }] : null)
@@ -1802,7 +1809,8 @@ export class ZombiesRuntime {
       this.audio.play({ kind: 'impact', position: end, radius: 18 })
       this.impacts.emit(end, shot.direction, surface, shot.weapon)
     } : undefined
-    this.bulletTrails.emit(shot.origin, end, shot.weapon, undefined, impact)
+    // An upgraded gun's rounds fly red, as Pack-a-Punched rounds glow in Call of Duty.
+    this.bulletTrails.emit(shot.origin, end, shot.weapon, undefined, impact, held?.packed ? PACKED_TRACER : undefined)
   }
 
   /** Throw a frag the way you are looking, a little up, carrying your own speed with it. */
@@ -2275,7 +2283,7 @@ export class ZombiesRuntime {
     for (const skull of this.skulls) skull.object.removeFromParent()
     delete document.body.dataset.deadInkStorm
     delete document.body.dataset.deadInkOneHit
-    this.coop.close(); this.partner.dispose(); this.partnerTag.dispose()
+    this.coop.close(); this.partner.dispose(); this.partnerTag.dispose(); this.powerMarker.dispose()
     for (const part of this.parts) part.dispose()
     for (const site of this.sites.values()) site.dispose()
     this.powerSwitch?.dispose()

@@ -20,6 +20,12 @@
 .coop-tag i { width: 0; height: 0; border: 7px solid transparent; border-top: 9px solid var(--ink, #111); border-bottom: 0; filter: drop-shadow(0 0 1px #fff); }
 .coop-tag.edge i { border: 7px solid transparent; border-left: 11px solid var(--ink, #111); border-right: 0; }
 .coop-tag.down { color: #d4332a; }
+/* An objective marker (the power switch): small and quiet, through walls; pinned to the edge with an arrow. */
+.world-marker { position: absolute; left: 0; top: 0; pointer-events: none; display: grid; justify-items: center; margin: -14px 0 0 -12px; width: 24px; opacity: 0.8; }
+.world-marker[hidden] { display: none; }
+.world-marker svg { width: 22px; height: 22px; fill: #e8b64a; stroke: var(--ink, #111); stroke-width: 1.8; stroke-linejoin: round; filter: drop-shadow(0 0 1.5px #fff); }
+.world-marker i { width: 0; height: 0; border: 5px solid transparent; border-top: 7px solid var(--ink, #111); border-bottom: 0; margin-top: 1px; }
+.world-marker.edge i { position: absolute; left: 27px; top: 6px; border: 5px solid transparent; border-left: 8px solid var(--ink, #111); border-right: 0; transform-origin: -15px 5px; }
 /* The co-op box on the Dead Ink home card. */
 .coop-panel { margin: 12px 0 0; padding: 10px 0 0; border-top: 2px solid var(--ink, #111); display: grid; gap: 6px; font: 14px/1.35 var(--notes, sans-serif); color: var(--ink, #111); }
 .coop-panel h3 { margin: 0; font: 700 12px/1 var(--notes, sans-serif); text-transform: uppercase; letter-spacing: 0.08em; }

@@ -7,7 +7,10 @@ const UP = new THREE.Vector3(0, 1, 0)
 type Round = {
   origin: THREE.Vector3; direction: THREE.Vector3; distance: number; age: number; duration: number
   length: number; width: number; pass?: { fraction: number; fire: () => void }; impact?: () => void
+  /** The round's ink: black, or red for an upgraded gun's rounds. */
+  color: THREE.Color
 }
+const INK = new THREE.Color(penPalette.ink)
 
 function inkDrop() {
   const geometry = new THREE.SphereGeometry(1, 10, 8)
@@ -40,9 +43,9 @@ export class BulletTrails {
   readonly rims = new THREE.InstancedMesh(inkDrop(),
     new THREE.MeshBasicMaterial({ color: penPalette.paper, transparent: true, opacity: 0.9, depthWrite: false, toneMapped: false }), CAPACITY)
   readonly heads = new THREE.InstancedMesh(inkDrop(),
-    new THREE.MeshBasicMaterial({ color: penPalette.ink, transparent: true, opacity: 0.95, depthWrite: false, toneMapped: false }), CAPACITY)
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.95, depthWrite: false, toneMapped: false }), CAPACITY)
   readonly tails = new THREE.InstancedMesh(new THREE.ConeGeometry(1, 1, 8).rotateX(Math.PI),
-    new THREE.MeshBasicMaterial({ color: penPalette.ink, transparent: true, opacity: 0.52, depthWrite: false, toneMapped: false }), CAPACITY)
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.52, depthWrite: false, toneMapped: false }), CAPACITY)
   private rounds: Round[] = []
   private eye = new THREE.Vector3()
   private point = new THREE.Vector3()
@@ -55,6 +58,8 @@ export class BulletTrails {
     this.rims.name = `${label} paper contrast rims`
     this.tails.name = `${label} tapered wakes`
     this.rims.renderOrder = 1; this.tails.renderOrder = 2; this.heads.renderOrder = 3
+    // Each round carries its own ink colour (instance colours multiply the white materials).
+    for (const mesh of [this.heads, this.tails]) for (let i = 0; i < CAPACITY; i++) mesh.setColorAt(i, INK)
     for (const mesh of [this.rims, this.heads, this.tails]) {
       mesh.userData.noCollision = true
       mesh.frustumCulled = false
@@ -68,13 +73,13 @@ export class BulletTrails {
     }
   }
 
-  emit(origin: THREE.Vector3, end: THREE.Vector3, weapon: WeaponName = 'ak', pass?: Round['pass'], impact?: () => void) {
+  emit(origin: THREE.Vector3, end: THREE.Vector3, weapon: WeaponName = 'ak', pass?: Round['pass'], impact?: () => void, color?: THREE.ColorRepresentation) {
     const distance = origin.distanceTo(end)
     if (distance < 0.025) { impact?.(); return }
     if (this.rounds.length === CAPACITY) this.rounds.shift()
     this.rounds.push({ origin: origin.clone(), direction: end.clone().sub(origin).normalize(), distance,
       age: 0, duration: bulletFlightTime(distance), length: weapon === 'sniper' ? 2.4 : weapon === 'shotgun' ? 0.85 : 1.65,
-      width: weapon === 'shotgun' ? 0.65 : weapon === 'sniper' ? 1.2 : 1, pass, impact })
+      width: weapon === 'shotgun' ? 0.65 : weapon === 'sniper' ? 1.2 : 1, pass, impact, color: color === undefined ? INK : new THREE.Color(color) })
     this.render()
   }
 
@@ -116,8 +121,11 @@ export class BulletTrails {
       this.point.copy(round.origin).addScaledVector(round.direction, travelled - headLength - tailLength / 2)
       this.scale.set(radius * 0.7, tailLength, radius * 0.7)
       this.tails.setMatrixAt(index, this.matrix.compose(this.point, this.rotation, this.scale))
+      this.heads.setColorAt(index, round.color); this.tails.setColorAt(index, round.color)
     })
     this.rims.instanceMatrix.needsUpdate = this.heads.instanceMatrix.needsUpdate = this.tails.instanceMatrix.needsUpdate = true
+    if (this.heads.instanceColor) this.heads.instanceColor.needsUpdate = true
+    if (this.tails.instanceColor) this.tails.instanceColor.needsUpdate = true
   }
 
   get count() { return this.rounds.length }
