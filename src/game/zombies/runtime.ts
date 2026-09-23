@@ -546,7 +546,9 @@ export class ZombiesRuntime {
     this.dropper = new PowerupDropper(this.random)
     this.weapons.restore({ slots: [startingPistol(), null], selected: 0, pickups: [], nextId: 1 })
     this.player.actions.reset()
-    this.player.body.teleport(this.spawn.clone())
+    // In co-op the guest starts a couple of metres beside the host, not inside them.
+    const node = this.isGuest && this.graph ? this.graph.nearest(this.spawn.clone().add(new THREE.Vector3(2, 0, 0)), 2) : -1
+    this.player.body.teleport(node >= 0 ? this.graph!.point(node).setY(this.spawn.y) : this.spawn.clone())
     this.player.world.refresh()
     this.player.body.update(1 / 60, new THREE.Vector3(), false)
     this.player.actions.syncCamera(this.camera.perspective)

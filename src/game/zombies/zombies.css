@@ -5,7 +5,7 @@
 /* Round counter, top left, Call of Duty style: tally marks to five, then numerals. */
 .dead-ink-round { position: absolute; left: 26px; top: 20px; color: #d4332a; filter: drop-shadow(0 0 2px #fff); }
 /* Co-op: each player's points, stacked above yours, in ink; the marker says which line is you. */
-.dead-ink-scores { position: absolute; right: 28px; bottom: 150px; display: grid; gap: 3px; min-width: 150px;
+.dead-ink-scores { position: absolute; right: 28px; bottom: 208px; display: grid; gap: 3px; min-width: 150px;
   font: 700 15px/1.2 var(--notes, "Chalkboard SE", "Comic Sans MS", cursive); color: var(--ink, #111); }
 .dead-ink-scores[hidden] { display: none; }
 .dead-ink-scores div { display: flex; justify-content: space-between; gap: 14px; padding: 2px 8px; background: #fbfaf5; border: 1.5px solid var(--ink, #111); border-radius: 3px 4px 2px 4px; }
