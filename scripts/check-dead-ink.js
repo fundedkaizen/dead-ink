@@ -26,7 +26,7 @@ const status = window.__deadInkCheck = { done: false, results }
   document.querySelector('#walk-start').click()
   check(p.playing, 'the game starts')
   check(m.state.points === 500 && m.weapons.current?.name === 'pistol', 'you start with a pistol and 500 points', `${m.weapons.current?.name} ${m.state.points}`)
-  check(m.wallBuys.length === 4 && !!m.box, 'four wall guns and a Mystery Box were placed', `${m.wallBuys.length} walls`)
+  check(m.wallBuys.length === 6 && !!m.box, 'six wall guns (two further in) and a Mystery Box were placed', `${m.wallBuys.map(w => w.weapon)}`)
 
   // ---- Round 1, played by a bot through the real weapon ----------------------------------------
   const startPoints = m.state.points
@@ -89,7 +89,7 @@ const status = window.__deadInkCheck = { done: false, results }
   check(offered, 'the box stops on a gun')
   const offer = { ...box.offer }
   check(offer.rarity && offer.rarity !== 'common', 'box guns are never grey', offer.rarity)
-  check(!m.weapons.slots.some(s => s?.name === offer.name), 'the box never offers a gun you carry', offer.name)
+  check(!!offer.special || !m.weapons.slots.some(s => s?.name === offer.name), 'the box never offers a gun you carry (the Ink Ray is its own)', `${offer.name} ${offer.special ?? ''}`)
   pressKey('KeyF')
   await sleep(250)
   check(m.weapons.current?.name === offer.name && m.weapons.current?.rarity === offer.rarity, `taking it puts the ${offer.rarity} ${offer.name} in your hands`)
