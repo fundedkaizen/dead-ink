@@ -103,10 +103,17 @@ export class CoopLink {
     const socket = new WebSocket(`${scheme}://${location.host}/coop${code ? `?room=${encodeURIComponent(code)}` : ''}`)
     this.socket = socket
     this.onStatus({ kind: 'connecting' })
+    // No answer in a few seconds: say so instead of "Connecting..." forever.
+    const timeout = setTimeout(() => {
+      if (this.socket !== socket || this.role) return
+      this.close()
+      this.onStatus({ kind: 'error', reason: 'Could not reach the co-op server. The game server may need a restart.' })
+    }, 6000)
     socket.onmessage = event => {
       let message: { t: string; [key: string]: unknown }
       try { message = JSON.parse(String(event.data)) } catch { return }
       if (message.t === 'room') {
+        clearTimeout(timeout)
         this.role = message.you as CoopRole
         this.code = String(message.code)
         this.link = inviteLink(this.code, this.seed)

@@ -52,7 +52,8 @@ const vr = new VRWalkthrough(renderer, scene, camera, player, invalidate)
 // ?mode=zombies plays Dead Ink on the same compound; anything else is the hostage mission.
 const zombies = new URLSearchParams(location.search).get('mode') === 'zombies'
 const mission = !missionWorld ? null : zombies
-  ? new ZombiesRuntime(scene, camera, player, missionWorld, invalidate)
+  // A co-op invite carries the host's world seed, so both players' stations stand in the same places.
+  ? new ZombiesRuntime(scene, camera, player, missionWorld, invalidate, Number(new URLSearchParams(location.search).get('seed')) || undefined)
   : new MissionRuntime(scene, camera, player, missionWorld, invalidate)
 const frameTimes: number[] = []
 let startupReady = !mission

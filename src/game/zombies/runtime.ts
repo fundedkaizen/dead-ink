@@ -341,7 +341,8 @@ export class ZombiesRuntime {
       retry: () => { this.restart(); void this.audio.unlock(); this.player.requestControl() },
       restart: () => { this.restart(); void this.audio.unlock(); this.player.requestControl() },
       volume: () => this.applySettings(),
-      mute: () => this.applySettings() }, { ...DEAD_INK_COPY, home: slot => { DEAD_INK_COPY.home?.(slot); this.buildCoopPanel(slot) } })
+      mute: () => this.applySettings() }, { ...DEAD_INK_COPY, pages: [...(DEAD_INK_COPY.pages ?? []),
+        { id: 'coop', label: 'Co-op', title: 'Play with a friend', build: body => this.buildCoopPanel(body), show: () => this.renderCoopPanel() }] })
     this.stopSettings = subscribeSettings(() => this.applySettings())
     this.applySettings()
     document.querySelector('#world')?.setAttribute('aria-label', 'Dead Ink, round-based zombies. Mouse to look, WASD move, left click fire, right click aim, mouse wheel switch weapon, V knife, F buy or use, R reload, Escape pause.')
@@ -361,6 +362,12 @@ export class ZombiesRuntime {
     }
     this.bindInput()
     this.initialized = this.initialize()
+    // Opened from an invite: join at once and show the co-op page, where the Start button is.
+    const invite = new URLSearchParams(location.search).get('join')
+    if (invite) {
+      this.coop.open(invite)
+      void this.initialized.then(() => requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-menu-open="coop"]')?.click()))
+    }
   }
 
   /** Difficulty on the Settings page, under the volume; it applies to every zombie from the next one on. */
@@ -1255,10 +1262,8 @@ export class ZombiesRuntime {
   private buildCoopPanel(slot: HTMLElement) {
     const panel = document.createElement('div')
     panel.className = 'coop-panel'
-    slot.after(panel)
+    slot.append(panel)
     this.coopPanel = panel
-    const join = new URLSearchParams(location.search).get('join')
-    if (join && !this.coop.active) this.coop.open(join)
     this.renderCoopPanel()
   }
 
@@ -1272,7 +1277,8 @@ export class ZombiesRuntime {
     if (s.kind === 'idle') body = `<button type="button" class="coop-invite">Play with a friend</button><p>Send them a link: they play in their browser, nothing to install.</p>`
     else if (s.kind === 'connecting') body = '<p>Connecting…</p>'
     else if (s.kind === 'waiting') body = `<p><strong>Send this link to your friend:</strong></p><div class="coop-link"><input readonly value="${escapeHtml(s.link)}" aria-label="Invite link"><button type="button" class="coop-copy">Copy</button></div><p>Waiting for them to open it… <button type="button" class="coop-cancel">Cancel</button></p>`
-    else if (s.kind === 'paired') body = s.role === 'host' ? '<p><strong>Your friend is here.</strong> Press Start and play together.</p>' : '<p><strong>Connected to your friend\'s game.</strong> Press Start to jump in.</p>'
+    else if (s.kind === 'paired') body = (s.role === 'host' ? '<p><strong>Your friend is here.</strong> Start and play together.</p>' : '<p><strong>Connected to your friend\'s game.</strong> Start to jump in.</p>')
+      + '<button type="button" class="coop-start">Start</button>'
     else if (s.kind === 'alone') body = '<p>Joined. Waiting for your friend\'s game…</p>'
     else body = `<p class="coop-error">${escapeHtml(s.reason)}</p><button type="button" class="coop-invite">Try again</button>`
     panel.innerHTML = `<h3>Co-op</h3>${name}${body}`
@@ -1283,6 +1289,7 @@ export class ZombiesRuntime {
       const join = new URLSearchParams(location.search).get('join')
       this.coop.open(s.kind === 'error' && join ? join : undefined)
     })
+    panel.querySelector('.coop-start')?.addEventListener('click', () => document.querySelector<HTMLElement>('#walk-start')?.click())
     panel.querySelector('.coop-cancel')?.addEventListener('click', () => { this.coop.close(); this.coopStatusChanged({ kind: 'idle' }) })
     panel.querySelector('.coop-copy')?.addEventListener('click', event => {
       const input = panel.querySelector<HTMLInputElement>('.coop-link input')!

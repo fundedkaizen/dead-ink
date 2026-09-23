@@ -2,7 +2,7 @@
 const files = (...names: string[]) => names.map(name => `igi/${name}.wav`)
 const series = (prefix: string, count: number, padding = 1) =>
   files(...Array.from({ length: count }, (_, i) => `${prefix}${String(i + 1).padStart(padding, '0')}`))
-export const IGI_SAMPLES: Record<string, { files: string[]; gain: number }> = {
+export const IGI_SAMPLES: Record<string, { files: string[]; gain: number; pitch?: number }> = {
   horn: { files: files('alarm_1'), gain: 0.48 },
   footstep: { files: series('walk_gravel_', 6), gain: 0.42 },
   'enemy-footstep': { files: series('walk_gravel_', 6), gain: 0.34 },
@@ -21,6 +21,10 @@ export const IGI_SAMPLES: Record<string, { files: string[]; gain: number }> = {
   'enemy-reload-shotgun': { files: files('spas12_pump'), gain: 0.35 },
   'reload-ready-shotgun': { files: files('spas12_reload_2'), gain: 0.4 },
   'shot-sniper': { files: files('svddrag_shot_1'), gain: 0.9 },
+  // Dead Ink's wall guns: dry recordings like the rest (the old rifle take has an echo that piles up
+  // under automatic fire). The LMG is a deeper AK; the Magnum a short, hard crack.
+  'shot-lmg': { files: files('ak47_single'), gain: 0.9, pitch: 0.84 },
+  'shot-magnum': { files: files('svddrag_shot_1'), gain: 0.85, pitch: 1.18 },
   'enemy-shot-sniper': { files: files('svddrag_shot_1'), gain: 0.82 },
   impact: { files: series('bul_concrete_', 2), gain: 0.35 },
   'enemy-hit': { files: series('bul_flesh_', 5), gain: 0.75 },
