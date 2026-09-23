@@ -63,6 +63,12 @@ function packCost(item: WeaponItem) {
 }
 const BOX_PLACES: readonly [number, number, number][] = [[-60, 0, 45], [0, 0, 40], [145, 0, 5]]
 const BOX_TEDDY_AFTER = 3, BOX_TEDDY_CHANCE = 0.2
+/**
+ * An upgraded gun's kills sometimes burst in ink that takes the zombies around with them: more often and
+ * wider at each Pack-a-Punch level, so the high rounds have an answer to a packed crowd.
+ */
+const INK_BURST = [{ chance: 0.15, radius: 3 }, { chance: 0.3, radius: 3.8 }, { chance: 0.45, radius: 4.6 }] as const
+
 /** Where the three Easter-egg skulls hide: up the water tower, inside the southwest stores, in the annex. */
 const SKULL_PLACES: readonly [number, number, number][] = [[10.9, 12.6, -30], [-62, 0.7, 62], [140, 0, -45]]
 
@@ -789,15 +795,17 @@ export class ZombiesRuntime {
    */
   private inkBurst(position: THREE.Vector3, level: number) {
     const director = this.director
-    if (!director || level < 2 || this.random() >= (level >= 3 ? 0.4 : 0.25)) return
+    const burst = INK_BURST[Math.min(INK_BURST.length, Math.max(1, level)) - 1]
+    if (!director || this.random() >= burst.chance) return
     const centre = position.clone().setY(position.y + 0.8)
-    const damage = zombieHealth(this.rounds.round) * DIFFICULTY[this.difficulty].health * 0.9
-    for (const hit of director.blast(centre, 3.4, damage)) {
+    // Twice a zombie's health: with the blast's falloff, everything inside the radius dies, at any round.
+    const damage = zombieHealth(this.rounds.round) * DIFFICULTY[this.difficulty].health * 2
+    for (const hit of director.blast(centre, burst.radius, damage)) {
       this.award(pointsForHit({ lethal: hit.lethal, zone: 'torso' }))
       this.hits.hit(hit.reaction.point, hit.dealt, hit.zombie.id, false, hit.lethal)
       if (hit.lethal) { this.state.kills++; this.killed(hit.zombie.position, hit.zombie) }
     }
-    this.shockwaves.emit(position, 3.4)
+    this.shockwaves.emit(position, burst.radius)
     this.riseMarks.emit(position)
     this.emit({ kind: 'ink-burst', position: centre, radius: 40 })
   }
@@ -946,7 +954,8 @@ export class ZombiesRuntime {
   private grenadeBlast(at: THREE.Vector3) {
     const director = this.director
     if (!director) return
-    const damage = Math.max(600, zombieHealth(this.rounds.round) * DIFFICULTY[this.difficulty].health * 1.2)
+    // Twice a zombie's health: everything inside the radius dies, even in the high rounds.
+    const damage = Math.max(600, zombieHealth(this.rounds.round) * DIFFICULTY[this.difficulty].health * 2)
     for (const hit of director.blast(at, GRENADE.radius, damage)) {
       this.award(pointsForHit({ lethal: hit.lethal, zone: 'torso' }))
       this.hits.hit(hit.reaction.point, hit.dealt, hit.zombie.id, false, hit.lethal)
