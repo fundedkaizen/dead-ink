@@ -41,6 +41,8 @@ export class DeadInkAudio extends MissionAudio {
       'perk-drink', 'perk-jingle', 'pack-work', 'pack-ready', 'boss-roar', 'boss-growl', 'boss-slam', 'box-leave', 'box-open', 'box-spin', 'box-offer', 'ink-burst', 'grenade-blast', 'grenade-throw',
       'headshot-pop', 'gore-rip', 'gib', 'gas-burst', 'blot-gurgle', 'storm', 'doll-clap', 'heartbeat']
     if (event.kind === 'door' && this.context && this.active && !this.muted) this.slam(event)
+    // The Magnum: the usual report with a chest punch, a hard crack and a rolling echo under it.
+    if (event.kind === 'shot-magnum' && context && this.master && this.active && !this.muted && !this.disposed && !this.dying) this.magnum()
     if (!handled.includes(event.kind)) { super.play(FOOTSTEP_VOLUME[event.kind] ? { ...event, volume: FOOTSTEP_VOLUME[event.kind] } : event); return }
     if (!context || !this.master || !this.active || this.muted || this.volume <= 0 || this.disposed || this.dying) return
     if (event.position && event.position.distanceTo(this.listenerPosition) > (event.radius ?? 60)) return
@@ -358,6 +360,36 @@ export class DeadInkAudio extends MissionAudio {
   }
 
   /** Ground breaking: a thud, then clods pattering down. */
+  private magnum() {
+    const context = this.context!, t = context.currentTime
+    // Punch: a fast drop from a low tone, felt more than heard.
+    const { gain: punchGain } = this.output({ kind: 'shot-magnum' })
+    const punch = context.createOscillator()
+    punch.type = 'sine'
+    punch.frequency.setValueAtTime(120, t); punch.frequency.exponentialRampToValueAtTime(42, t + 0.22)
+    punchGain.gain.setValueAtTime(0.0001, t); punchGain.gain.exponentialRampToValueAtTime(0.75, t + 0.006); punchGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.3)
+    punch.connect(punchGain)
+    this.track(punch, [punchGain]); punch.start(t); punch.stop(t + 0.32)
+    // Crack: a very short burst of bright noise.
+    const { gain: crackGain } = this.output({ kind: 'shot-magnum' })
+    const crack = context.createBufferSource(), high = context.createBiquadFilter()
+    crack.buffer = this.noise; crack.playbackRate.value = 1.3
+    high.type = 'highpass'; high.frequency.value = 1800
+    crackGain.gain.setValueAtTime(0.0001, t); crackGain.gain.exponentialRampToValueAtTime(0.6, t + 0.002); crackGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.06)
+    crack.connect(high).connect(crackGain)
+    this.track(crack, [high, crackGain]); crack.start(t); crack.stop(t + 0.08)
+    // Echo: the shot rolling off the buildings, twice, darker each time.
+    for (const [delay, level, cutoff] of [[0.02, 0.28, 1100], [0.24, 0.14, 700]] as const) {
+      const { gain } = this.output({ kind: 'shot-magnum' })
+      const tail = context.createBufferSource(), low = context.createBiquadFilter()
+      tail.buffer = this.noise; tail.playbackRate.value = 0.55
+      low.type = 'lowpass'; low.frequency.setValueAtTime(cutoff, t + delay); low.frequency.exponentialRampToValueAtTime(160, t + delay + 0.9)
+      gain.gain.setValueAtTime(0.0001, t + delay); gain.gain.exponentialRampToValueAtTime(level, t + delay + 0.02); gain.gain.exponentialRampToValueAtTime(0.0001, t + delay + 0.95)
+      tail.connect(low).connect(gain)
+      this.track(tail, [low, gain], 'incidental'); tail.start(t + delay); tail.stop(t + delay + 1)
+    }
+  }
+
   private heartbeat(strength: number) {
     const context = this.context!, t = context.currentTime
     for (const [delay, level] of [[0, 1], [0.14, 0.6]] as const) {

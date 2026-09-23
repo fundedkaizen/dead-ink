@@ -931,6 +931,18 @@ export class FirstPersonWeapons {
         left.lerp(target, smooth(progress, 0.70, 0.79) * (1 - smooth(progress, 0.91, 0.99)))
       }
     }
+    // The Magnum: the free hand comes up to the cylinder as it swings out, pushes the fresh rounds in from
+    // behind while it spins, and flicks it shut.
+    const cylinder = this.model?.userData.parts.cylinder
+    if (this.reloading && cylinder) {
+      const side = this.root.worldToLocal(cylinder.localToWorld((cylinder.userData.grip as THREE.Vector3 | undefined)?.clone() ?? new THREE.Vector3(0.045, 0.015, 0)))
+      const back = this.root.worldToLocal(cylinder.localToWorld(new THREE.Vector3(0.01, 0, -0.075)))
+      const hold = smooth(progress, 0.04, 0.18) * (1 - smooth(progress, 0.86, 0.96))
+      const load = smooth(progress, 0.3, 0.4) * (1 - smooth(progress, 0.66, 0.76))
+      left.lerp(side.lerp(back, load), hold)
+      // Two firm shoves of the loader.
+      left.z += 0.012 * load * Math.max(0, Math.sin((progress - 0.3) * Math.PI * 7))
+    }
     const loadingPort = this.model?.userData.parts.loadingPort
     if (this.reloading && loadingPort) {
       const contact = this.root.worldToLocal(loadingPort.getWorldPosition(new THREE.Vector3()))
