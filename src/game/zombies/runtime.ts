@@ -1522,6 +1522,7 @@ export class ZombiesRuntime {
       shotsFired: this.shotsFired, shotsHit: this.shotsHit, elapsed: this.state.elapsed })
     this.hud.notify(`+${report.inkTotal} Ink`, 3)
     this.lowHealth.clear()
+    delete document.body.dataset.deadInkOneHit
   }
 
   // ---------------------------------------------------------------- zombies
@@ -1691,7 +1692,13 @@ export class ZombiesRuntime {
       // Health comes back after a few seconds without being hit, as in Call of Duty.
       if (this.state.phase === 'active' && this.state.elapsed - this.lastHurt > PLAYER_HEALTH.regenDelay)
         this.state.health = Math.min(this.maxHealth(), this.state.health + PLAYER_HEALTH.regenPerSecond * dt)
-      this.lowHealth.update(this.player.playing ? dt : 0, this.state.phase === 'active' ? this.state.health / this.maxHealth() : 1)
+      // One swipe from going down, the whole screen goes red, as in Call of Duty; otherwise the ink creeps
+      // in with the health you have left.
+      const oneHit = this.state.phase === 'active' && this.state.health > 0 && this.state.health <= PLAYER_HEALTH.zombieHit * DIFFICULTY[this.difficulty].damage
+      this.lowHealth.update(this.player.playing ? dt : 0, this.state.phase !== 'active' ? 1 : oneHit ? Math.min(0.06, this.state.health / this.maxHealth()) : this.state.health / this.maxHealth())
+      if (oneHit !== (document.body.dataset.deadInkOneHit === 'true')) {
+        if (oneHit) document.body.dataset.deadInkOneHit = 'true'; else delete document.body.dataset.deadInkOneHit
+      }
       const fov = getSettings().fov, cam = this.camera.perspective
       if (this.player.playing && !this.weapons.scoped && cam.fov !== fov) { cam.fov = fov; cam.updateProjectionMatrix() }
       this.reviveGrace = Math.max(0, this.reviveGrace - dt)
@@ -1814,6 +1821,7 @@ export class ZombiesRuntime {
     this.uninstallCosmetics(); this.lowHealth.dispose(); this.stopSettings(); this.bulletTrails.dispose(); this.weapons.dispose(); this.blood.dispose(); this.impacts.dispose(); this.riseMarks.dispose(); this.sparks.dispose(); this.shockwaves.dispose(); this.explosions.dispose(); this.nukeCloud.dispose(); this.undress?.(); this.grenades.dispose(); this.dolls.dispose(); this.dollBuy?.dispose(); this.bolts.dispose(); this.powerups.dispose()
     for (const skull of this.skulls) skull.object.removeFromParent()
     delete document.body.dataset.deadInkStorm
+    delete document.body.dataset.deadInkOneHit
     for (const part of this.parts) part.dispose()
     for (const site of this.sites.values()) site.dispose()
     this.powerSwitch?.dispose()

@@ -80,6 +80,9 @@ body[data-mission="true"]::before { content: ''; position: fixed; inset: 0; poin
 /* The Ink Storm: the light goes while it lasts. */
 #world { transition: filter 2.5s ease; }
 body[data-dead-ink-storm="true"] #world { filter: brightness(0.58) contrast(1.3) saturate(0.55); }
+/* One hit from going down: the whole world washes red. After the Storm's rule so it wins; the Nuke and
+   Second Draft animations still play over it. */
+body[data-dead-ink-one-hit="true"] #world { filter: grayscale(0.4) sepia(0.6) saturate(2.6) hue-rotate(-32deg) brightness(0.9) contrast(1.05); }
 /* Second Draft: down in grey, swimming; up again as the colour floods back, blue for the perk. */
 body[data-dead-ink-revive="true"] #world { animation: dead-ink-revive 2.4s linear; }
 @keyframes dead-ink-revive {
