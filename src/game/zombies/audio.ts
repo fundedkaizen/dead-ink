@@ -40,10 +40,12 @@ export class DeadInkAudio extends MissionAudio {
     const context = this.context
     const handled = ['zombie-groan', 'zombie-scream', 'zombie-snarl', 'zombie-swipe', 'zombie-rise', 'powerup-drop', 'powerup-grab', 'nuke', 'round-start', 'round-end',
       'perk-drink', 'perk-jingle', 'pack-work', 'pack-ready', 'boss-roar', 'boss-growl', 'boss-slam', 'box-leave', 'box-open', 'box-spin', 'box-offer', 'ink-burst', 'grenade-blast', 'grenade-throw',
-      'headshot-pop', 'gore-rip', 'gib', 'gas-burst', 'blot-gurgle', 'storm', 'doll-clap', 'heartbeat']
+      'headshot-pop', 'gore-rip', 'gib', 'gas-burst', 'blot-gurgle', 'storm', 'doll-clap', 'heartbeat', 'shot-raygun', 'soul', 'soul-in']
     if (event.kind === 'door' && this.context && this.active && !this.muted) this.slam(event)
     // The Magnum: the usual report with a chest punch, a hard crack and a rolling echo under it.
     if (event.kind === 'shot-magnum' && context && this.master && this.active && !this.muted && !this.disposed && !this.dying) this.magnum()
+    // Upgraded guns, as in Call of Duty: the gun's own report with a bright electric zap on top.
+    if (event.packed && event.kind.startsWith('shot-') && event.kind !== 'shot-raygun' && context && this.master && this.active && !this.muted && !this.disposed && !this.dying) this.zap(event)
     if (!handled.includes(event.kind)) { super.play(FOOTSTEP_VOLUME[event.kind] ? { ...event, volume: FOOTSTEP_VOLUME[event.kind] } : event); return }
     if (!context || !this.master || !this.active || this.muted || this.volume <= 0 || this.disposed || this.dying) return
     if (event.position && event.position.distanceTo(this.listenerPosition) > (event.radius ?? 60)) return
@@ -91,6 +93,69 @@ export class DeadInkAudio extends MissionAudio {
       case 'gib': this.pop(event, 0.55); this.tear(event); this.splatter(event, 7, 0.15); break
       case 'gas-burst': this.pop(event, 0.4); this.splatter(event, 5, 0.12); this.hiss(event); break
       case 'blot-gurgle': this.gurgle(event); break
+      case 'shot-raygun': this.rayGun(event); break
+      // A soul tearing loose and flying off; its arrival: a gulp in the ink and a small bright note.
+      case 'soul': this.whoosh(event); this.wail(event); break
+      case 'soul-in': this.pop(event, 0.7); this.arpeggio(event, [784, 1174.7], 0.06, 'triangle', 0.12, 0.6); break
+    }
+  }
+
+  /** A soul leaving a body: a thin ghostly tone sliding up, with a slow wobble. */
+  private wail(event: SoundEvent) {
+    const context = this.context!, t = context.currentTime
+    const { gain, panner } = this.output(event)
+    const tone = context.createOscillator(), wobble = context.createOscillator(), depth = context.createGain()
+    tone.type = 'sine'
+    tone.frequency.setValueAtTime(320, t); tone.frequency.exponentialRampToValueAtTime(980, t + 0.55)
+    wobble.frequency.value = 7; depth.gain.value = 18
+    wobble.connect(depth).connect(tone.frequency)
+    gain.gain.setValueAtTime(0.0001, t); gain.gain.exponentialRampToValueAtTime(0.16, t + 0.08); gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.7)
+    tone.connect(gain)
+    this.track(tone, [depth, gain, ...(panner ? [panner] : [])]); this.track(wobble, [])
+    for (const source of [tone, wobble]) { source.start(t); source.stop(t + 0.72) }
+  }
+
+  /**
+   * The Ray Gun's report: a resonant sweep falling from a whistle to a growl with a fast wobble in it,
+   * over a short punch. The X2 is a little higher and doubled, as Porter's X2 sounds heavier.
+   */
+  private rayGun(event: SoundEvent) {
+    const context = this.context!, t = context.currentTime
+    const packed = !!event.packed, top = packed ? 2100 : 1700
+    for (const detune of packed ? [1, 1.012, 0.5] : [1, 1.009]) {
+      const { gain, panner } = this.output(event)
+      const tone = context.createOscillator(), wobble = context.createOscillator(), depth = context.createGain(), filter = context.createBiquadFilter()
+      tone.type = detune === 0.5 ? 'square' : 'sawtooth'
+      tone.frequency.setValueAtTime(top * detune, t); tone.frequency.exponentialRampToValueAtTime(190 * detune, t + 0.24)
+      wobble.frequency.value = 36; depth.gain.value = 55 * detune
+      wobble.connect(depth).connect(tone.frequency)
+      filter.type = 'bandpass'; filter.Q.value = 5
+      filter.frequency.setValueAtTime(4200, t); filter.frequency.exponentialRampToValueAtTime(650, t + 0.26)
+      const level = detune === 0.5 ? 0.18 : 0.34
+      gain.gain.setValueAtTime(0.0001, t); gain.gain.exponentialRampToValueAtTime(level, t + 0.005); gain.gain.exponentialRampToValueAtTime(0.0001, t + (packed ? 0.34 : 0.28))
+      tone.connect(filter).connect(gain)
+      this.track(tone, [depth, filter, gain, ...(panner ? [panner] : [])]); this.track(wobble, [])
+      for (const source of [tone, wobble]) { source.start(t); source.stop(t + 0.36) }
+    }
+    const { gain: body, panner: bodyPanner } = this.output(event)
+    const punch = context.createOscillator()
+    punch.type = 'sine'; punch.frequency.setValueAtTime(150, t); punch.frequency.exponentialRampToValueAtTime(55, t + 0.11)
+    body.gain.setValueAtTime(0.0001, t); body.gain.exponentialRampToValueAtTime(0.5, t + 0.004); body.gain.exponentialRampToValueAtTime(0.0001, t + 0.14)
+    punch.connect(body)
+    this.track(punch, [body, ...(bodyPanner ? [bodyPanner] : [])]); punch.start(t); punch.stop(t + 0.15)
+  }
+
+  /** The Pack-a-Punch layer: a quick bright chirp falling fast, with a ring a fifth above. */
+  private zap(event: SoundEvent) {
+    const context = this.context!, t = context.currentTime
+    for (const ratio of [1, 1.5]) {
+      const { gain, panner } = this.output(event)
+      const tone = context.createOscillator()
+      tone.type = ratio === 1 ? 'triangle' : 'sine'
+      tone.frequency.setValueAtTime(2600 * ratio, t); tone.frequency.exponentialRampToValueAtTime(620 * ratio, t + 0.08)
+      gain.gain.setValueAtTime(0.0001, t); gain.gain.exponentialRampToValueAtTime(ratio === 1 ? 0.2 : 0.09, t + 0.003); gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.11)
+      tone.connect(gain)
+      this.track(tone, [gain, ...(panner ? [panner] : [])], 'incidental'); tone.start(t); tone.stop(t + 0.12)
     }
   }
 

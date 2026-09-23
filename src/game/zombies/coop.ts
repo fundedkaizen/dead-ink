@@ -64,6 +64,7 @@ export type CoopMessage =
   | { t: 'drop'; k: PowerupKind; p: [number, number, number] }
   | { t: 'grab'; k: PowerupKind; p: [number, number, number]; by: CoopRole }
   | { t: 'boom'; p: [number, number, number]; r: number }
+  | { t: 'soul'; p: [number, number, number]; i: number }
   | { t: 'gameover' }
   | { t: 'start' }
   // guest -> host

@@ -9,6 +9,8 @@ npm run dev
 
 Open the local Vite URL and select **Begin mission**. Controls are in the game menu. The character lab is at `/lab.html`.
 
+Zombie mode is at `/?mode=zombies`. Automatic live reload is disabled so source edits do not reset a game that is playing or paused in another tab. Refresh manually when you want to load code changes; a refresh starts a new run.
+
 - `npm run build` — type-check and build for production.
 - `npm test` — run all logic checks.
 

@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import { Capsule } from 'three/addons/math/Capsule.js'
 import { BulletTrails } from '../bullet-trails'
 import { WEAPON_RULES, fallDamage } from '../balance'
-import { PACKED_NAMES, pierceOf } from '../loot'
+import { PACKED_NAMES, pierceOf, weaponRules } from '../loot'
 import type { EnvironmentCamera } from '../../camera'
 import type { FirstPersonController } from '../../player/controller'
 import type { ActionTarget } from '../../player/actions'
@@ -76,6 +76,8 @@ type TimedPowerup = 'instaKill' | 'doublePoints' | 'deathMachine'
 /** Pack-a-Punch prices: 5000, then 10000, then 20000 to upgrade the same gun again; null when maxed. */
 function packCost(item: WeaponItem) {
   const level = item.packed ? item.packLevel ?? 1 : 0
+  // The Ink Ray upgrades once, to the X2, as the Ray Gun does in Call of Duty.
+  if (item.special === 'rayGun') return level ? null : PACK.costs[0]
   return level >= PACK.costs.length ? null : PACK.costs[level]
 }
 const BOX_PLACES: readonly [number, number, number][] = [[-60, 0, 45], [0, 0, 40], [145, 0, 5]]
@@ -509,11 +511,12 @@ export class ZombiesRuntime {
     if (this.pack) { const site = new BuildSite('pack', this.pack.spot, false); this.sites.set('pack', site); this.scene.add(site.root) }
     this.soulStreams = new SoulStreams(this.scene)
     for (const [x, y, z] of INKWELL_PLACES) {
-      const node = graph.nearest(new THREE.Vector3(x, y, z), 4)
-      if (node < 0) { console.warn(`Dead Ink: nowhere for an inkwell near ${x}, ${z}`); continue }
-      const well = new Inkwell(graph.point(node))
+      const at = this.levelGround(new THREE.Vector3(x, y, z), 0.7)
+      if (!at) { console.warn(`Dead Ink: nowhere for an inkwell near ${x}, ${z}`); continue }
+      const well = new Inkwell(at)
       this.wells.push(well)
       this.scene.add(well.root)
+      this.makeSolid(well.root, [1.25, 1.05, 1.25], [0, 0.52, 0])
     }
     for (const { gate, home } of TRAP_GATES) {
       const spec = ZONE_GATES.find(g => g.id === gate)
@@ -696,6 +699,7 @@ export class ZombiesRuntime {
       const blurb = machine.kind === 'secondDraft' && this.paired ? 'Revive your partner twice as fast.' : perk.blurb
       const label = !this.power && !this.soloDraft(machine.kind) ? `${perk.name} · no power` : this.perks.has(machine.kind) ? `${perk.name} · yours`
         : this.perks.size >= PERK_LIMIT ? `${perk.name} · you can hold ${PERK_LIMIT} perks`
+        : this.timers.deathMachine ? `${perk.name} · not while you hold the Death Machine`
         : `Drink ${perk.name} · ${perk.cost}${this.state.points >= perk.cost ? '' : ` · need ${perk.cost - this.state.points} more`} · ${blurb}`
       targets.push({ object: machine.root, point: machine.point, kind: 'mission', descending: false, label, use: () => this.buyPerk(machine) })
     }
@@ -703,8 +707,8 @@ export class ZombiesRuntime {
     if (pack && this.packBuilt && this.questStep === 'pour' && pack.state === 'idle') {
       targets.push({ object: pack.root, point: pack.point, kind: 'mission', descending: false, label: 'Pour the three bottles of ink into the Pack-a-Punch', use: () => this.pourInk() })
     } else if (pack && this.packBuilt && pack.state !== 'working') {
-      const label = !this.power && pack.state === 'idle' ? 'Pack-a-Punch · no power' : pack.state === 'ready' && pack.held ? `Take the ${PACKED_NAMES[pack.held.name]}`
-        : !held || held.special ? 'Pack-a-Punch · hold a gun to upgrade it'
+      const label = !this.power && pack.state === 'idle' ? 'Pack-a-Punch · no power' : pack.state === 'ready' && pack.held ? `Take the ${pack.held.special === 'rayGun' ? 'Ink Ray X2' : PACKED_NAMES[pack.held.name]}`
+        : !held || held.special === 'deathMachine' ? 'Pack-a-Punch · hold a gun to upgrade it'
         : packCost(held) === null ? 'Pack-a-Punch · fully upgraded'
         : `Pack-a-Punch · ${held.packed ? 'upgrade again' : 'upgrade'} your ${this.weapons.label} · ${packCost(held)}${this.state.points >= packCost(held)! ? '' : ` · need ${packCost(held)! - this.state.points} more`}`
       targets.push({ object: pack.root, point: pack.point, kind: 'mission', descending: false, label, use: () => this.usePack(pack) })
@@ -788,8 +792,12 @@ export class ZombiesRuntime {
     for (const part of this.parts) part.dispose()
     this.parts = []
     const graph = this.graph
+    // Two parts never share a spot, and none lies in a perk machine, the Pack-a-Punch, a box spot or a wall gun.
+    const taken: THREE.Vector3[] = [...this.perkMachines.map(machine => machine.root.position), ...(this.pack ? [this.pack.root.position] : []),
+      ...this.boxSpots.map(spot => spot.stand), ...this.wallBuys.map(buy => buy.spot.stand)]
     if (graph) for (const id of Object.keys(PARTS) as PartId[]) {
-      const places = PARTS[id].places
+      const clear = PARTS[id].places.filter(([px, , pz]) => !taken.some(t => Math.hypot(t.x - px, t.z - pz) < 3))
+      const places = clear.length ? clear : PARTS[id].places
       const [x, y, z] = places[Math.floor(this.random() * places.length) % places.length]
       // On the real floor at its place (a tower deck's middle, not the grid spot at its edge); the
       // zombies' grid is the fallback.
@@ -798,6 +806,7 @@ export class ZombiesRuntime {
       if (node < 0 && !(Number.isFinite(floor) && Math.abs(floor - y) < 1.5)) { console.warn(`Dead Ink: nowhere to put the ${PARTS[id].label}`); continue }
       const part = new PartPickup(id, node >= 0 ? graph.point(node) : new THREE.Vector3(x, floor, z))
       this.parts.push(part)
+      taken.push(part.root.position)
       this.scene.add(part.root)
     }
     this.zombieHud.parts([])
@@ -954,6 +963,8 @@ export class ZombiesRuntime {
   /** The quest moves on by itself as its conditions come true; the inkwells take in their souls. */
   private updateQuest(dt: number) {
     if (this.isGuest) {
+      // The host counts the souls; here they are only seen and heard.
+      for (const well of this.soulStreams?.update(dt, this.camera.perspective) ?? []) this.emit({ kind: 'soul-in', position: well.point.clone(), radius: 25 })
       for (const well of this.wells) well.update(dt)
       const souls = this.wells.reduce((sum, well) => sum + Math.min(QUEST.souls, well.souls), 0)
       this.zombieHud.quest(this.questLine(souls))
@@ -966,7 +977,8 @@ export class ZombiesRuntime {
       this.shout('The inkwells are thirsty', 3.5)
       this.hud.notify('Kill zombies near the inkwells to fill them.', 4)
     }
-    for (const well of this.soulStreams?.update(dt) ?? []) {
+    for (const well of this.soulStreams?.update(dt, this.camera.perspective) ?? []) {
+      this.emit({ kind: 'soul-in', position: well.point.clone(), radius: 25 })
       if (well.addSoul() && well.full) {
         this.emit({ kind: 'pack-ready', position: well.point.clone(), radius: 40 })
         this.hud.notify('An inkwell is full. Take its bottle.', 3)
@@ -1298,6 +1310,11 @@ export class ZombiesRuntime {
         break
       // ---- both
       case 'revive': this.getUp(); this.hud.notify('Your partner got you back up.', 2.5); break
+      case 'soul': {
+        const well = this.wells[m.i]
+        if (well) { const from = toVector(m.p); this.soulStreams?.emit(from, well); this.emit({ kind: 'soul', position: from, radius: 30 }) }
+        break
+      }
       case 'down': if (this.partnerState) this.partnerState.dn = m.dn; break
     }
   }
@@ -1508,9 +1525,15 @@ export class ZombiesRuntime {
 
   private buyPerk(machine: PerkMachine) {
     const perk = PERKS[machine.kind]
-    if (!this.isActive() || !this.canReach(machine.point, machine.root) || this.pendingPerk || this.timers.deathMachine) return false
-    if (!this.power && !this.soloDraft(machine.kind)) { this.hud.notify('No power. Find the power switch.', 2.5, true); return false }
-    if (this.perks.has(machine.kind) || this.perks.size >= PERK_LIMIT || !this.spend(perk.cost)) return false
+    if (!this.isActive() || !this.canReach(machine.point, machine.root)) return false
+    // Every refusal says why: a machine that ignores F reads as a broken one.
+    const refusal = this.timers.deathMachine ? 'Not while you hold the Death Machine.'
+      : this.pendingPerk ? 'Finish the one you are drinking first.'
+      : !this.power && !this.soloDraft(machine.kind) ? 'No power. Find the power switch.'
+      : this.perks.has(machine.kind) ? `You already have ${perk.name}.`
+      : this.perks.size >= PERK_LIMIT ? `You can hold ${PERK_LIMIT} perks.` : null
+    if (refusal) { this.hud.notify(refusal, 2.5, true); return false }
+    if (!this.spend(perk.cost)) return false
     // Drink it: the gun goes down, the bottle comes up, the perk works once it is empty.
     this.weapons.cancel(); this.aiming = false
     this.bottle.drink(machine.kind)
@@ -1579,16 +1602,17 @@ export class ZombiesRuntime {
     }
     const current = this.weapons.current
     const cost = current ? packCost(current) : null
-    if (pack.state !== 'idle' || !current || current.special || cost === null || this.timers.deathMachine || !this.spend(cost)) return false
+    if (pack.state !== 'idle' || !current || current.special === 'deathMachine' || cost === null || this.timers.deathMachine || !this.spend(cost)) return false
     // The gun goes in: your hands move to your other gun, or stay empty, until it comes out.
     const snapshot = this.weapons.snapshot()
     snapshot.slots[snapshot.selected] = null
     const other = snapshot.slots.findIndex(Boolean)
     if (other >= 0) snapshot.selected = other
     this.weapons.restore(snapshot)
-    const capacity = WEAPON_RULES[current.name].capacity
     const level = (current.packed ? current.packLevel ?? 1 : 0) + 1
-    pack.insert({ ...current, id: `${current.id}-packed${level}`, packed: true, packLevel: level, magazine: capacity, reserve: capacity * RESERVE_MAGAZINES * 2 })
+    const upgraded = { ...current, id: `${current.id}-packed${level}`, packed: true, packLevel: level }
+    const capacity = weaponRules(upgraded).capacity
+    pack.insert({ ...upgraded, magazine: capacity, reserve: current.special === 'rayGun' ? INK_RAY.packedReserve : capacity * RESERVE_MAGAZINES * 2 })
     this.emit({ kind: 'pack-work', position: pack.point.clone(), radius: 30 })
     this.invalidate()
     return true
@@ -1642,6 +1666,30 @@ export class ZombiesRuntime {
   }
 
   /** Make something solid to the player: an invisible box around it in the collision world. */
+  /**
+   * Level ground near `near` for something round standing in the open (an inkwell): the whole base flat,
+   * on the ground rather than half on a platform's lip, with room around it. Rings out to 6 m.
+   */
+  private levelGround(near: THREE.Vector3, radius: number) {
+    const world = this.player.world, probe = new THREE.Vector3(), room = new Capsule()
+    for (let ring = 0; ring <= 8; ring++) {
+      const steps = ring ? ring * 6 : 1
+      for (let s = 0; s < steps; s++) {
+        const angle = s / steps * Math.PI * 2, x = near.x + Math.cos(angle) * ring * 0.75, z = near.z + Math.sin(angle) * ring * 0.75
+        const floor = world.floor(probe.set(x, near.y + 0.6, z), 0.6, 1.5)
+        if (!Number.isFinite(floor) || Math.abs(floor - near.y) > 0.3) continue
+        let level = true
+        for (let i = 0; i < 8 && level; i++) {
+          const around = world.floor(probe.set(x + Math.cos(i * Math.PI / 4) * radius, floor + 0.5, z + Math.sin(i * Math.PI / 4) * radius), 0.5, 0.6)
+          level = Number.isFinite(around) && Math.abs(around - floor) < 0.04
+        }
+        room.start.set(x, floor + radius + 0.05, z); room.end.set(x, floor + 1.6, z); room.radius = radius
+        if (level && world.fits(room)) return new THREE.Vector3(x, floor, z)
+      }
+    }
+    return null
+  }
+
   private makeSolid(owner: THREE.Object3D, size: [number, number, number], offset: [number, number, number]) {
     const old = this.solids.get(owner)
     if (old) this.player.world.removeObject(old)
@@ -1736,7 +1784,7 @@ export class ZombiesRuntime {
       if (this.paired) this.coop.send(this.isGuest ? { t: 'use', what: 'box-take' } : { t: 'box', a: 'take' })
       if (!offer) return false
       const item = freshWeapon(`box-${offer.name}-${Math.floor(this.state.elapsed * 1000)}`, offer.name, offer.rarity)
-      this.weapons.give(offer.special ? { ...item, special: offer.special } : item)
+      this.weapons.give(offer.special ? { ...item, special: offer.special, magazine: INK_RAY.magazine, reserve: INK_RAY.reserve } : item)
       this.invalidate()
       return true
     }
@@ -1791,7 +1839,12 @@ export class ZombiesRuntime {
         const distance = well.root.position.distanceTo(position)
         if (well.awake && !well.full && distance < bestDistance) { best = well; bestDistance = distance }
       }
-      if (best) this.soulStreams?.emit(position.clone().setY(position.y + 1.2), best)
+      if (best) {
+        const from = position.clone().setY(position.y + 1.2)
+        this.soulStreams?.emit(from, best)
+        this.emit({ kind: 'soul', position: from, radius: 30 })
+        this.coop.send({ t: 'soul', p: vec(from), i: this.wells.indexOf(best) })
+      }
     }
     if (zombie && zombie === this.editor) { this.finishQuest(position); return }
     if (weapon?.packed) this.inkBurst(position, weapon.packLevel ?? 1)
@@ -1846,8 +1899,9 @@ export class ZombiesRuntime {
         this.grenadeCount = GRENADE.max
         if (this.dollCount > 0) this.dollCount = DECOY.carry
         for (const item of [...this.weapons.slots, ...(this.heldWeapons?.slots ?? [])]) {
-          if (!item || item.special) continue
-          item.reserve = Math.max(item.reserve, WEAPON_RULES[item.name].capacity * RESERVE_MAGAZINES * (item.packed ? 2 : 1))
+          if (!item || item.special === 'deathMachine') continue
+          item.reserve = Math.max(item.reserve, item.special === 'rayGun' ? item.packed ? INK_RAY.packedReserve : INK_RAY.reserve
+            : WEAPON_RULES[item.name].capacity * RESERVE_MAGAZINES * (item.packed ? 2 : 1))
         }
         break
       case 'deathMachine':
@@ -1897,7 +1951,7 @@ export class ZombiesRuntime {
     const held = this.weapons.current
     if (held?.special === 'rayGun') {
       // A bolt, not a bullet: it flies, and bursts where it lands.
-      this.bolts.fire(shot.origin, shot.direction)
+      this.bolts.fire(shot.origin, shot.direction, !!held.packed)
       return
     }
     if (this.isGuest) {
@@ -1936,13 +1990,14 @@ export class ZombiesRuntime {
   }
 
   /** An Ink Ray bolt bursts: a splash that kills most things near it, and stings you point-blank. */
-  private boltBurst(at: THREE.Vector3) {
+  private boltBurst(at: THREE.Vector3, packed = false) {
     const director = this.director
     if (!director) return
-    this.coopBlast(at, INK_RAY.radius, this.blastDamage('boltBurst'))
+    const radius = packed ? INK_RAY.packedRadius : INK_RAY.radius, scale = packed ? INK_RAY.packedDamage : 1
+    this.coopBlast(at, radius, this.blastDamage('boltBurst') * scale)
     if (this.isGuest) return
-    const damage = Math.max(1500, zombieHealth(this.rounds.round) * DIFFICULTY[this.difficulty].health * 1.6)
-    for (const hit of director.blast(at, INK_RAY.radius, damage)) {
+    const damage = Math.max(1500, zombieHealth(this.rounds.round) * DIFFICULTY[this.difficulty].health * 1.6) * scale
+    for (const hit of director.blast(at, radius, damage)) {
       this.hitFlash = 0.15
       this.award(pointsForHit({ lethal: hit.lethal, zone: 'torso' }))
       this.hits.hit(hit.reaction.point, hit.dealt, hit.zombie.id, false, hit.lethal)
@@ -1951,7 +2006,7 @@ export class ZombiesRuntime {
     const eye = this.camera.perspective.getWorldPosition(new THREE.Vector3())
     const distance = eye.distanceTo(at)
     if (distance < INK_RAY.selfRadius) this.damage(Math.round(INK_RAY.selfDamage * (1 - distance / INK_RAY.selfRadius)), 'zombie', at.clone())
-    this.shockwaves.emit(at.clone().setY(at.y - 0.5), INK_RAY.radius)
+    this.shockwaves.emit(at.clone().setY(at.y - 0.5), radius)
     this.sparks.emit(at, new THREE.Vector3(0, 1, 0), 8)
     this.emit({ kind: 'ink-burst', position: at.clone(), radius: 60 })
   }
@@ -2331,7 +2386,7 @@ export class ZombiesRuntime {
       for (const lure of [...this.partnerLures]) if ((lure.left -= dt) <= 0) this.partnerLures.splice(this.partnerLures.indexOf(lure), 1)
       if (lures.length && (this.dollClap -= dt) <= 0) { this.dollClap = 0.32; this.emit({ kind: 'doll-clap', position: lures[0].position.clone(), radius: 25 }) }
       for (const at of this.dolls.update(dt)) this.dollBlast(at)
-      for (const at of this.bolts.update(dt)) this.boltBurst(at)
+      for (const burst of this.bolts.update(dt)) this.boltBurst(burst.at, burst.packed)
       this.tickPowerups(dt)
       const speed = Math.hypot(body.velocity.x, body.velocity.z)
       if (speed > 0.5 && body.grounded || this.player.actions.climbing) {
