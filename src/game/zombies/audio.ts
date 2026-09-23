@@ -57,6 +57,8 @@ export class DeadInkAudio extends MissionAudio {
       case 'nuke': this.boom(event); break
       // The Ink Storm rolling in: thunder, then the rain of grit.
       case 'storm': this.boom(event); this.dirt(event); break
+      // The Ink Doll's cymbals: a bright, short crash of hiss.
+      case 'doll-clap': this.clash(event); break
       case 'round-start': this.bell(event, [55, 82.4, 110], 3.2, 0.5); break
       // The round is over, not won: a low minor chord under a tolling, slightly sour bell.
       case 'round-end': this.bell(event, [73.4, 87.3, 110, 103.8], 4.2, 0.55); break
@@ -253,6 +255,25 @@ export class DeadInkAudio extends MissionAudio {
   }
 
   /** Ground breaking: a thud, then clods pattering down. */
+  /** A small cymbal: a bright band of hiss that rings off quickly, with a metallic ping on top. */
+  private clash(event: SoundEvent) {
+    const context = this.context!, t = context.currentTime
+    const { gain, panner } = this.output(event)
+    const hiss = context.createBufferSource(), high = context.createBiquadFilter()
+    hiss.buffer = this.noise; hiss.playbackRate.value = 1.6
+    high.type = 'highpass'; high.frequency.value = 5200
+    gain.gain.setValueAtTime(0.0001, t); gain.gain.exponentialRampToValueAtTime(0.35, t + 0.004); gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.28)
+    hiss.connect(high).connect(gain)
+    const ping = context.createOscillator()
+    ping.type = 'square'; ping.frequency.value = 2950 + Math.random() * 200
+    const pingGain = context.createGain()
+    pingGain.gain.setValueAtTime(0.04, t); pingGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.12)
+    ping.connect(pingGain).connect(gain)
+    this.track(hiss, [high, gain, ...(panner ? [panner] : [])], 'incidental')
+    this.track(ping, [pingGain], 'incidental')
+    hiss.start(t); hiss.stop(t + 0.3); ping.start(t); ping.stop(t + 0.13)
+  }
+
   private dirt(event: SoundEvent) {
     const context = this.context!, t = context.currentTime
     const { gain, panner } = this.output(event)

@@ -43,6 +43,9 @@ body[data-reduced-motion="true"] .dead-ink-powerup.ending { animation: none; opa
 .dead-ink-grenades { display: flex; gap: 3px; margin-top: 4px; }
 .dead-ink-grenades svg { width: 16px; height: 19px; fill: var(--ink); stroke: var(--ink); stroke-width: 1.5; filter: drop-shadow(0 0 1px #fff); }
 .dead-ink-grenades svg .band { stroke: #fff; stroke-width: 1.4; }
+.dead-ink-grenades svg.doll { width: 19px; }
+.dead-ink-grenades svg.doll .face { fill: #fff; }
+.dead-ink-grenades svg.doll .fez { fill: #c8322d; }
 
 /* The Brute's health: red, because it is the danger. */
 .dead-ink-boss { position: absolute; left: 50%; top: 22px; transform: translateX(-50%); width: min(460px, 70vw); display: grid; gap: 4px; justify-items: center;

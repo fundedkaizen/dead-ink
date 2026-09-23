@@ -8,13 +8,18 @@ import type { CollisionWorld } from '../../player/collision'
  */
 export const GRENADE = { start: 2, perRound: 2, max: 4, fuse: 2.2, speed: 13, lift: 3.6, radius: 5.5, cooldown: 0.8, selfRadius: 4, selfDamage: 60 } as const
 
-type Live = { object: THREE.Object3D; velocity: THREE.Vector3; spin: THREE.Vector3; fuse: number; resting: boolean }
+type Live = { object: THREE.Object3D; velocity: THREE.Vector3; spin: THREE.Vector3; fuse: number; resting: boolean; restAge: number }
 
 export class Grenades {
   private live: Live[] = []
   private hit = new THREE.Vector3()
 
-  constructor(private scene: THREE.Scene, private world: CollisionWorld, private model: () => THREE.Object3D = inkFrag) {}
+  /** `fuse` in seconds; `upright` for something that lands on its feet and stays there (the Ink Doll). */
+  constructor(private scene: THREE.Scene, private world: CollisionWorld, private model: () => THREE.Object3D = inkFrag,
+    private options: { fuse?: number; upright?: boolean } = {}) {}
+
+  /** Those lying still, with seconds since they came to rest. */
+  resting() { return this.live.filter(g => g.resting).map(g => ({ object: g.object, position: g.object.position, age: g.restAge })) }
 
   get count() { return this.live.length }
 
@@ -24,7 +29,7 @@ export class Grenades {
     object.userData.noCollision = true
     this.scene.add(object)
     const velocity = direction.clone().normalize().multiplyScalar(GRENADE.speed).add(new THREE.Vector3(0, GRENADE.lift, 0)).add(carried)
-    this.live.push({ object, velocity, spin: new THREE.Vector3(Math.random() * 10 - 5, Math.random() * 10 - 5, Math.random() * 10 - 5), fuse: GRENADE.fuse, resting: false })
+    this.live.push({ object, velocity, spin: new THREE.Vector3(Math.random() * 10 - 5, Math.random() * 10 - 5, Math.random() * 10 - 5), fuse: this.options.fuse ?? GRENADE.fuse, resting: false, restAge: 0 })
   }
 
   /** Move, bounce and count down; returns where grenades went off this frame. */
@@ -43,12 +48,16 @@ export class Grenades {
             this.hit.copy(surface.normal)
             g.object.position.copy(surface.point).addScaledVector(this.hit, 0.06)
             g.velocity.reflect(this.hit).multiplyScalar(0.4)
-            if (this.hit.y > 0.6 && g.velocity.length() < 1.2) { g.resting = true; g.velocity.set(0, 0, 0) }
+            if (this.hit.y > 0.6 && g.velocity.length() < 1.2) {
+              g.resting = true; g.velocity.set(0, 0, 0)
+              if (this.options.upright) { g.object.rotation.set(0, g.object.rotation.y, 0); g.object.position.y -= 0.06 }
+            }
           } else g.object.position.add(move)
         }
         g.object.rotation.x += g.spin.x * step; g.object.rotation.y += g.spin.y * step; g.object.rotation.z += g.spin.z * step
         if (g.object.position.y < -20) g.fuse = 0
       }
+      else g.restAge += step
       if (g.fuse <= 0) {
         bursts.push(g.object.position.clone())
         this.remove(g)

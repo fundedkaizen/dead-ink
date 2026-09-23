@@ -34,6 +34,7 @@ import { MuzzleSparks, RiseMarks, Shockwaves } from './effects'
 import { GRENADE, Grenades } from './grenades'
 import { INK_RAY, InkRayBolts } from './wonder'
 import { REVIVE, SecondDraftRevive } from './revive'
+import { DECOY, DollBuy, animateDoll, inkDoll } from './decoy'
 import { POWERUP_INFO, PowerupDrops, PowerupDropper } from './powerups'
 import { SEALED, ZoneGates, type ZoneGate } from './zones'
 import { MACHINE_PLACES, PACK, PERKS, PERK_EFFECT, PERK_LIMIT, PackAPunch, PackedLook, PerkBottle, PerkMachine, type PerkKind } from './perks'
@@ -68,6 +69,9 @@ const BOX_TEDDY_AFTER = 3, BOX_TEDDY_CHANCE = 0.2
  * wider at each Pack-a-Punch level, so the high rounds have an answer to a packed crowd.
  */
 const INK_BURST = [{ chance: 0.15, radius: 3 }, { chance: 0.3, radius: 3.8 }, { chance: 0.45, radius: 4.6 }] as const
+
+/** The Ink Doll wall is in the warehouse, the first zone past the start worth fighting for. */
+const DOLL_PLACE: [number, number, number] = [26, 0.7, -10]
 
 /** Where the three Easter-egg skulls hide: up the water tower, inside the southwest stores, in the annex. */
 const SKULL_PLACES: readonly [number, number, number][] = [[10.9, 12.6, -30], [-62, 0.7, 62], [140, 0, -45]]
@@ -116,7 +120,7 @@ export const DEAD_INK_COPY: MenuCopy = {
   restartWarning: 'This game ends and a new one starts at round 1.',
   missionPage: false,
   modeLink: { label: 'Hostage mission', href: './' },
-  controls: [['Knife', 'V'], ['Grenade', 'Q or G'], ['Switch weapon', 'Wheel']],
+  controls: [['Knife', 'V'], ['Grenade', 'Q or G'], ['Ink Doll', 'T'], ['Switch weapon', 'Wheel']],
 }
 
 /**
@@ -184,6 +188,12 @@ export class ZombiesRuntime {
   /** Seconds of grace after Second Draft gets you back up. */
   private reviveGrace = 0
   private revive = new SecondDraftRevive()
+  /** Ink Dolls: thrown, lying there banging their cymbals, and the wall that sells them. */
+  private dolls: Grenades
+  private dollCount = 0
+  private dollCooldown = 0
+  private dollClap = 0
+  private dollBuy: DollBuy | null = null
   /** An Ink Storm round is on; the last kill's place, for its Max Ammo. */
   private storm = false
   private lastKillAt: THREE.Vector3 | null = null
@@ -229,6 +239,7 @@ export class ZombiesRuntime {
     this.sparks = new MuzzleSparks(scene)
     this.shockwaves = new Shockwaves(scene)
     this.grenades = new Grenades(scene, player.world)
+    this.dolls = new Grenades(scene, player.world, inkDoll, { fuse: DECOY.lure + 1, upright: true })
     this.bolts = new InkRayBolts(scene, player.world, (origin, direction, max) => this.director?.aimDistance(origin, direction, max) ?? Infinity)
     this.powerups = new PowerupDrops(scene)
     this.bottle = new PerkBottle(camera.perspective)
@@ -300,7 +311,7 @@ export class ZombiesRuntime {
       if (graph.geometry && graph.geometry !== hash) console.warn(`Dead Ink: navigation graph was baked for geometry ${graph.geometry}, map is ${hash}. Rebake with scripts/build-navgraph.ts.`)
       this.graph = graph
       this.director = new ZombieDirector({ scene: this.scene, world: this.player.world, doors: doors.filter(door => !door.userData.missionLocked), graph, emit: event => this.emit(event),
-        damagePlayer: (_id, amount, source) => this.damage(Math.round(amount * DIFFICULTY[this.difficulty].damage), 'zombie', source),
+        damagePlayer: (id, amount, source) => id === 'p1' && this.damage(Math.round(amount * DIFFICULTY[this.difficulty].damage), 'zombie', source),
         onHit: hit => { this.impactPoint = hit.point.clone(); this.blood.emitHit(hit); this.audio.confirmHit(hit) },
         onRise: position => { this.riseMarks.emit(position); this.emit({ kind: 'zombie-rise', position, radius: 30 }) },
         onSlam: (position, radius) => { this.shockwaves.emit(position, radius); this.riseMarks.emit(position) } })
@@ -351,6 +362,9 @@ export class ZombiesRuntime {
       this.scene.add(machine.root)
     }
     this.placeSkulls()
+    graph.flow([new THREE.Vector3(...DOLL_PLACE)])
+    const [dollSpot] = findWallSpots(graph, this.player.world, this.random, { count: 1, near: 0, far: 30, spacing: 7, avoid: taken })
+    if (dollSpot) { this.dollBuy = new DollBuy(dollSpot); this.scene.add(this.dollBuy.root) }
     if (this.box) this.boxSpots = [this.box.spot]
     for (const machine of this.perkMachines) this.makeSolid(machine.root, [1.05, 2.05, 0.7], [0, 1.025, 0])
     if (this.pack) this.makeSolid(this.pack.root, [2.05, 1.1, 1.1], [0, 0.55, 0])
@@ -379,6 +393,7 @@ export class ZombiesRuntime {
     for (const skull of this.skulls) { skull.found = false; skull.object.userData.found = false }
     this.music.stopStings()
     this.grenades.clear(); this.bolts.clear(); this.grenadeCount = GRENADE.start; this.grenadeCooldown = 0
+    this.dolls.clear(); this.dollCount = 0; this.dollCooldown = 0
     if (this.pack && this.pack.state !== 'idle') this.pack.take()
     this.dropper = new PowerupDropper(this.random)
     this.weapons.restore({ slots: [startingPistol(), null], selected: 0, pickups: [], nextId: 1 })
@@ -460,6 +475,10 @@ export class ZombiesRuntime {
     if (!this.isActive()) return
     // Q zooms a scoped sniper; otherwise it throws a grenade (so does G).
     const scoped = this.aiming && this.weapons.current?.name === 'sniper'
+    if (event.code === 'KeyT') {
+      if (!event.repeat && this.throwDoll()) { event.preventDefault(); this.invalidate() }
+      return
+    }
     if ((event.code === 'KeyQ' && !scoped) || event.code === 'KeyG') {
       if (!event.repeat && this.throwGrenade()) { event.preventDefault(); this.invalidate() }
       return
@@ -486,6 +505,12 @@ export class ZombiesRuntime {
   private targets(): ActionTarget[] {
     if (!this.isActive()) return []
     const targets: ActionTarget[] = []
+    if (this.dollBuy) {
+      const buy = this.dollBuy, full = this.dollCount >= DECOY.carry
+      targets.push({ object: buy.root, point: buy.point, kind: 'mission', descending: false,
+        label: full ? 'Ink Dolls · full' : `Buy ${DECOY.carry} Ink Dolls · ${DECOY.price}${this.state.points >= DECOY.price ? '' : ` · need ${DECOY.price - this.state.points} more`}`,
+        use: () => this.useDollWall(buy) })
+    }
     for (const buy of this.wallBuys) {
       const offer = wallOffer(buy.weapon, buy.price, this.weapons.slots)
       targets.push({ object: buy.root, point: buy.point, kind: 'mission', descending: false,
@@ -540,6 +565,46 @@ export class ZombiesRuntime {
     this.state.points -= cost
     this.zombieHud.spend(cost)
     return true
+  }
+
+  private useDollWall(buy: DollBuy) {
+    if (!this.isActive() || !this.canReach(buy.point, buy.root) || this.dollCount >= DECOY.carry || !this.spend(DECOY.price)) return false
+    this.dollCount = DECOY.carry
+    this.hud.notify('Ink Dolls: throw one with T and every zombie goes for it.', 3)
+    this.emit({ kind: 'pickup', position: this.player.body.position.clone(), radius: 2 })
+    this.invalidate()
+    return true
+  }
+
+  /** Throw an Ink Doll: it lands on its feet and bangs its cymbals until it goes off. */
+  throwDoll() {
+    if (!this.isActive() || this.revive.down || this.dollCount <= 0 || this.dollCooldown > 0) return false
+    this.dollCount--
+    this.dollCooldown = DECOY.cooldown
+    this.weapons.cancel()
+    this.interactionTime = Math.max(this.interactionTime, 0.35)
+    const camera = this.camera.perspective
+    const forward = camera.getWorldDirection(new THREE.Vector3())
+    const origin = camera.getWorldPosition(new THREE.Vector3()).addScaledVector(forward, 0.45).add(new THREE.Vector3(0, -0.12, 0))
+    this.dolls.throw(origin, forward, this.player.body.velocity.clone().multiplyScalar(0.5))
+    this.emit({ kind: 'grenade-throw', position: origin, radius: 6 })
+    return true
+  }
+
+  /** The doll goes off among the crowd it drew: three times a zombie's health, so nothing near it lives. */
+  private dollBlast(at: THREE.Vector3) {
+    const director = this.director
+    if (!director) return
+    const damage = zombieHealth(this.rounds.round) * DIFFICULTY[this.difficulty].health * 3
+    for (const hit of director.blast(at, DECOY.radius, damage)) {
+      this.award(pointsForHit({ lethal: hit.lethal, zone: 'torso' }))
+      this.hits.hit(hit.reaction.point, hit.dealt, hit.zombie.id, false, hit.lethal)
+      if (hit.lethal) { this.state.kills++; this.killed(hit.zombie.position, hit.zombie) }
+    }
+    this.shockwaves.emit(at, DECOY.radius)
+    this.riseMarks.emit(at)
+    this.sparks.emit(at.clone().setY(at.y + 0.2), new THREE.Vector3(0, 1, 0), 14)
+    this.emit({ kind: 'grenade-blast', position: at.clone(), radius: 120 })
   }
 
   private useWall(buy: WallBuy) {
@@ -847,6 +912,7 @@ export class ZombiesRuntime {
       }
       case 'maxAmmo':
         this.grenadeCount = GRENADE.max
+        if (this.dollCount > 0) this.dollCount = DECOY.carry
         for (const item of [...this.weapons.slots, ...(this.heldWeapons?.slots ?? [])]) {
           if (!item || item.special) continue
           item.reserve = Math.max(item.reserve, WEAPON_RULES[item.name].capacity * RESERVE_MAGAZINES * (item.packed ? 2 : 1))
@@ -1125,7 +1191,10 @@ export class ZombiesRuntime {
     const deathPlaying = deathVisible && !this.death.menuVisible && !document.hidden
     if (active !== this.active) { this.cancelInput(); this.active = active }
     this.audio.setActive(active || deathPlaying)
-    const target = (): ZombieTarget[] => [{ id: 'p1', feet: this.player.body.position, alive: this.state.phase === 'active' }]
+    // A doll on the ground draws every zombie to it, the Brute too, until it goes off.
+    const lures = this.dolls.resting()
+    const target = (): ZombieTarget[] => lures.length ? lures.map((doll, i) => ({ id: `doll-${i}`, feet: doll.position, alive: true }))
+      : [{ id: 'p1', feet: this.player.body.position, alive: this.state.phase === 'active' }]
     if (active && this.director) {
       this.state.elapsed += dt
       const body = this.player.body
@@ -1197,6 +1266,10 @@ export class ZombiesRuntime {
       this.zones?.update(dt)
       this.grenadeCooldown = Math.max(0, this.grenadeCooldown - dt)
       for (const at of this.grenades.update(dt)) this.grenadeBlast(at)
+      this.dollCooldown = Math.max(0, this.dollCooldown - dt)
+      for (const doll of lures) animateDoll(doll.object, doll.age)
+      if (lures.length && (this.dollClap -= dt) <= 0) { this.dollClap = 0.32; this.emit({ kind: 'doll-clap', position: lures[0].position.clone(), radius: 25 }) }
+      for (const at of this.dolls.update(dt)) this.dollBlast(at)
       for (const at of this.bolts.update(dt)) this.boltBurst(at)
       this.tickPowerups(dt)
       const speed = Math.hypot(body.velocity.x, body.velocity.z)
@@ -1246,7 +1319,7 @@ export class ZombiesRuntime {
     this.hotbar.update(this.weapons.slots, this.weapons.selectedSlot)
     this.zombieHud.update(running, this.state.round, this.state.points)
     this.zombieHud.boss(this.brute && this.brute.state === 'chase' ? this.brute.health / this.brute.maxHealth : null)
-    this.zombieHud.grenades(this.grenadeCount)
+    this.zombieHud.grenades(this.grenadeCount, this.dollCount)
     this.updateMusic()
     // The heart shows health as a share of your maximum, which Thick Ink raises.
     this.hud.update(dt, { ...this.state, health: this.state.health / this.maxHealth() * 100 }, { playing: this.player.playing, enabled: this.player.enabled && !this.player.immersive,
@@ -1267,7 +1340,7 @@ export class ZombiesRuntime {
     this.pack?.dispose(); this.bottle.dispose(); this.packedLook.dispose()
     this.director?.dispose()
     this.hits.dispose(); this.indicator.dispose(); this.hotbar.dispose(); this.zombieHud.dispose()
-    this.bulletTrails.dispose(); this.weapons.dispose(); this.blood.dispose(); this.impacts.dispose(); this.riseMarks.dispose(); this.sparks.dispose(); this.shockwaves.dispose(); this.grenades.dispose(); this.bolts.dispose(); this.powerups.dispose()
+    this.bulletTrails.dispose(); this.weapons.dispose(); this.blood.dispose(); this.impacts.dispose(); this.riseMarks.dispose(); this.sparks.dispose(); this.shockwaves.dispose(); this.grenades.dispose(); this.dolls.dispose(); this.dollBuy?.dispose(); this.bolts.dispose(); this.powerups.dispose()
     for (const skull of this.skulls) skull.object.removeFromParent()
     delete document.body.dataset.deadInkStorm
     this.audio.dispose(); this.music.dispose(); this.hud.dispose()

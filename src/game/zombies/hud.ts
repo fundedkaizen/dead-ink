@@ -115,12 +115,15 @@ export class ZombieHud {
   }
 
   /** Grenades you are carrying, as little ink frags beside your points. */
-  grenades(count: number) {
-    if (count === this.shownGrenades) return
-    this.shownGrenades = count
+  grenades(count: number, dolls = 0) {
+    if (count * 10 + dolls === this.shownGrenades) return
+    this.shownGrenades = count * 10 + dolls
     const frag = '<svg viewBox="0 0 20 24" aria-hidden="true"><rect x="7" y="1" width="6" height="4" rx="1"/><path d="M13 4 L17 9" /><ellipse cx="10" cy="14" rx="7" ry="8.5"/><line x1="3" y1="14" x2="17" y2="14" class="band"/></svg>'
-    this.grenadesEl.innerHTML = frag.repeat(Math.max(0, count))
-    this.grenadesEl.setAttribute('aria-label', `${count} grenade${count === 1 ? '' : 's'}`)
+    // The Ink Doll: a round head in a fez on a little body, cymbals out.
+    const doll = '<svg class="doll" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="1" width="6" height="4" class="fez"/><circle cx="12" cy="9" r="4.5" class="face"/><rect x="8" y="14" width="8" height="9" class="face"/><line x1="2" y1="16" x2="8" y2="16"/><line x1="16" y1="16" x2="22" y2="16"/></svg>'
+    this.grenadesEl.innerHTML = frag.repeat(Math.max(0, count)) + doll.repeat(Math.max(0, dolls))
+    const dollText = dolls ? `, ${dolls} ink doll${dolls === 1 ? '' : 's'}` : ''
+    this.grenadesEl.setAttribute('aria-label', `${count} grenade${count === 1 ? '' : 's'}${dollText}`)
   }
 
   /** The Brute's health across the top of the screen while it lives; null hides it. */
