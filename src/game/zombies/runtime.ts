@@ -689,9 +689,10 @@ export class ZombiesRuntime {
     }
     for (const machine of this.perkMachines) {
       const perk = PERKS[machine.kind]
-      const label = !this.power ? `${perk.name} · no power` : this.perks.has(machine.kind) ? `${perk.name} · yours`
+      const blurb = machine.kind === 'secondDraft' && this.paired ? 'Revive your partner twice as fast.' : perk.blurb
+      const label = !this.power && !this.soloDraft(machine.kind) ? `${perk.name} · no power` : this.perks.has(machine.kind) ? `${perk.name} · yours`
         : this.perks.size >= PERK_LIMIT ? `${perk.name} · you can hold ${PERK_LIMIT} perks`
-        : `Drink ${perk.name} · ${perk.cost}${this.state.points >= perk.cost ? '' : ` · need ${perk.cost - this.state.points} more`} · ${perk.blurb}`
+        : `Drink ${perk.name} · ${perk.cost}${this.state.points >= perk.cost ? '' : ` · need ${perk.cost - this.state.points} more`} · ${blurb}`
       targets.push({ object: machine.root, point: machine.point, kind: 'mission', descending: false, label, use: () => this.buyPerk(machine) })
     }
     const pack = this.pack, held = this.weapons.current
@@ -806,8 +807,11 @@ export class ZombiesRuntime {
   /** The power across the compound: perk machines light up (stuttering on), the Pack-a-Punch runs. */
   setPower(on: boolean, flicker = true) {
     this.power = on
-    for (const machine of this.perkMachines) machine.setPowered(on, flicker)
+    for (const machine of this.perkMachines) machine.setPowered(on || this.soloDraft(machine.kind), flicker)
   }
+
+  /** Second Draft needs no power when you play alone (Call of Duty's solo Quick Revive). */
+  private soloDraft(kind: PerkKind) { return kind === 'secondDraft' && !this.paired }
 
   private pickPart(part: PartPickup) {
     if (!this.isActive() || part.point.distanceTo(this.camera.perspective.position) > 3) return false
@@ -1043,14 +1047,14 @@ export class ZombiesRuntime {
     if (this.reviving > 0) {
       const near = partner && partner.dn === 1 && this.partner.feet.distanceTo(this.player.body.position) < COOP.reviveReach
       if (!near || this.down) { this.reviving = 0; this.player.movementLocked = !!this.down }
-      else if ((this.reviving += dt) >= COOP.reviveSeconds) {
+      else if ((this.reviving += dt) >= COOP.reviveSeconds * (this.perks.has('secondDraft') ? 0.5 : 1)) {
         this.reviving = 0
         this.player.movementLocked = false
         this.coop.send({ t: 'revive' })
         if (this.partnerState) this.partnerState.dn = 0
         this.award(COOP.revivePoints)
         this.hud.notify('You got your partner back up.', 2.5)
-      } else this.hud.notify(`Reviving… ${Math.ceil((COOP.reviveSeconds - this.reviving) * 10) / 10} s`, 0.3)
+      } else this.hud.notify(`Reviving… ${Math.ceil((COOP.reviveSeconds * (this.perks.has('secondDraft') ? 0.5 : 1) - this.reviving) * 10) / 10} s`, 0.3)
     }
     // Both down (or out): the game is over for both.
     if (this.coop.role === 'host' && this.down && partner && partner.dn) {
@@ -1201,6 +1205,8 @@ export class ZombiesRuntime {
 
   private coopStatusChanged(status: CoopStatus) {
     this.coopStatus = status
+    // Second Draft's machine is lit without power only when alone.
+    this.setPower(this.power, false)
     if (status.kind === 'paired') {
       this.partner.load()
       if (this.coop.role === 'host') this.sendSync()
@@ -1398,7 +1404,7 @@ export class ZombiesRuntime {
   private buyPerk(machine: PerkMachine) {
     const perk = PERKS[machine.kind]
     if (!this.isActive() || !this.canReach(machine.point, machine.root) || this.pendingPerk || this.timers.deathMachine) return false
-    if (!this.power) { this.hud.notify('No power. Find the power switch.', 2.5, true); return false }
+    if (!this.power && !this.soloDraft(machine.kind)) { this.hud.notify('No power. Find the power switch.', 2.5, true); return false }
     if (this.perks.has(machine.kind) || this.perks.size >= PERK_LIMIT || !this.spend(perk.cost)) return false
     // Drink it: the gun goes down, the bottle comes up, the perk works once it is empty.
     this.weapons.cancel(); this.aiming = false
@@ -1918,7 +1924,8 @@ export class ZombiesRuntime {
     this.hud.hurt(); this.audio.play({ kind: 'damage' })
     if (cause !== 'gas') this.audio.play({ kind: 'bullet-hit', intensity: Math.min(1, amount / 50) })
     if (cause === 'fall') this.hud.notify('You fell.', 2)
-    if (dead && this.perks.has('secondDraft')) this.selfRevive()
+    // Alone, Second Draft gets you up; in co-op it is a faster revive instead, and your partner does it.
+    if (dead && this.perks.has('secondDraft') && !this.paired) this.selfRevive()
     else if (dead && this.partnerUp && !this.down) this.goDown()
     else if (dead && !this.down) { if (this.coop.role === 'host') this.coop.send({ t: 'gameover' }); this.gameOver(source) }
     this.invalidate()

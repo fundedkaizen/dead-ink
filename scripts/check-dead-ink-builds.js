@@ -26,11 +26,17 @@ const status = window.__buildCheck = { done: false, results }
   check(!!m.powerSwitch && m.sites.has('pack') && m.sites.has('shield'), 'the power switch, the Pack-a-Punch site and the shield bench were placed')
 
   // A dark machine refuses you.
-  const machine = m.perkMachines[0]
+  const machine = m.perkMachines.find(x => x.kind !== 'secondDraft')
   m.state.points = 5000
   standFacing(machine.spot, machine.point.clone())
   await press()
   check(m.state.points === 5000 && m.perks.size === 0, 'with no power a perk machine takes nothing', `${m.state.points}`)
+  // Alone, Second Draft is the exception: it sells without power, as solo Quick Revive does.
+  const draft = m.perkMachines.find(x => x.kind === 'secondDraft')
+  standFacing(draft.spot, draft.point.clone())
+  await press()
+  check(await new Promise(r => setTimeout(() => r(m.perks.has('secondDraft') || m.state.points < 5000), 2500)), 'solo, Second Draft sells without power', `${m.state.points}`)
+  m.perks.clear(); m.state.points = 5000
 
   const take = async id => {
     const part = m.parts.find(x => x.id === id)
