@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { EnemyActor } from '../actors'
+import { HOSTAGE_INK } from '../hostage-actor'
 import { createMissionGun } from '../weapon-models'
 import { disposeGun } from '../../lab/weapons/models'
 import type { WeaponName } from '../types'
@@ -168,6 +169,9 @@ export class PartnerAvatar {
     this.loading ??= EnemyActor.create('pistol').then(actor => {
       this.actor = actor
       actor.root.name = 'Co-op partner'
+      // Blue like the hostage, so your partner stands out from every black zombie at a glance.
+      const body = actor.rig.mesh.material as THREE.MeshBasicMaterial
+      body.color.setHex(HOSTAGE_INK)
       actor.root.visible = false
       actor.gun.visible = false
       this.scene.add(actor.root)

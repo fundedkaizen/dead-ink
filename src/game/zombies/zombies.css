@@ -10,15 +10,16 @@
 .dead-ink-scores[hidden] { display: none; }
 .dead-ink-scores div { display: flex; justify-content: space-between; gap: 14px; padding: 2px 8px; background: #fbfaf5; border: 1.5px solid var(--ink, #111); border-radius: 3px 4px 2px 4px; }
 .dead-ink-scores div.me { border-width: 2.5px; }
+.dead-ink-scores div:not(.me) { color: #2878d0; border-color: #2878d0; }
 .dead-ink-scores div.down { opacity: 0.5; text-decoration: line-through; }
 .dead-ink-scores strong { font-variant-numeric: tabular-nums; }
 /* The partner's name over their head, through walls; pinned to the edge with an arrow when off screen. */
 .coop-tag { position: absolute; left: 0; top: 0; pointer-events: none; display: grid; justify-items: center; gap: 1px; margin: -34px 0 0 -60px; width: 120px;
-  font: 700 13px/1.1 var(--notes, "Chalkboard SE", "Comic Sans MS", cursive); color: var(--ink, #111);
+  font: 700 13px/1.1 var(--notes, "Chalkboard SE", "Comic Sans MS", cursive); color: #2878d0;
   text-shadow: 1px 1px 0 #fff, -1px 1px 0 #fff, 1px -1px 0 #fff, -1px -1px 0 #fff; }
 .coop-tag[hidden] { display: none; }
-.coop-tag i { width: 0; height: 0; border: 7px solid transparent; border-top: 9px solid var(--ink, #111); border-bottom: 0; filter: drop-shadow(0 0 1px #fff); }
-.coop-tag.edge i { border: 7px solid transparent; border-left: 11px solid var(--ink, #111); border-right: 0; }
+.coop-tag i { width: 0; height: 0; border: 7px solid transparent; border-top: 9px solid #2878d0; border-bottom: 0; filter: drop-shadow(0 0 1px #fff); }
+.coop-tag.edge i { border: 7px solid transparent; border-left: 11px solid #2878d0; border-right: 0; }
 .coop-tag.down { color: #d4332a; }
 /* An objective marker (the power switch): small and quiet, through walls; pinned to the edge with an arrow. */
 .world-marker { position: absolute; left: 0; top: 0; pointer-events: none; display: grid; justify-items: center; margin: -14px 0 0 -12px; width: 24px; opacity: 0.8; }
