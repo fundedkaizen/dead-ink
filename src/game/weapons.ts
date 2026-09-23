@@ -39,6 +39,8 @@ const FEEL: Record<WeaponName, { kick: number; roll: number; shake: number; flas
   ak: { kick: 0.9, roll: 0.045, shake: 0.0045, flash: 1.05 },
   shotgun: { kick: 1.9, roll: 0.1, shake: 0.018, flash: 1.55 },
   sniper: { kick: 2.1, roll: 0.075, shake: 0.02, flash: 1.35 },
+  magnum: { kick: 1.8, roll: 0.09, shake: 0.014, flash: 1.35 },
+  lmg: { kick: 0.75, roll: 0.04, shake: 0.006, flash: 1.15 },
 }
 const DEATH_MACHINE_FEEL = { kick: 0.3, roll: 0.02, shake: 0.002, flash: 1.1 }
 /** Where a watch face points: up and toward the eye, so a glance at the wrist shows it. */
@@ -177,7 +179,7 @@ export class FirstPersonWeapons {
   get blocked() { return this.obstructed }
   get selected() { return this.slot }
   get scoped() { return this.scopeActive }
-  get canAim() { return this.current?.name === 'ak' || this.current?.name === 'smg' || this.current?.name === 'sniper' }
+  get canAim() { return this.current?.name === 'ak' || this.current?.name === 'smg' || this.current?.name === 'sniper' || this.current?.name === 'lmg' }
   get scopeMagnification() { return this.scopeZoom }
   get lookSensitivity() { return this.scopeActive ? 1 / this.scopeZoom : 1 }
   get current(): WeaponItem | null { return this.inventory[this.slot] }
@@ -747,7 +749,7 @@ export class FirstPersonWeapons {
   }
 
   private gripPosition() {
-    const rifle = this.current?.name === 'ak' || this.current?.name === 'sniper' || this.current?.name === 'shotgun'
+    const rifle = this.current?.name === 'ak' || this.current?.name === 'sniper' || this.current?.name === 'shotgun' || this.current?.name === 'lmg'
     return new THREE.Vector3(THREE.MathUtils.lerp(rifle ? 0.17 : 0.16, 0, this.aim),
       THREE.MathUtils.lerp(rifle ? -0.23 : -0.20, this.aimedGripY, this.aim), rifle ? -0.36 : -0.43)
   }
@@ -822,6 +824,15 @@ export class FirstPersonWeapons {
         const cycle = WEAPON_RULES.shotgun.interval - this.cooldown
         pump.position.z -= 0.07 * smooth(cycle, 0.12, 0.3) * (1 - smooth(cycle, 0.35, 0.55))
       }
+      // The Magnum's cylinder swings out, spins, and snaps back in on a reload; it turns a chamber a shot.
+      const cylinder = this.model.userData.parts.cylinder
+      if (cylinder) {
+        if (this.reloading) {
+          const out = smooth(progress, 0.12, 0.25) * (1 - smooth(progress, 0.78, 0.88))
+          cylinder.position.x += out * 0.04
+          cylinder.rotation.z += smooth(progress, 0.3, 0.7) * Math.PI * 4
+        } else if (this.current) cylinder.rotation.z += (WEAPON_RULES.magnum.capacity - this.current.magazine) * Math.PI / 3
+      }
       const barrels = this.model.userData.parts.barrels
       if (barrels) barrels.rotation.z += this.barrelAngle
     }
@@ -835,7 +846,7 @@ export class FirstPersonWeapons {
     this.root.updateWorldMatrix(true, true)
     // While the old gun drops out of a switch, the hands still hold the old gun.
     const held = this.swap?.outgoing ?? this.model
-    const pistol = held?.userData.name === 'pistol'
+    const pistol = held?.userData.cls === 'pistol'
     // A pistol's free hand comes up into view to show the watch while the gun is inspected.
     const showWrist = pistol && inspect > 0.02
     this.leftHand.visible = !knife && (!pistol || showWrist || this.reloadElapsed !== null && this.reloadElapsed >= 0)

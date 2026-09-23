@@ -2,7 +2,7 @@ import type * as THREE from 'three'
 import type { CollisionWorld } from '../player/collision'
 
 export type Vec3 = [number, number, number]
-export type WeaponName = 'pistol' | 'ak' | 'smg' | 'shotgun' | 'sniper'
+export type WeaponName = 'pistol' | 'ak' | 'smg' | 'shotgun' | 'sniper' | 'magnum' | 'lmg'
 export type WeaponItem = { id: string; name: WeaponName; magazine: number; reserve: number; position?: Vec3; rarity?: import('./loot').Rarity; special?: 'deathMachine' | 'rayGun'; packed?: boolean; packLevel?: number }
 export type SoundEvent = { kind: string; position?: THREE.Vector3; source?: THREE.Vector3; intensity?: number; radius?: number; text?: string; voice?: string; speaker?: number; weapon?: WeaponName; zone?: import('./hit-reactions').HitZone; volume?: number }
 export type EmitSound = (event: SoundEvent) => void

@@ -78,7 +78,7 @@ export const STARTING_POINTS = 500
 export const PRICES = {
   box: 950, packAPunch: 5000,
   perks: { thickInk: 2500, quickDip: 3000, doubleLine: 2000, secondDraftSolo: 500, secondDraftCoop: 1500, spareNib: 4000 },
-  wall: { pistol: 500, smg: 1000, ak: 1200, shotgun: 1500, sniper: 1500 },
+  wall: { pistol: 500, smg: 1000, ak: 1200, shotgun: 1500, sniper: 1500, magnum: 2000, lmg: 4500 },
   door: { cheap: 750, standard: 1000, expensive: 1250 },
 } as const
 /** Refilling a wall weapon's ammo costs half its price, as in Call of Duty. */

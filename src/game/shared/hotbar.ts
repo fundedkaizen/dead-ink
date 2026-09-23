@@ -5,7 +5,7 @@ import type { WeaponItem } from '../types'
  * Fortnite style hotbar: your four slots along the bottom of the screen, each weapon edged in its
  * rarity colour, the selected one raised. Rebuilt only when something on it actually changed.
  */
-const SHORT: Record<WeaponItem['name'], string> = { pistol: 'Pistol', ak: 'AK', smg: 'SMG', shotgun: 'Shotgun', sniper: 'Sniper' }
+const SHORT: Record<WeaponItem['name'], string> = { pistol: 'Pistol', ak: 'AK', smg: 'SMG', shotgun: 'Shotgun', sniper: 'Sniper', magnum: 'Magnum', lmg: 'LMG' }
 
 export class Hotbar {
   readonly root = document.createElement('div')

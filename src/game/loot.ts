@@ -75,9 +75,11 @@ export const PACKED = { damage: [2, 3.2, 4.8] } as const
 export function pierceOf(item: { name: WeaponName; special?: string; packLevel?: number; packed?: boolean }) {
   if (item.special === 'deathMachine') return 2
   const level = item.packLevel ?? (item.packed ? 1 : 0)
-  return (item.name === 'sniper' ? 3 : 1) + (level > 0 ? (item.name === 'sniper' ? 2 : 1) : 0)
+  const base = item.name === 'sniper' ? 3 : item.name === 'magnum' || item.name === 'lmg' ? 2 : 1
+  return base + (level > 0 ? (item.name === 'sniper' ? 2 : 1) : 0)
 }
-export const PACKED_NAMES: Record<WeaponName, string> = { pistol: 'Fountain Pen', smg: 'Inkjet', ak: 'Blotter', shotgun: 'Splatter', sniper: 'Quill' }
+export const PACKED_NAMES: Record<WeaponName, string> = { pistol: 'Fountain Pen', smg: 'Inkjet', ak: 'Blotter', shotgun: 'Splatter', sniper: 'Quill',
+  magnum: 'Deadline', lmg: 'Printing Press' }
 
 export function weaponRules(item: { name: WeaponName; rarity?: Rarity; special?: 'deathMachine' | 'rayGun'; packed?: boolean; packLevel?: number }): ScaledRules {
   const base = WEAPON_RULES[item.name]

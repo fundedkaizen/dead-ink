@@ -21,6 +21,10 @@ export const WEAPON_RULES = {
   smg: { label: 'SMG', capacity: 24, reload: 2.05, interval: 0.085, range: 100, damage: 24, automatic: true, kick: 0.012, settle: 0.65 },
   shotgun: { label: 'Pump shotgun', capacity: 6, reload: 0.65, interval: 0.9, range: 32, damage: 28, automatic: false, kick: 0.11, settle: 0.84 },
   sniper: { label: 'Sniper rifle', capacity: 5, reload: 2.9, interval: 1.35, range: 220, damage: 65, automatic: false, kick: 0.048, settle: 0.85 },
+  // Dead Ink's later wall guns. The Magnum: six heavy rounds that go through a body. The LMG: a long
+  // belt, a slow reload.
+  magnum: { label: 'Magnum', capacity: 6, reload: 2.6, interval: 0.42, range: 140, damage: 95, automatic: false, kick: 0.075, settle: 0.72 },
+  lmg: { label: 'LMG', capacity: 75, reload: 4.2, interval: 0.095, range: 170, damage: 42, automatic: true, kick: 0.02, settle: 0.7 },
 } as const
 
 export const ENEMY_WEAPONS = {
@@ -29,6 +33,9 @@ export const ENEMY_WEAPONS = {
   smg: { magazine: 24, reload: 2.1, damage: 7, burst: 5, gap: 0.08, pause: [0.5, 0.75] },
   shotgun: { magazine: 6, reload: 3.9, damage: 14, burst: 1, gap: 0.9, pause: [1.2, 1.6] },
   sniper: { magazine: 5, reload: 2.9, damage: 32, burst: 1, gap: 1.35, pause: [2.0, 2.6] },
+  // Dead Ink's wall guns; the mission's guards never carry them.
+  magnum: { magazine: 6, reload: 2.6, damage: 24, burst: 1, gap: 0.42, pause: [0.9, 1.3] },
+  lmg: { magazine: 75, reload: 4.2, damage: 10, burst: 6, gap: 0.095, pause: [0.6, 0.9] },
 } as const
 
 export function hitDamage(weapon: WeaponName | undefined, zone: HitZone, baseDamage: number) {

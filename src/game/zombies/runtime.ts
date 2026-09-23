@@ -73,6 +73,12 @@ const BOX_TEDDY_AFTER = 3, BOX_TEDDY_CHANCE = 0.2
  */
 const INK_BURST = [{ chance: 0.15, radius: 3 }, { chance: 0.3, radius: 3.8 }, { chance: 0.45, radius: 4.6 }] as const
 
+/** Wall guns past the start: the Magnum in the southwest yard, the LMG, the dearest wall gun, in the rail yard. */
+const LATE_WALL_WEAPONS: { name: 'magnum' | 'lmg'; near: [number, number, number] }[] = [
+  { name: 'magnum', near: [-40, 0, 40] },
+  { name: 'lmg', near: [60, 0, -21] },
+]
+
 /** The Ink Doll wall is in the warehouse, the first zone past the start worth fighting for. */
 const DOLL_PLACE: [number, number, number] = [26, 0.7, -10]
 
@@ -382,7 +388,17 @@ export class ZombiesRuntime {
     this.placeSkulls()
     graph.flow([new THREE.Vector3(...DOLL_PLACE)])
     const [dollSpot] = findWallSpots(graph, this.player.world, this.random, { count: 1, near: 0, far: 30, spacing: 7, avoid: taken })
-    if (dollSpot) { this.dollBuy = new DollBuy(dollSpot); this.scene.add(this.dollBuy.root) }
+    if (dollSpot) { this.dollBuy = new DollBuy(dollSpot); taken.push(dollSpot.stand); this.scene.add(this.dollBuy.root) }
+    // The better guns are further in: each on a wall inside the zone you pay to reach.
+    for (const { name, near } of LATE_WALL_WEAPONS) {
+      graph.flow([new THREE.Vector3(...near)])
+      const [spot] = findWallSpots(graph, this.player.world, this.random, { count: 1, near: 0, far: 30, spacing: 7, avoid: taken })
+      if (!spot) { console.warn(`Dead Ink: no wall for the ${name} near ${near[0]}, ${near[2]}`); continue }
+      taken.push(spot.stand)
+      const buy = new WallBuy(spot, name, PRICES.wall[name])
+      this.wallBuys.push(buy)
+      this.scene.add(buy.root)
+    }
     if (this.box) this.boxSpots = [this.box.spot]
     for (const machine of this.perkMachines) this.makeSolid(machine.root, [1.05, 2.05, 0.7], [0, 1.025, 0])
     if (this.pack) this.makeSolid(this.pack.root, [2.05, 1.1, 1.1], [0, 0.55, 0])

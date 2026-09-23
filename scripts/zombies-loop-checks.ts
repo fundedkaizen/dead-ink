@@ -133,7 +133,7 @@ assert.equal(freshWeapon('z', 'smg').reserve, WEAPON_RULES.smg.capacity * RESERV
   // Ordinary guns: gold is rare among them, and each comes up in proportion to its weight.
   const ordinary = draws - rays, gold = rarities.legendary - rays
   assert(gold > 0 && gold < ordinary * 0.12, `gold is rare (${gold} of ${ordinary})`)
-  const pool = (['smg', 'shotgun', 'sniper'] as WeaponName[]), total = pool.reduce((s, n) => s + BOX_WEIGHTS[n], 0)
+  const pool = (['smg', 'shotgun', 'sniper', 'magnum', 'lmg'] as WeaponName[]), total = pool.reduce((s, n) => s + BOX_WEIGHTS[n], 0)
   for (const n of pool) assert(Math.abs(names[n] / ordinary - BOX_WEIGHTS[n] / total) < 0.015, `${n} share`)
   for (const r of Object.keys(rarities)) assert(RARITIES.includes(r as never))
 }

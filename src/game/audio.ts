@@ -17,6 +17,8 @@ const SAMPLES: Record<string, { files: string[]; gain: number; pitch?: number }>
   'shot-smg': { files: series('shot_rifle', 5), gain: 0.62, pitch: 1.28 },
   'shot-shotgun': { files: series('shot_rifle', 5), gain: 0.95, pitch: 0.62 },
   'shot-sniper': { files: series('shot_rifle', 5), gain: 0.9, pitch: 0.72 },
+  'shot-magnum': { files: series('shot_pistol', 4), gain: 1, pitch: 0.68 },
+  'shot-lmg': { files: series('shot_rifle', 5), gain: 0.88, pitch: 0.86 },
   'enemy-shot-pistol': { files: series('shot_pistol', 4), gain: 0.7 },
   'enemy-shot-ak': { files: series('shot_rifle', 5), gain: 0.75 },
   'enemy-shot-smg': { files: series('shot_rifle', 5), gain: 0.6, pitch: 1.28 },

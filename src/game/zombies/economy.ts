@@ -57,7 +57,7 @@ export function wallOffer(name: WeaponName, price: number, slots: readonly (Weap
  * The Mystery Box's weapon table. Snipers and shotguns are the exciting draws; the pistol is the
  * letdown every box has. Weights are relative.
  */
-export const BOX_WEIGHTS: Record<WeaponName, number> = { ak: 24, smg: 22, shotgun: 22, sniper: 18, pistol: 14 }
+export const BOX_WEIGHTS: Record<WeaponName, number> = { ak: 24, smg: 22, shotgun: 22, sniper: 18, pistol: 14, magnum: 12, lmg: 10 }
 /** The chance a box roll is the Ink Ray, Dead Ink's wonder weapon (Call of Duty's Ray Gun is a rare draw too). */
 export const RAY_GUN_CHANCE = 0.05
 /** Seconds the box spins before showing its gun, and how long you have to take it. */

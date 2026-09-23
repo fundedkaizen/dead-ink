@@ -195,6 +195,56 @@ export function buildAk(): Gun {
 }
 
 /**
+ * Dead Ink's light machine gun: a long, heavy belt-fed gun, held like the AK (same grip and support
+ * hand) so every pose carries over. Its box magazine hangs where the AK's banana magazine sits and is
+ * the part the reload pulls; a bipod folds under the barrel and a carry handle rides on top.
+ */
+export function buildLmg(): Gun {
+  const result = gun('ak', 'ak', true, [0, 0.08, 0.72], [0.03, 0.092, 0.1], (g, parts) => {
+    // A long square receiver with a hinged feed cover on top.
+    g.add(box(0.056, 0.074, 0.3, [0, 0.074, 0.12]))
+    g.add(box(0.058, 0.016, 0.2, [0, 0.118, 0.1], dark))
+    for (const z of [0.03, 0.08, 0.13, 0.18]) g.add(box(0.06, 0.004, 0.006, [0, 0.127, z], dark))
+    // Pistol grip and trigger where the AK's are.
+    g.add(box(0.034, 0.11, 0.048, [0, -0.002, 0.0], wood, [-18, 0, 0]))
+    g.add(box(0.012, 0.03, 0.06, [0, 0.022, 0.055], dark))
+    // A skeleton stock with a shoulder pad.
+    g.add(box(0.036, 0.024, 0.2, [0, 0.083, -0.14], dark))
+    g.add(box(0.036, 0.02, 0.18, [0, 0.02, -0.13], dark, [12, 0, 0]))
+    g.add(box(0.046, 0.12, 0.03, [0, 0.05, -0.245]))
+    // A heavy perforated barrel shroud, then the barrel and a flared muzzle.
+    g.add(tube(0.028, 0.26, [0, 0.08, 0.4]))
+    for (const z of [0.3, 0.34, 0.38, 0.42, 0.46, 0.5]) for (const side of [-1, 1]) g.add(box(0.002, 0.012, 0.018, [side * 0.029, 0.08, z], dark))
+    g.add(tube(0.011, 0.2, [0, 0.08, 0.6], dark))
+    g.add(tube(0.018, 0.04, [0, 0.08, 0.705], dark))
+    // Carry handle and front sight.
+    g.add(box(0.012, 0.012, 0.11, [0, 0.16, 0.25], dark))
+    for (const z of [0.2, 0.3]) g.add(box(0.01, 0.036, 0.01, [0, 0.14, z], dark))
+    g.add(box(0.006, 0.03, 0.008, [0, 0.105, 0.67], dark))
+    // Bipod legs folded along the barrel.
+    for (const side of [-1, 1]) g.add(box(0.006, 0.006, 0.2, [side * 0.014, 0.05, 0.56], dark, [4, 0, 0]))
+    // The ammunition box: the part the reload pulls away, belt running up into the feed.
+    const magazine = new THREE.Group()
+    magazine.position.set(0, 0.04, 0.12)
+    magazine.add(box(0.07, 0.1, 0.12, [-0.012, -0.05, 0]))
+    magazine.add(box(0.072, 0.012, 0.122, [-0.012, 0.004, 0], dark))
+    magazine.add(box(0.03, 0.03, 0.05, [-0.012, -0.05, 0.062], dark))
+    for (let i = 0; i < 5; i++) magazine.add(box(0.014, 0.006, 0.012, [0.03, 0.01 + i * 0.012, -0.02 + i * 0.004], metal))
+    magazine.userData.grip = new THREE.Vector3(-0.012, -0.1, 0.02)
+    parts.magazine = magazine
+    g.add(magazine)
+    const bolt = new THREE.Group()
+    bolt.position.set(0.034, 0.09, 0.14)
+    bolt.add(box(0.014, 0.012, 0.024, [0.008, 0, 0], dark))
+    bolt.userData.grip = new THREE.Vector3(0.035, 0.036, 0)
+    parts.bolt = bolt
+    g.add(bolt)
+  }, 'lmg')
+  result.userData.support = new THREE.Vector3(0, 0.01, 0.34)
+  return result
+}
+
+/**
  * Dead Ink's Death Machine power-up: a six-barrel minigun, held like the AK (same grip, same support
  * hand) so every pose and animation carries over. The barrel cluster is its own part, spun while firing.
  */
