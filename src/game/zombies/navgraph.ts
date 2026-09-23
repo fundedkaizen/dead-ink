@@ -48,6 +48,11 @@ export type RaisedSpot = { cell: number; x: number; y: number; z: number; mask: 
 export type RaisedWays = { climbs: { bottom: THREE.Vector3; via: THREE.Vector3[]; top: THREE.Vector3 }[]; seeds: THREE.Vector3[] }
 /** Climbing up costs this many times its length on the flow field, so stairs win where they exist. */
 export const CLIMB_COST = { up: 2.5, down: 1.3 } as const
+/**
+ * Walls a zombie climbs without a ladder: tops this high above the ground beside them (containers, crate
+ * stacks, sheds, low roofs). Taller buildings keep to their ladders.
+ */
+export const WALL_CLIMB = { low: 1.4, high: 3.4 } as const
 
 export type NavData = {
   version: number; cell: number; minX: number; minZ: number; nx: number; nz: number
@@ -554,7 +559,31 @@ export class NavGraph {
       if (spot) addRaised(index, spot)
       else log(`  no standing room at raised seed ${seed.toArray().map(n => n.toFixed(1)).join(',')}`)
     }
-    while (queue.length && raised.length < 4000) {
+    // Solid under the whole body, not just somewhere under it: a container lid or a roof, never the top
+    // of a wall or fence (a zombie climbing a zone fence would walk over into a zone still shut).
+    const footing = (x: number, top: number, z: number) => {
+      const r = BODY_RADIUS * 0.9
+      for (const [ox, oz] of [[0, 0], [r, 0], [-r, 0], [0, r], [0, -r]]) {
+        const floor = world.floor(probe.set(x + ox, top + 0.1, z + oz), 0, 0.35)
+        if (!Number.isFinite(floor) || Math.abs(floor - top) > 0.25) return false
+      }
+      return true
+    }
+    // Ledges: flat tops a body fits on, 1.4 to 3.4 m above the ground next to them (containers, crate
+    // stacks, sheds). Seeded here so the same walk-out finds the whole top; wall-climb links reach them.
+    for (let i = 0; i < nx; i++) for (let k = 0; k < nz; k++) {
+      const index = i * nz + k
+      let ground = heights[index]
+      if (Number.isNaN(ground)) {
+        for (const [di, dk] of DIRECTIONS) { const h = at(i + di, k + dk); if (!Number.isNaN(h)) { ground = h; break } }
+        if (Number.isNaN(ground)) continue
+      }
+      const cx = bounds.minX + (i + 0.5) * cell, cz = bounds.minZ + (k + 0.5) * cell
+      const top = world.floor(probe.set(cx, ground + WALL_CLIMB.high + 0.1, cz), 0, WALL_CLIMB.high - WALL_CLIMB.low + 0.1, BODY_RADIUS * 0.95)
+      if (!Number.isFinite(top) || top - ground < WALL_CLIMB.low || findRaised(index, top) >= 0) continue
+      if (bodyFits(cx, top + 0.024, cz) && footing(cx, top, cz)) addRaised(index, new THREE.Vector3(cx, top, cz))
+    }
+    while (queue.length && raised.length < 20000) {
       const r = queue.shift()!, from = raised[r]
       const i = Math.floor(from.cell / nz), k = from.cell % nz
       const here = new THREE.Vector3(from.x, from.y, from.z)
@@ -583,6 +612,52 @@ export class NavGraph {
     const graph = new NavGraph(cell, bounds.minX, bounds.minZ, nx, nz, heights, masks, [], geometry, raised)
     for (const [r, ground] of joins) graph.addLink({ a: graph.cells + r, b: ground })
     for (const [low, high] of vaults) graph.addLink({ a: low, b: high, kind: 'climb' })
+    // Wall climbs: from a ground spot up the face of whatever it stands beside onto the raised spot above,
+    // when the column is clear (no overhang). One per raised spot and direction, only at edges.
+    const wallClimb = (ground: THREE.Vector3, top: THREE.Vector3) => {
+      const dx = top.x - ground.x, dz = top.z - ground.z, span = Math.hypot(dx, dz)
+      if (span < 0.2) return null
+      const ux = dx / span, uz = dz / span
+      // The foot of the wall: the last place on the way that a standing body still fits.
+      let foot: THREE.Vector3 | null = null
+      for (let t = 0.1; t <= span + 0.05; t += 0.1) {
+        const p = new THREE.Vector3(ground.x + ux * t, ground.y, ground.z + uz * t)
+        if (!bodyFits(p.x, ground.y + 0.05, p.z)) break
+        foot = p
+      }
+      if (!foot || foot.distanceTo(ground) > span - 0.2) return null
+      // Nothing overhanging all the way up.
+      for (let h = ground.y + 0.5; h < top.y; h += 0.6) if (!bodyFits(foot.x, h, foot.z)) return null
+      if (!bodyFits(foot.x, top.y + 0.05, foot.z)) return null
+      // Over the edge onto the top.
+      for (let t = 0.15; t <= 2.4; t += 0.15) {
+        const p = new THREE.Vector3(foot.x + ux * t, top.y, foot.z + uz * t)
+        const floor = world.floor(p, 0.5, 0.5, BODY_RADIUS * 0.8)
+        if (Number.isFinite(floor) && Math.abs(floor - top.y) < 0.3 && bodyFits(p.x, floor + 0.024, p.z) && footing(p.x, floor, p.z))
+          return [foot.x, ground.y + 0.024, foot.z, foot.x, top.y + 0.05, foot.z, p.x, floor + 0.024, p.z]
+      }
+      return null
+    }
+    let wallClimbs = 0
+    const aboveGround = new THREE.Vector3(), below = new THREE.Vector3()
+    for (let r = 0; r < raised.length; r++) {
+      const spot = raised[r], i = Math.floor(spot.cell / nz), k = spot.cell % nz
+      for (let d = 0; d < 4; d++) {
+        if (spot.mask & (1 << d)) continue
+        for (const reach of [1, 2]) {
+          const index = graph.index(i + DIRECTIONS[d][0] * reach, k + DIRECTIONS[d][1] * reach)
+          if (index < 0 || !graph.walkable(index)) continue
+          const rise = spot.y - heights[index]
+          if (rise < WALL_CLIMB.low || rise > WALL_CLIMB.high) continue
+          const via = wallClimb(place(index, below), aboveGround.set(spot.x, spot.y, spot.z))
+          if (!via) continue
+          graph.addLink({ a: index, b: graph.cells + r, kind: 'climb', via })
+          wallClimbs++
+          break
+        }
+      }
+    }
+    log(`${wallClimbs} wall climbs onto ledges and low roofs`)
     for (const climb of ways.climbs) {
       // Climbed from the nearest ground spot a body can actually walk to the bottom rung from: tower
       // legs and bracing crowd the foot of a ladder, so the very nearest spot can be boxed in.

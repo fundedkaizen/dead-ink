@@ -263,8 +263,9 @@ export class ZombieDirector {
     const graph = this.context.graph
     if (graph && this.flowTimer <= 0) {
       const sources = targets.filter(t => t.alive).map(t => t.feet)
-      if (sources.length) graph.flow(sources)
-      this.flowTimer = FLOW_INTERVAL
+      // Only restart the clock on a real refresh: with every player down there is nothing to flow to, and
+      // the first update after a revive must not judge progress on the old field.
+      if (sources.length) { graph.flow(sources); this.flowTimer = FLOW_INTERVAL }
     }
     this.advanceFinePlans()
     for (const zombie of this.zombies) {
