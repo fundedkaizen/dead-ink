@@ -32,10 +32,28 @@ export type PlayerState = {
   name: string
 }
 
+/** The host's buildables, traps and quest, as the guest needs them (sent with every tick). */
+export type WorldState = {
+  /** Parts still lying about: id and where. */
+  parts: [string, number, number, number][]
+  /** Parts the team carries (shared, as in Black Ops 3). */
+  carried: string[]
+  /** Parts already fitted at each build site. */
+  placed: Record<string, string[]>
+  power: 'broken' | 'ready' | 'on'
+  shieldOnBench: 0 | 1
+  traps: ['idle' | 'active' | 'cooling', number][]
+  quest: string
+  /** Each inkwell: awake, souls, bottle taken. */
+  wells: [0 | 1, number, 0 | 1][]
+  bottles: number
+}
+
 export type CoopMessage =
   // host -> guest
   | { t: 'sync'; gates: string[]; power: boolean; box: number; seed: number; difficulty: string }
-  | { t: 'tick'; z: ZombieSnap[]; r: number; ph: 'break' | 'active'; me: PlayerState; storm: boolean; pw: 0 | 1; pk: 0 | 1 }
+  | { t: 'tick'; z: ZombieSnap[]; r: number; ph: 'break' | 'active'; me: PlayerState; storm: boolean; pw: 0 | 1; pk: 0 | 1; w?: WorldState }
+  | { t: 'shield' }
   | { t: 'award'; n: number; k?: number; h?: number }
   | { t: 'hit'; pt: [number, number, number]; dealt: number; id: string; head: 0 | 1; lethal: 0 | 1 }
   | { t: 'hurt'; n: number; s?: [number, number, number] }
@@ -56,6 +74,13 @@ export type CoopMessage =
   | { t: 'use'; what: 'gate'; id: string }
   | { t: 'use'; what: 'box'; guns: WeaponName[] }
   | { t: 'use'; what: 'box-take' }
+  | { t: 'use'; what: 'part'; id: string }
+  | { t: 'use'; what: 'site'; build: string }
+  | { t: 'use'; what: 'power' }
+  | { t: 'use'; what: 'trap'; index: number }
+  | { t: 'use'; what: 'bottle'; index: number }
+  | { t: 'use'; what: 'pour' }
+  | { t: 'lure'; p: [number, number, number]; s: number }
   // either way
   | { t: 'revive' }
   | { t: 'down'; dn: 0 | 1 | 2 }

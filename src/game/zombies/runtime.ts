@@ -50,7 +50,7 @@ import { INKWELL_PLACES, Inkwell, QUEST, SoulStreams, questHint, type QuestStep 
 import { BLOT, GAS, rollBlot } from './gas'
 import { POWER_ICON, WorldMarker } from './markers'
 import { playMythicSting } from './mythic'
-import { CoopLink, PartnerAvatar, PartnerTag, toVector, vec, type CoopMessage, type CoopStatus, type PlayerState } from './coop'
+import { CoopLink, PartnerAvatar, PartnerTag, toVector, vec, type CoopMessage, type CoopStatus, type PlayerState, type WorldState } from './coop'
 import type { Shot as ShotType } from '../types'
 import type { Rarity } from '../loot'
 import { MACHINE_PLACES, PACK, PERKS, PERK_EFFECT, PERK_LIMIT, PackAPunch, PackedLook, PerkBottle, PerkMachine, type PerkKind } from './perks'
@@ -271,6 +271,9 @@ export class ZombiesRuntime {
   private coopPanel: HTMLElement | null = null
   private coopStatus: CoopStatus = { kind: 'idle' }
   private partnerKills = 0
+  /** The guest's Ink Dolls, on the host: where each lies and how long it keeps drawing zombies. */
+  private partnerLures: { position: THREE.Vector3; left: number }[] = []
+  private partsKey = ''
   /** Accuracy for the game-over page: trigger pulls, and pulls that hit a zombie (a shotgun blast counts once). */
   private shotsFired = 0
   private shotsHit = 0
@@ -566,8 +569,7 @@ export class ZombiesRuntime {
     this.lastHurt = -100; this.knifeCooldown = 0; this.strandTimer = 0
     this.down = 0; this.bleed = 0; this.reviving = 0; this.boxOwner = 'host'; this.partnerKills = 0
     this.lastTick = null
-    // The guest's world is the host's: no parts or build hunts of its own in this version.
-    if (this.isGuest) for (const part of this.parts) part.root.visible = false
+    this.partnerLures = []
     if (this.coop.role === 'host') { this.sendSync(); this.coop.send({ t: 'start' }) }
   }
 
@@ -711,23 +713,20 @@ export class ZombiesRuntime {
       targets.push({ object: this.partner.actor?.root ?? this.scene, point: this.partner.feet.clone().setY(this.partner.feet.y + 0.6), kind: 'mission', descending: false,
         label: `Revive ${this.partnerState.name} (stay close)`, use: () => { this.reviving = 0.001; this.player.movementLocked = true; return true } })
     for (const part of this.parts) {
-      if (this.isGuest) break
-      if (part.point.distanceTo(eye) > 3) continue
+      if (part.point.distanceTo(eye) > 3 || !part.root.visible) continue
       targets.push({ object: part.root, point: part.point, kind: 'mission', descending: false, label: `Pick up the ${PARTS[part.id].label}`, use: () => this.pickPart(part) })
     }
     const power = this.powerSwitch
-    if (power && power.state !== 'on' && !this.isGuest) {
+    if (power && power.state !== 'on') {
       const label = power.state === 'ready' ? 'Turn on the power'
         : this.carried.has('lever') ? 'Put the lever back on the power switch' : 'The power switch has lost its lever'
       targets.push({ object: power.root, point: power.point, kind: 'mission', descending: false, label, use: () => this.usePower(power) })
     }
     for (const well of this.wells) {
-      if (this.isGuest) break
       if (!well.bottleWaiting || well.point.distanceTo(eye) > 3) continue
       targets.push({ object: well.root, point: well.point, kind: 'mission', descending: false, label: 'Take the bottle of ink', use: () => this.takeBottle(well) })
     }
     for (const trap of this.traps) {
-      if (this.isGuest) break
       if (trap.point.distanceTo(eye) > 3) continue
       const gate = this.zones?.gates.find(g => g.spec.id === trap.spec.id)
       const label = !this.power ? 'Ink trap · no power' : gate && gate.state === 'closed' ? 'Ink trap · open the gate first'
@@ -736,7 +735,6 @@ export class ZombiesRuntime {
       targets.push({ object: trap.root, point: trap.point, kind: 'mission', descending: false, label, use: () => this.useTrap(trap) })
     }
     for (const site of this.sites.values()) {
-      if (this.isGuest) break
       if (site.build === 'pack' && this.packBuilt) continue
       const name = BUILDS[site.build].label, have = site.missing().filter(id => this.carried.has(id))
       let label: string
@@ -817,10 +815,16 @@ export class ZombiesRuntime {
 
   private pickPart(part: PartPickup) {
     if (!this.isActive() || part.point.distanceTo(this.camera.perspective.position) > 3) return false
+    if (this.isGuest) { this.coop.send({ t: 'use', what: 'part', id: part.id }); return true }
+    return this.takePart(part, false)
+  }
+
+  /** A part into the team's hands (the host decides; `partner` when the guest picked it up). */
+  private takePart(part: PartPickup, partner: boolean) {
     this.carried.add(part.id)
     this.parts.splice(this.parts.indexOf(part), 1)
     part.dispose()
-    this.hud.notify(`You found the ${PARTS[part.id].label}.`, 2.5)
+    this.hud.notify(partner ? `Your partner found the ${PARTS[part.id].label}.` : `You found the ${PARTS[part.id].label}.`, 2.5)
     this.emit({ kind: 'pickup', position: this.player.body.position.clone(), radius: 3 })
     this.zombieHud.parts([...this.carried].map(id => PARTS[id].label))
     this.invalidate()
@@ -829,6 +833,12 @@ export class ZombiesRuntime {
 
   private usePower(power: PowerSwitch) {
     if (!this.isActive() || !this.canReach(power.point, power.root)) return false
+    if (this.isGuest) { this.coop.send({ t: 'use', what: 'power' }); return true }
+    return this.workPower(power)
+  }
+
+  /** Fit the lever, or pull it: the power comes on for everyone. */
+  private workPower(power: PowerSwitch) {
     if (power.state === 'broken') {
       if (!this.carried.has('lever')) { this.hud.notify('The lever is missing. It must be somewhere about the compound.', 3, true); return false }
       this.carried.delete('lever')
@@ -849,7 +859,19 @@ export class ZombiesRuntime {
   /** At a build site: put in every part you carry for it; the last one finishes the build. */
   private useSite(site: BuildSite) {
     if (!this.isActive() || !this.canReach(site.point, site.root)) return false
+    if (this.isGuest) { this.coop.send({ t: 'use', what: 'site', build: site.build }); return true }
+    return this.buildAt(site, false)
+  }
+
+  /** Fit the team's parts at a site, or take the finished shield (`partner`: the guest is at the site). */
+  private buildAt(site: BuildSite, partner: boolean) {
     if (site.complete) {
+      if (partner) {
+        if (site.build !== 'shield' || !this.shieldOnBench) return false
+        this.shieldOnBench = false
+        this.coop.send({ t: 'shield' })
+        return true
+      }
       if (site.build !== 'shield' || this.shield || !this.shieldOnBench) return false
       this.shield = { health: SHIELD.health }
       this.shieldOnBench = false
@@ -895,6 +917,7 @@ export class ZombiesRuntime {
     const gate = this.zones?.gates.find(g => g.spec.id === trap.spec.id)
     if (gate && gate.state === 'closed') return false
     if (trap.state !== 'idle' || !this.spend(TRAP.cost)) return false
+    if (this.isGuest) { this.coop.send({ t: 'use', what: 'trap', index: this.traps.indexOf(trap) }); return true }
     trap.start()
     this.emit({ kind: 'pack-work', position: trap.point.clone(), radius: 20 })
     this.invalidate()
@@ -913,7 +936,7 @@ export class ZombiesRuntime {
     for (const trap of this.traps) {
       trap.update(dt, this.power)
       if (trap.state !== 'active' || !director) continue
-      for (const zombie of director.zombies) {
+      if (!this.isGuest) for (const zombie of director.zombies) {
         if (zombie.state !== 'chase' || !trap.inside(zombie.position)) continue
         const chest = zombie.position.clone().setY(zombie.position.y + 1.1 * (zombie.boss ? BOSS.scale : 1))
         const damage = zombie.boss ? TRAP.bruteDps * dt : zombie.health + 1
@@ -930,11 +953,17 @@ export class ZombiesRuntime {
 
   /** The quest moves on by itself as its conditions come true; the inkwells take in their souls. */
   private updateQuest(dt: number) {
+    if (this.isGuest) {
+      for (const well of this.wells) well.update(dt)
+      const souls = this.wells.reduce((sum, well) => sum + Math.min(QUEST.souls, well.souls), 0)
+      this.zombieHud.quest(questHint(this.questStep, { souls, bottles: this.bottles }))
+      return
+    }
     if (this.questStep === 'power' && this.power) this.questStep = 'pack'
     if (this.questStep === 'pack' && this.packBuilt) {
       this.questStep = 'wells'
       for (const well of this.wells) well.wake()
-      this.zombieHud.announce('The inkwells are thirsty', 3.5)
+      this.shout('The inkwells are thirsty', 3.5)
       this.hud.notify('Kill zombies near the inkwells to fill them.', 4)
     }
     for (const well of this.soulStreams?.update(dt) ?? []) {
@@ -954,22 +983,26 @@ export class ZombiesRuntime {
   }
 
   private takeBottle(well: Inkwell) {
-    if (!this.isActive() || well.point.distanceTo(this.camera.perspective.position) > 3 || !well.takeBottle()) return false
+    if (!this.isActive() || well.point.distanceTo(this.camera.perspective.position) > 3) return false
+    if (this.isGuest) { if (well.bottleWaiting) this.coop.send({ t: 'use', what: 'bottle', index: this.wells.indexOf(well) }); return well.bottleWaiting }
+    if (!well.takeBottle()) return false
     this.bottles++
     this.emit({ kind: 'pickup', position: this.player.body.position.clone(), radius: 3 })
     this.hud.notify(`A bottle of ink (${this.bottles} of ${this.wells.length}).`, 2.5)
     return true
   }
 
-  private pourInk() {
+  private pourInk(partner = false) {
     const pack = this.pack
-    if (!this.isActive() || !pack || this.questStep !== 'pour' || !this.canReach(pack.point, pack.root)) return false
+    if (!pack || this.questStep !== 'pour') return false
+    if (!partner && (!this.isActive() || !this.canReach(pack.point, pack.root))) return false
+    if (this.isGuest) { this.coop.send({ t: 'use', what: 'pour' }); return true }
     this.questStep = 'editor'
     this.bottles = 0
     this.editorTimer = QUEST.editorDelay
     this.shockwaves.emit(pack.root.position.clone(), 6)
     this.emit({ kind: 'boss-slam', position: pack.point.clone(), radius: 200 })
-    this.zombieHud.announce('The press is running', 3)
+    this.shout('The press is running', 3)
     return true
   }
 
@@ -1078,7 +1111,7 @@ export class ZombiesRuntime {
     this.sendTimer = 1 / COOP.sendRate
     if (this.coop.role === 'host') {
       this.coop.send({ t: 'tick', z: this.director?.snapshot() ?? [], r: this.rounds.round, ph: this.rounds.phase, me: this.myState(), storm: this.storm,
-        pw: this.power ? 1 : 0, pk: this.packBuilt ? 1 : 0 })
+        pw: this.power ? 1 : 0, pk: this.packBuilt ? 1 : 0, w: this.worldState() })
     } else this.coop.send({ t: 'me', me: this.myState() })
   }
 
@@ -1126,6 +1159,48 @@ export class ZombiesRuntime {
     this.coop.send({ t: 'down', dn: 0 })
   }
 
+  /** The host's buildables, traps and quest for the guest (small: sent with every tick). */
+  private worldState(): WorldState {
+    const placed: Record<string, string[]> = {}
+    for (const [build, site] of this.sites) placed[build] = [...site.placed]
+    return {
+      parts: this.parts.map(p => [p.id, Math.round(p.root.position.x * 100) / 100, Math.round(p.root.position.y * 100) / 100, Math.round(p.root.position.z * 100) / 100]),
+      carried: [...this.carried], placed, power: this.powerSwitch?.state ?? 'broken', shieldOnBench: this.shieldOnBench ? 1 : 0,
+      traps: this.traps.map(t => [t.state, Math.round(t.timer * 10) / 10]), quest: this.questStep,
+      wells: this.wells.map(w => [w.awake ? 1 : 0, w.souls, w.bottleTaken ? 1 : 0]), bottles: this.bottles,
+    }
+  }
+
+  /** On the guest: make the parts, sites, switch, traps and inkwells look as the host has them. */
+  private applyWorld(w: WorldState) {
+    // Parts: rebuild the list when it differs (a new game, or one picked up).
+    const key = w.parts.map(p => p.join(',')).join('|')
+    if (key !== this.partsKey) {
+      this.partsKey = key
+      for (const part of this.parts) part.dispose()
+      this.parts = w.parts.map(([id, x, y, z]) => { const part = new PartPickup(id as PartId, new THREE.Vector3(x, y, z)); this.scene.add(part.root); return part })
+    }
+    const carried = w.carried.join(',')
+    if (carried !== [...this.carried].join(',')) {
+      this.carried = new Set(w.carried as PartId[])
+      this.zombieHud.parts([...this.carried].map(id => PARTS[id].label))
+    }
+    for (const [build, site] of this.sites) for (const id of w.placed[build] ?? []) if (!site.placed.has(id as PartId)) site.place(id as PartId)
+    const power = this.powerSwitch
+    if (power && power.state !== w.power) { if (w.power !== 'broken') power.repair(); if (w.power === 'on') power.turnOn() }
+    this.shieldOnBench = !!w.shieldOnBench
+    w.traps.forEach(([state, timer], i) => { const trap = this.traps[i]; if (trap && trap.state !== state) { trap.state = state; trap.timer = timer } })
+    this.questStep = w.quest as QuestStep
+    w.wells.forEach(([awake, souls, taken], i) => {
+      const well = this.wells[i]
+      if (!well) return
+      if (awake && !well.awake) well.wake()
+      while (well.souls < souls) well.addSoul()
+      if (taken && !well.bottleTaken) well.takeBottle()
+    })
+    this.bottles = w.bottles
+  }
+
   /** Every message from the other browser. */
   private coopMessage(m: CoopMessage) {
     switch (m.t) {
@@ -1143,6 +1218,7 @@ export class ZombiesRuntime {
         this.partnerState = m.me
         if (!!m.pw !== this.power) this.setPower(!!m.pw)
         if (m.pk && !this.packBuilt) this.completeBuild('pack')
+        if (m.w) this.applyWorld(m.w)
         if (newRound) {
           if (this.down === 2) this.getUp(true)
           this.grenadeCount = Math.min(GRENADE.max, this.grenadeCount + GRENADE.perRound)
@@ -1198,6 +1274,18 @@ export class ZombiesRuntime {
           }
         } else if (m.what === 'box') this.spinBox('guest', m.guns)
         else if (m.what === 'box-take') this.box?.take()
+        else if (m.what === 'part') { const part = this.parts.find(p => p.id === m.id); if (part) this.takePart(part, true) }
+        else if (m.what === 'site') { const site = this.sites.get(m.build as BuildId); if (site) this.buildAt(site, true) }
+        else if (m.what === 'power' && this.powerSwitch) this.workPower(this.powerSwitch)
+        else if (m.what === 'trap') { const trap = this.traps[m.index]; if (trap && trap.state === 'idle' && this.power) { trap.start(); this.emit({ kind: 'pack-work', position: trap.point.clone(), radius: 20 }) } }
+        else if (m.what === 'bottle') { const well = this.wells[m.index]; if (well?.takeBottle()) { this.bottles++; this.hud.notify(`Your partner took a bottle of ink (${this.bottles} of ${this.wells.length}).`, 2.5) } }
+        else if (m.what === 'pour') this.pourInk(true)
+        break
+      case 'lure': this.partnerLures.push({ position: toVector(m.p), left: m.s }); break
+      case 'shield':
+        this.shield = { health: SHIELD.health }
+        this.hud.notify('The shield is on your back: it takes hits from behind.', 3)
+        this.zombieHud.shield(1)
         break
       // ---- both
       case 'revive': this.getUp(); this.hud.notify('Your partner got you back up.', 2.5); break
@@ -2065,7 +2153,8 @@ export class ZombiesRuntime {
     this.audio.setActive(active || deathPlaying)
     // A doll on the ground draws every zombie to it, the Brute too, until it goes off.
     const lures = this.dolls.resting()
-    const target = (): ZombieTarget[] => lures.length ? lures.map((doll, i) => ({ id: `doll-${i}`, feet: doll.position, alive: true }))
+    const allLures = [...lures.map(doll => doll.position), ...this.partnerLures.map(lure => lure.position)]
+    const target = (): ZombieTarget[] => allLures.length ? allLures.map((feet, i) => ({ id: `doll-${i}`, feet, alive: true }))
       : [{ id: 'p1', feet: this.player.body.position, alive: this.state.phase === 'active' && !this.down },
         ...(this.coop.role === 'host' && this.partnerUp ? [{ id: 'p2', feet: this.partner.feet, alive: true }] : [])]
     if (active && this.director) {
@@ -2223,6 +2312,12 @@ export class ZombiesRuntime {
       for (const at of this.grenades.update(dt)) this.grenadeBlast(at)
       this.dollCooldown = Math.max(0, this.dollCooldown - dt)
       for (const doll of lures) animateDoll(doll.object, doll.age)
+      // The guest's doll draws the host's zombies: tell the host once, when it lands.
+      if (this.isGuest) for (const doll of lures) if (!doll.object.userData.lureSent) {
+        doll.object.userData.lureSent = true
+        this.coop.send({ t: 'lure', p: vec(doll.position), s: DECOY.lure + 1 - doll.age })
+      }
+      for (const lure of [...this.partnerLures]) if ((lure.left -= dt) <= 0) this.partnerLures.splice(this.partnerLures.indexOf(lure), 1)
       if (lures.length && (this.dollClap -= dt) <= 0) { this.dollClap = 0.32; this.emit({ kind: 'doll-clap', position: lures[0].position.clone(), radius: 25 }) }
       for (const at of this.dolls.update(dt)) this.dollBlast(at)
       for (const at of this.bolts.update(dt)) this.boltBurst(at)
