@@ -35,6 +35,7 @@ import { GRENADE, Grenades } from './grenades'
 import { INK_RAY, InkRayBolts } from './wonder'
 import { REVIVE, SecondDraftRevive } from './revive'
 import { DECOY, DollBuy, animateDoll, inkDoll } from './decoy'
+import { THROW_RELEASE } from '../weapons'
 import { ARMORY_PAGE, awardGame, deadInkHome, installCosmetics } from './cosmetics'
 import { addDressing } from './dressing'
 import { Explosion, MushroomCloud, createGrenadeModel } from './vfx'
@@ -207,6 +208,8 @@ export class ZombiesRuntime {
   private dollCooldown = 0
   private dollClap = 0
   private dollBuy: DollBuy | null = null
+  /** Throws waiting for the hand to let go, so the grenade leaves the screen as it leaves the hand. */
+  private pendingThrows: { timer: number; launch: () => void }[] = []
   private uninstallCosmetics: () => void
   /** Grenade blasts and the Nuke's mushroom cloud; the junk, graffiti and hidden details about the map. */
   readonly explosions: Explosion
@@ -431,7 +434,7 @@ export class ZombiesRuntime {
     for (const skull of this.skulls) { skull.found = false; skull.object.userData.found = false }
     this.music.stopStings()
     this.grenades.clear(); this.bolts.clear(); this.grenadeCount = GRENADE.start; this.grenadeCooldown = 0
-    this.dolls.clear(); this.dollCount = 0; this.dollCooldown = 0
+    this.dolls.clear(); this.dollCount = 0; this.dollCooldown = 0; this.pendingThrows = []
     if (this.pack && this.pack.state !== 'idle') this.pack.take()
     this.dropper = new PowerupDropper(this.random)
     this.weapons.restore({ slots: [startingPistol(), null], selected: 0, pickups: [], nextId: 1 })
@@ -619,14 +622,22 @@ export class ZombiesRuntime {
     if (!this.isActive() || this.revive.down || this.dollCount <= 0 || this.dollCooldown > 0) return false
     this.dollCount--
     this.dollCooldown = DECOY.cooldown
-    this.weapons.cancel()
-    this.interactionTime = Math.max(this.interactionTime, 0.35)
-    const camera = this.camera.perspective
-    const forward = camera.getWorldDirection(new THREE.Vector3())
-    const origin = camera.getWorldPosition(new THREE.Vector3()).addScaledVector(forward, 0.45).add(new THREE.Vector3(0, -0.12, 0))
-    this.dolls.throw(origin, forward, this.player.body.velocity.clone().multiplyScalar(0.5))
-    this.emit({ kind: 'grenade-throw', position: origin, radius: 6 })
+    const doll = inkDoll()
+    doll.scale.setScalar(0.8)
+    this.weapons.throwItem(doll)
+    this.throwLater(this.dolls)
     return true
+  }
+
+  /** Launch from the camera when the hand lets go, the way you are looking then. */
+  private throwLater(into: Grenades) {
+    this.pendingThrows.push({ timer: THROW_RELEASE, launch: () => {
+      const camera = this.camera.perspective
+      const forward = camera.getWorldDirection(new THREE.Vector3())
+      const origin = camera.getWorldPosition(new THREE.Vector3()).addScaledVector(forward, 0.45).add(new THREE.Vector3(0, -0.05, 0))
+      into.throw(origin, forward, this.player.body.velocity.clone().multiplyScalar(0.5))
+      this.emit({ kind: 'grenade-throw', position: origin, radius: 6 })
+    } })
   }
 
   /** The doll goes off among the crowd it drew: three times a zombie's health, so nothing near it lives. */
@@ -1027,13 +1038,9 @@ export class ZombiesRuntime {
     if (!this.isActive() || this.revive.down || this.grenadeCount <= 0 || this.grenadeCooldown > 0) return false
     this.grenadeCount--
     this.grenadeCooldown = GRENADE.cooldown
-    this.weapons.cancel()
-    this.interactionTime = Math.max(this.interactionTime, 0.35)
-    const camera = this.camera.perspective
-    const forward = camera.getWorldDirection(new THREE.Vector3())
-    const origin = camera.getWorldPosition(new THREE.Vector3()).addScaledVector(forward, 0.45).add(new THREE.Vector3(0, -0.12, 0))
-    this.grenades.throw(origin, forward, this.player.body.velocity.clone().multiplyScalar(0.5))
-    this.emit({ kind: 'grenade-throw', position: origin, radius: 6 })
+    // The throw itself keeps the gun down until it is over (an inactive frame would cancel it).
+    this.weapons.throwItem(createGrenadeModel())
+    this.throwLater(this.grenades)
     return true
   }
 
@@ -1307,6 +1314,7 @@ export class ZombiesRuntime {
       this.explosions.update(dt); this.nukeCloud.update(dt)
       this.zones?.update(dt)
       this.grenadeCooldown = Math.max(0, this.grenadeCooldown - dt)
+      for (const pending of [...this.pendingThrows]) if ((pending.timer -= dt) <= 0) { this.pendingThrows.splice(this.pendingThrows.indexOf(pending), 1); pending.launch() }
       for (const at of this.grenades.update(dt)) this.grenadeBlast(at)
       this.dollCooldown = Math.max(0, this.dollCooldown - dt)
       for (const doll of lures) animateDoll(doll.object, doll.age)

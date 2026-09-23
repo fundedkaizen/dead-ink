@@ -22,6 +22,11 @@ const STINGS: Record<Sting, { file: string; level: number }> = {
   song: { file: 'music/easter-egg.mp3', level: 0.7 },
 }
 const FADE_SECONDS = 1.6
+/**
+ * The stings are cut out of longer songs, so they would stop dead where the cut is: each fades in over
+ * a moment and out over its last two seconds (the hidden song is a whole song and plays out as written).
+ */
+const STING_FADE = { in: 0.25, out: 2 } as const
 
 export class DeadInkMusic {
   private beds = {} as Record<Bed, HTMLAudioElement>
@@ -63,9 +68,27 @@ export class DeadInkMusic {
     if (!this.unlocked || this.disposed || this.muted) return
     const audio = this.stings[name]
     audio.currentTime = 0
-    audio.volume = Math.min(1, this.volume * STINGS[name].level)
+    audio.volume = this.stingVolume(name)
     void audio.play().catch(() => {})
     if (name === 'song') this.tick()
+    // Follow it to its end, easing the volume in and out.
+    const follow = () => {
+      if (this.disposed || audio.paused || audio.ended) return
+      audio.volume = this.stingVolume(name)
+      requestAnimationFrame(follow)
+    }
+    requestAnimationFrame(follow)
+  }
+
+  /** A sting's volume right now: the master level, its own, and its fade in and out. */
+  private stingVolume(name: Sting) {
+    const audio = this.stings[name], level = (this.muted ? 0 : this.volume) * STINGS[name].level
+    if (name === 'song') return Math.min(1, level)
+    const left = audio.duration - audio.currentTime
+    const fadeIn = Math.min(1, audio.currentTime / STING_FADE.in)
+    const fadeOut = Number.isFinite(left) ? Math.min(1, Math.max(0, left / STING_FADE.out)) : 1
+    // Squared, so the tail thins out the way a hand on a fader does rather than in a straight line.
+    return Math.min(1, level * fadeIn * fadeOut * fadeOut)
   }
 
   stopStings() { for (const audio of Object.values(this.stings)) { audio.pause(); audio.currentTime = 0 } }
@@ -112,7 +135,7 @@ export class DeadInkMusic {
       if (level > 0.001 && audio.paused && this.unlocked && !document.hidden) void audio.play().catch(() => {})
       if (level <= 0.001 && !audio.paused) audio.pause()
     }
-    for (const [name, audio] of Object.entries(this.stings) as [Sting, HTMLAudioElement][]) audio.volume = Math.min(1, master * STINGS[name].level)
+    for (const name of Object.keys(this.stings) as Sting[]) this.stings[name].volume = this.stingVolume(name)
   }
 
   dispose() {

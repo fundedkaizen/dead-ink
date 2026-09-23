@@ -18,6 +18,7 @@ const KINDS: { kind: CosmeticKind; label: string }[] = [
 ]
 const GUNS: { name: WeaponName; label: string }[] = [
   { name: 'pistol', label: 'Pistol' }, { name: 'smg', label: 'SMG' }, { name: 'ak', label: 'AK' }, { name: 'shotgun', label: 'Shotgun' }, { name: 'sniper', label: 'Sniper' },
+  { name: 'magnum', label: 'Magnum' }, { name: 'lmg', label: 'LMG' },
 ]
 const TILE = 120
 const reducedMotion = () => document.body.dataset.reducedMotion === 'true'

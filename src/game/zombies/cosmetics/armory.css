@@ -38,14 +38,17 @@ body[data-mission="true"] .walk-card .armory-equip { min-height: 34px; padding: 
 body[data-mission="true"] .walk-card .armory-equip:hover { background: var(--ink); color: var(--paper); }
 
 .armory-tabs, .armory-guns { display: flex; flex-wrap: wrap; gap: 6px; }
-.armory-guns[hidden] { display: none; }
+/* Every tab keeps the same height, so switching tabs never moves the page under the mouse: the gun row
+   keeps its place (just invisible) off the camo tab, and the grid always has room for two rows. */
+.armory-guns[hidden] { display: flex; visibility: hidden; }
 body[data-mission="true"] .walk-card :is(.armory-tabs, .armory-guns) button { min-height: 36px; padding: 6px 14px; border: 1.5px solid var(--ink-rule); background: var(--paper); color: var(--ink); border-radius: 3px 5px 3px 4px; font: 600 13px/1 var(--notes); cursor: pointer; }
 body[data-mission="true"] .walk-card :is(.armory-tabs button[aria-selected="true"], .armory-guns button[aria-pressed="true"]) { background: var(--ink); color: var(--paper); border-color: var(--ink); }
 body[data-mission="true"] .walk-card .armory-hint { margin: -6px 0 0; font-size: 12px; }
-.armory-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 10px; }
+.armory-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); grid-auto-rows: 118px; gap: 10px; min-height: 246px; align-content: start; }
 body[data-mission="true"] .walk-card .armory-item { min-height: 0; display: grid; justify-items: center; gap: 2px; padding: 10px 8px 12px; background: var(--paper); color: var(--ink);
   border: 1.5px solid var(--ink); border-bottom: 5px solid var(--rarity); border-radius: 4px 3px 5px 3px; cursor: pointer; text-align: center; }
 .armory-item svg { width: 58px; height: 58px; }
+body[data-mission="true"] .walk-card .armory-hint { min-height: 2.8em; }
 .armory-item:hover:not([aria-disabled]) { transform: translateY(-2px); box-shadow: 3px 4px 0 var(--ink); }
 .armory-item.worn { box-shadow: 0 0 0 3px var(--rarity); }
 .armory-item[aria-disabled] { cursor: default; opacity: 0.42; filter: grayscale(1); }

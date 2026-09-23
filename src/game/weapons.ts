@@ -24,6 +24,12 @@ const SWAP_OUT = 0.1, SWAP_SETTLE = 0.42, SWITCH_TIME = 0.26
 const SWAP_DROP = 0.24
 /** A knife slash, from the gun dipping out to it coming back up. */
 const KNIFE_TIME = 0.36
+/**
+ * A throw (grenade, Ink Doll): the gun dips out, the hand comes up with it, winds back by the ear, throws
+ * forward and lets go at THROW_RELEASE (when the mode should launch the real thing), then follows through.
+ */
+const THROW_TIME = 0.46
+export const THROW_RELEASE = 0.29
 /** Seconds of stillness before the gun is inspected or the knife does a flourish. */
 const IDLE_FLOURISH = 10
 const INSPECT_TIME = 3.4, KNIFE_FLOURISH_TIME = 2.3
@@ -61,6 +67,12 @@ const KNIFE_SLASH: [number, V3, V3][] = [
   [0.12, [0.3, -0.04, -0.32], [-0.55, Math.PI + 0.15, 1.35]],
   [0.25, [-0.22, -0.25, -0.43], [0.25, Math.PI + 1.05, 1.55]],
   [KNIFE_TIME, [-0.02, -0.5, -0.34], [0.5, Math.PI + 0.9, 1.2]],
+]
+const THROW_PATH: [number, V3, V3][] = [
+  [0.06, [0.26, -0.28, -0.34], [0.1, Math.PI, 0]],
+  [0.2, [0.25, 0.02, -0.22], [-0.9, Math.PI + 0.2, 0.3]],
+  [THROW_RELEASE, [0.06, 0.05, -0.52], [0.5, Math.PI - 0.1, -0.1]],
+  [THROW_TIME, [0.0, -0.45, -0.46], [0.9, Math.PI - 0.2, -0.3]],
 ]
 const copyItem = (item: WeaponItem): WeaponItem => ({ ...item, ...(item.position ? { position: [...item.position] } : {}) })
 const smooth = (value: number, a: number, b: number) => THREE.MathUtils.smoothstep(value, a, b)
@@ -139,6 +151,9 @@ export class FirstPersonWeapons {
   private turnRate = 0
   private swap: { time: number; outgoing: Gun | null } | null = null
   private knifeTime: number | null = null
+  /** A throw in progress, and what is in the hand for it. */
+  private throwTime: number | null = null
+  private throwModel: THREE.Object3D | null = null
   private knifeHand = new THREE.Group()
   private knifeSpin = new THREE.Group()
   private knives = new Map<KnifeId, Gun>()
@@ -443,6 +458,36 @@ export class FirstPersonWeapons {
     this.idleTime = 0
     this.endFlourish()
     if (this.knifeTime !== null) { this.knifeTime = null; this.hideKnife() }
+    if (this.throwTime !== null) this.endThrow()
+  }
+
+  /**
+   * Throw something from the hand: `model` is what you see in it (it is the viewmodel's until the throw
+   * ends). The gun dips out and comes back up after; the mode launches the real one at THROW_RELEASE.
+   */
+  throwItem(model: THREE.Object3D) {
+    if (this.disposed || !this.enabled) return false
+    this.cancel()
+    this.throwTime = 0
+    this.throwModel = model
+    model.visible = false
+    this.knifeSpin.add(model)
+    this.switchTime = THROW_TIME
+    this.clearSwap()
+    this.root.visible = !this.scopeActive
+    this.pose(0)
+    return true
+  }
+
+  private endThrow() {
+    this.throwTime = null
+    if (this.throwModel) {
+      this.throwModel.removeFromParent()
+      this.throwModel.traverse(o => { if (o instanceof THREE.Mesh) o.geometry.dispose() })
+      this.throwModel = null
+    }
+    if (this.knifeModel) this.knifeModel.visible = true
+    this.hideKnife()
   }
 
   /**
@@ -600,7 +645,7 @@ export class FirstPersonWeapons {
     this.checkObstruction()
     this.setScope(this.current?.name === 'sniper' && frame.aiming && !this.reloading && this.switchTime <= 0 && !this.obstructed)
     // A scoped rifle is represented by the scope overlay; hide the viewmodel to avoid near-plane clipping.
-    this.root.visible = (!!this.current || this.knifeTime !== null) && !this.scopeActive
+    this.root.visible = (!!this.current || this.knifeTime !== null || this.throwTime !== null) && !this.scopeActive
     this.lower += ((this.obstructed ? 1 : 0) - this.lower) * Math.min(1, delta * 15)
     this.watchIdle(delta, frame)
     this.pose(delta)
@@ -673,6 +718,20 @@ export class FirstPersonWeapons {
       }
       if (this.swap.time >= SWAP_OUT + SWAP_SETTLE) this.swap = null
     }
+    if (this.throwTime !== null) {
+      this.throwTime += delta
+      // The gun ducks out, then the hand holds the grenade (and not the knife) until it lets go.
+      if (!this.knifeShown && this.throwTime >= 0.06) {
+        this.knifeHand.visible = true
+        if (this.knifeModel) this.knifeModel.visible = false
+        if (this.model) this.model.visible = false
+      }
+      if (this.throwModel) this.throwModel.visible = this.knifeShown && this.throwTime < THROW_RELEASE
+      if (this.throwTime >= THROW_TIME) {
+        this.endThrow()
+        this.raiseGun(SWAP_OUT + 0.03)
+      }
+    }
     if (this.knifeTime !== null) {
       this.knifeTime += delta
       // The gun dips for the first few frames, then the knife is in the hand.
@@ -699,7 +758,7 @@ export class FirstPersonWeapons {
    * flourish, alternating. Any input stops it at once.
    */
   private watchIdle(delta: number, frame: WeaponFrame) {
-    const busy = this.held || this.pendingShot || this.reloading || this.switchTime > 0 || !!this.swap || this.knifeTime !== null ||
+    const busy = this.held || this.pendingShot || this.reloading || this.switchTime > 0 || !!this.swap || this.knifeTime !== null || this.throwTime !== null ||
       frame.aiming || frame.moving > 0.05 || this.turnRate > 0.35 || this.obstructed || this.scopeActive || !this.current ||
       !!frame.hitPose && frame.hitPose.weaponPosition.lengthSq() + frame.hitPose.weaponRotation.lengthSq() > 1e-6
     if (busy) {
@@ -770,7 +829,7 @@ export class FirstPersonWeapons {
   }
 
   private pose(dt: number) {
-    const knife = this.knifeShown || this.knifeTime !== null
+    const knife = this.knifeShown || this.knifeTime !== null || this.throwTime !== null
     if (!knife && (!this.model || !this.current)) return
     const motion = !this.frame.reducedMotion
     const hit = motion ? this.frame.hitPose : undefined
@@ -945,6 +1004,22 @@ export class FirstPersonWeapons {
   private poseKnife(motion: boolean) {
     const m = this.mount
     const set = (p: V3, r: V3) => { m.position.set(...p); m.rotation.set(r[0], r[1], r[2], 'YXZ') }
+    if (this.throwTime !== null) {
+      const t = this.throwTime
+      if (!this.knifeShown) {
+        const out = (t / 0.06) ** 2
+        const grip = this.gripPosition()
+        set([grip.x + 0.04 * out, grip.y - 0.18 * out, grip.z], [0.6 * out, Math.PI, -0.6 * out])
+        return
+      }
+      if (!motion) { set([0.14, -0.2, -0.4], [0, Math.PI, 0]); return }
+      let i = 0
+      while (i < THROW_PATH.length - 2 && t > THROW_PATH[i + 1][0]) i++
+      const [t0, p0, r0] = THROW_PATH[i], [t1, p1, r1] = THROW_PATH[i + 1]
+      const k = smooth(t, t0, t1)
+      set(p0.map((v, j) => v + (p1[j] - v) * k) as V3, r0.map((v, j) => v + (r1[j] - v) * k) as V3)
+      return
+    }
     if (this.knifeTime !== null) {
       if (!motion) { set([0.14, -0.2, -0.38], [-0.25, Math.PI + 0.4, 1.3]); return }
       const t = this.knifeTime
