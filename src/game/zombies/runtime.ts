@@ -41,7 +41,8 @@ import { ARMORY_PAGE, awardGame, deadInkHome, installCosmetics } from './cosmeti
 import { addDressing } from './dressing'
 import { Explosion, MushroomCloud, createGrenadeModel } from './vfx'
 import { POWERUP_INFO, PowerupDrops, PowerupDropper } from './powerups'
-import { SEALED, ZoneGates, type ZoneGate } from './zones'
+import { SEALED, ZONE_GATES, ZoneGates, type ZoneGate } from './zones'
+import { InkTrap, TRAP, TRAP_GATES } from './traps'
 import { MACHINE_PLACES, PACK, PERKS, PERK_EFFECT, PERK_LIMIT, PackAPunch, PackedLook, PerkBottle, PerkMachine, type PerkKind } from './perks'
 
 export type ZombieState = {
@@ -222,6 +223,9 @@ export class ZombiesRuntime {
   private shieldOnBench = false
   private shieldBackRound = 0
   private shield: { health: number } | null = null
+  /** Ink traps across two gate openings, and the clocks for their damage and sound. */
+  traps: InkTrap[] = []
+  private trapTick = 0
   /** Throws waiting for the hand to let go, so the grenade leaves the screen as it leaves the hand. */
   private pendingThrows: { timer: number; launch: () => void }[] = []
   private uninstallCosmetics: () => void
@@ -367,7 +371,8 @@ export class ZombiesRuntime {
       const keepClear = [...this.wallBuys.map(b => b.spot.wall), ...this.boxSpots.map(s => s.wall),
         ...this.perkMachines.map(m => m.spot.wall), ...(this.pack ? [this.pack.spot.wall] : []),
         ...(this.dollBuy ? [this.dollBuy.spot.wall] : []), ...this.skulls.map(s => s.object.position),
-        ...(this.powerSwitch ? [this.powerSwitch.spot.wall] : []), ...[...this.sites.values()].map(site => site.spot.wall)]
+        ...(this.powerSwitch ? [this.powerSwitch.spot.wall] : []), ...[...this.sites.values()].map(site => site.spot.wall),
+        ...this.traps.flatMap(trap => [trap.centre, trap.point])]
       try { this.undress = addDressing(this.scene, this.player.world, seeded(0xDEAD1), keepClear) }
       catch (error) { console.warn('Dead Ink: dressing failed', error) }
       this.startGame()
@@ -431,6 +436,14 @@ export class ZombiesRuntime {
     if (benchSpot) { taken.push(benchSpot.stand); const bench = new BuildSite('shield', benchSpot, true); this.sites.set('shield', bench); this.scene.add(bench.root) }
     else console.warn('Dead Ink: no wall for the shield bench')
     if (this.pack) { const site = new BuildSite('pack', this.pack.spot, false); this.sites.set('pack', site); this.scene.add(site.root) }
+    for (const { gate, home } of TRAP_GATES) {
+      const spec = ZONE_GATES.find(g => g.id === gate)
+      if (!spec) continue
+      const floor = this.player.world.floor(new THREE.Vector3(spec.centre[0], 1, spec.centre[1]), 1, 2, 0)
+      const trap = new InkTrap(spec, home, Number.isFinite(floor) ? floor : 0)
+      this.traps.push(trap)
+      this.scene.add(trap.root)
+    }
     if (this.box) this.boxSpots = [this.box.spot]
     for (const machine of this.perkMachines) this.makeSolid(machine.root, [1.05, 2.05, 0.7], [0, 1.025, 0])
     for (const [x, y, z] of BOX_PLACES) {
@@ -617,6 +630,14 @@ export class ZombiesRuntime {
         : this.carried.has('lever') ? 'Put the lever back on the power switch' : 'The power switch has lost its lever'
       targets.push({ object: power.root, point: power.point, kind: 'mission', descending: false, label, use: () => this.usePower(power) })
     }
+    for (const trap of this.traps) {
+      if (trap.point.distanceTo(eye) > 3) continue
+      const gate = this.zones?.gates.find(g => g.spec.id === trap.spec.id)
+      const label = !this.power ? 'Ink trap · no power' : gate && gate.state === 'closed' ? 'Ink trap · open the gate first'
+        : trap.state === 'active' ? 'Ink trap · running' : trap.state === 'cooling' ? 'Ink trap · recharging'
+        : `Ink trap · ${TRAP.cost}${this.state.points >= TRAP.cost ? '' : ` · need ${TRAP.cost - this.state.points} more`}`
+      targets.push({ object: trap.root, point: trap.point, kind: 'mission', descending: false, label, use: () => this.useTrap(trap) })
+    }
     for (const site of this.sites.values()) {
       if (site.build === 'pack' && this.packBuilt) continue
       const name = BUILDS[site.build].label, have = site.missing().filter(id => this.carried.has(id))
@@ -659,6 +680,7 @@ export class ZombiesRuntime {
     this.setPower(false, false)
     this.powerSwitch?.reset()
     for (const site of this.sites.values()) site.reset()
+    for (const trap of this.traps) trap.reset()
     this.packBuilt = false
     if (this.pack) { this.pack.root.visible = false; this.removeSolid(this.pack.root) }
     this.shield = null; this.shieldOnBench = false; this.shieldBackRound = 0
@@ -757,6 +779,45 @@ export class ZombiesRuntime {
       this.emit({ kind: 'pack-ready', position: (site?.point ?? this.player.body.position).clone(), radius: 20 })
     }
     if (build === 'power' && this.powerSwitch) { this.powerSwitch.repair(); this.powerSwitch.turnOn(); this.setPower(true) }
+  }
+
+  private useTrap(trap: InkTrap) {
+    if (!this.isActive() || !this.canReach(trap.point, trap.root)) return false
+    if (!this.power) { this.hud.notify('No power. Find the power switch.', 2.5, true); return false }
+    const gate = this.zones?.gates.find(g => g.spec.id === trap.spec.id)
+    if (gate && gate.state === 'closed') return false
+    if (trap.state !== 'idle' || !this.spend(TRAP.cost)) return false
+    trap.start()
+    this.emit({ kind: 'pack-work', position: trap.point.clone(), radius: 20 })
+    this.invalidate()
+    return true
+  }
+
+  /**
+   * Running traps: zombies in the jets die (no points; the Brute takes a steady beating), the player in
+   * them gets hurt, and the ink hisses.
+   */
+  private updateTraps(dt: number) {
+    const director = this.director
+    this.trapTick -= dt
+    const tick = this.trapTick <= 0
+    if (tick) this.trapTick = 0.25
+    for (const trap of this.traps) {
+      trap.update(dt, this.power)
+      if (trap.state !== 'active' || !director) continue
+      for (const zombie of director.zombies) {
+        if (zombie.state !== 'chase' || !trap.inside(zombie.position)) continue
+        const chest = zombie.position.clone().setY(zombie.position.y + 1.1 * (zombie.boss ? BOSS.scale : 1))
+        const damage = zombie.boss ? TRAP.bruteDps * dt : zombie.health + 1
+        for (const hit of director.blast(chest, 0.3, damage)) {
+          if (hit.lethal) { this.state.kills++; this.killed(hit.zombie.position, hit.zombie) }
+        }
+      }
+      if (tick) {
+        if (trap.inside(this.player.body.position)) this.damage(Math.round(TRAP.playerDps * 0.25), 'zombie')
+        if (Math.random() < 0.5) this.emit({ kind: 'ink-burst', position: trap.centre.clone().setY(trap.centre.y + 0.6), radius: 30 })
+      }
+    }
   }
 
   private removeSolid(owner: THREE.Object3D) {
@@ -1482,6 +1543,7 @@ export class ZombiesRuntime {
       for (const part of this.parts) part.update(dt)
       for (const site of this.sites.values()) site.update(dt)
       this.powerSwitch?.update(dt)
+      this.updateTraps(dt)
       for (const machine of this.perkMachines) {
         machine.update(dt)
         // Walk up to a machine and it plays its jingle (not again for a while).
@@ -1587,6 +1649,7 @@ export class ZombiesRuntime {
     for (const part of this.parts) part.dispose()
     for (const site of this.sites.values()) site.dispose()
     this.powerSwitch?.dispose()
+    for (const trap of this.traps) trap.dispose()
     this.audio.dispose(); this.music.dispose(); this.hud.dispose()
     this.player.movementLocked = false; this.player.onPlayingChange = () => {}; this.player.lookSensitivity = () => 1
     this.player.actions.extraTargets = () => []; this.player.actions.onAction = () => {}

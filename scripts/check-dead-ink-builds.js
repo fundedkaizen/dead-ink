@@ -50,6 +50,28 @@ const status = window.__buildCheck = { done: false, results }
   check(m.power && m.powerSwitch.state === 'on', 'pulling it turns the power on')
   check(m.perkMachines.every(x => x.powered), 'every perk machine has power')
 
+  // An ink trap: pay at its switch, zombies in the jets die (no points), you get hurt in them.
+  const trap = m.traps[0]
+  check(m.traps.length === 2, 'two ink traps were placed', `${m.traps.map(t => t.spec.id)}`)
+  m.state.points = 3000
+  p.body.teleport(trap.point.clone().setY(trap.centre.y).add(new V(0.9, 0, 0.9))); p.actions.syncCamera(cam); cam.lookAt(trap.point); e.invalidate()
+  if (!trap.inside(p.body.position)) {
+    await press()
+  }
+  check(trap.state === 'active' && m.state.points === 2000, 'F at the switch starts the trap for 1000', `${trap.state} ${m.state.points}`)
+  const victim = m.director.spawn(trap.centre.clone(), 400, 'walk', 0)
+  const kills = m.state.kills
+  await sleep(800)
+  check(victim.state !== 'chase' && m.state.kills === kills + 1 && m.state.points === 2000, 'a zombie in the jets dies, and pays nothing', `${victim.state} ${m.state.points}`)
+  m.invincible = false
+  const before = m.state.health
+  p.body.teleport(trap.centre.clone().setY(trap.centre.y + 0.05)); p.actions.syncCamera(cam); e.invalidate()
+  await sleep(700)
+  check(m.state.health < before, 'standing in the jets hurts', `${before} -> ${m.state.health}`)
+  m.invincible = true
+  m.state.health = 100
+  m.director.clear()
+
   // The shield: three parts to the bench, then take it.
   for (const id of ['panel', 'strap', 'grip']) await take(id)
   const bench = m.sites.get('shield')

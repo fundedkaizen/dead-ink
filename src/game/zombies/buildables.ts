@@ -247,7 +247,8 @@ export class PowerSwitch {
     box.hatch([-0.3, 1.1, 0.245], [0.6, 0, 0], [0, 0.15, 0], { spacing: 0.05 })
     box.finish()
     this.root.add(box)
-    this.root.add(wallText('POWER', [0, 2.05, 0.03], 0.2))
+    // On the box's face, clear of the conduits above.
+    this.root.add(wallText('POWER', [0, 1.62, 0.245], 0.13))
     this.lamp = new THREE.Mesh(new THREE.CircleGeometry(0.06, 20), new THREE.MeshBasicMaterial({ color: 0x3a3a3a, toneMapped: false }))
     this.lamp.position.set(0, 1.78, 0.235)
     this.root.add(this.lamp)
