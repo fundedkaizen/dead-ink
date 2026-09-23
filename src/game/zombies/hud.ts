@@ -34,6 +34,9 @@ export class ZombieHud {
   private perksEl = document.createElement('div')
   private grenadesEl = document.createElement('div')
   private partsEl = document.createElement('div')
+  private questEl = document.createElement('div')
+  private shownQuest = ''
+  private shownBossLabel = 'THE BRUTE'
   private shieldEl = document.createElement('div')
   private shownParts = ''
   private shownShield = -2
@@ -74,7 +77,9 @@ export class ZombieHud {
     this.shieldEl.setAttribute('role', 'meter')
     this.shieldEl.innerHTML = '<svg viewBox="0 0 24 28" aria-hidden="true"><path d="M12 1 L22 5 V13 C22 20 17 25 12 27 C7 25 2 20 2 13 V5 Z"/></svg><i><b></b></i>'
     this.shieldEl.hidden = true
-    this.root.append(this.partsEl, this.shieldEl)
+    this.questEl.className = 'dead-ink-quest'
+    this.questEl.setAttribute('role', 'status')
+    this.root.append(this.partsEl, this.shieldEl, this.questEl)
     this.root.append(this.roundEl, this.pointsEl, this.banner, this.powerupsEl, this.perksEl, this.bossEl)
     parent.append(this.root)
   }
@@ -146,6 +151,15 @@ export class ZombieHud {
     this.partsEl.setAttribute('aria-label', labels.length ? `Carrying ${labels.join(', ')}` : 'No parts')
   }
 
+  /** The main quest's next step, a quiet line under the round; null hides it. */
+  quest(text: string | null) {
+    const shown = text ?? ''
+    if (shown === this.shownQuest) return
+    this.shownQuest = shown
+    this.questEl.textContent = shown
+    this.questEl.hidden = !text
+  }
+
   /** The shield on your back and how much it has left; null hides it. */
   shield(fraction: number | null) {
     const shown = fraction === null ? -1 : Math.round(fraction * 100)
@@ -158,7 +172,12 @@ export class ZombieHud {
   }
 
   /** The Brute's health across the top of the screen while it lives; null hides it. */
-  boss(fraction: number | null) {
+  boss(fraction: number | null, label = 'THE BRUTE') {
+    if (label !== this.shownBossLabel) {
+      this.shownBossLabel = label
+      this.bossEl.querySelector('span')!.textContent = label
+      this.shownBoss = -2
+    }
     const shown = fraction === null ? -1 : Math.round(fraction * 200)
     if (shown === this.shownBoss) return
     this.shownBoss = shown

@@ -43,6 +43,7 @@ import { Explosion, MushroomCloud, createGrenadeModel } from './vfx'
 import { POWERUP_INFO, PowerupDrops, PowerupDropper } from './powerups'
 import { SEALED, ZONE_GATES, ZoneGates, type ZoneGate } from './zones'
 import { InkTrap, TRAP, TRAP_GATES } from './traps'
+import { INKWELL_PLACES, Inkwell, QUEST, SoulStreams, questHint, type QuestStep } from './quest'
 import { MACHINE_PLACES, PACK, PERKS, PERK_EFFECT, PERK_LIMIT, PackAPunch, PackedLook, PerkBottle, PerkMachine, type PerkKind } from './perks'
 
 export type ZombieState = {
@@ -226,6 +227,13 @@ export class ZombiesRuntime {
   /** Ink traps across two gate openings, and the clocks for their damage and sound. */
   traps: InkTrap[] = []
   private trapTick = 0
+  /** The main quest, "The Last Edition": its step, the inkwells, the ink flying into them, the Editor. */
+  questStep: QuestStep = 'power'
+  wells: Inkwell[] = []
+  private soulStreams: SoulStreams | null = null
+  private bottles = 0
+  editor: Zombie | null = null
+  private editorTimer = -1
   /** Throws waiting for the hand to let go, so the grenade leaves the screen as it leaves the hand. */
   private pendingThrows: { timer: number; launch: () => void }[] = []
   private uninstallCosmetics: () => void
@@ -372,7 +380,7 @@ export class ZombiesRuntime {
         ...this.perkMachines.map(m => m.spot.wall), ...(this.pack ? [this.pack.spot.wall] : []),
         ...(this.dollBuy ? [this.dollBuy.spot.wall] : []), ...this.skulls.map(s => s.object.position),
         ...(this.powerSwitch ? [this.powerSwitch.spot.wall] : []), ...[...this.sites.values()].map(site => site.spot.wall),
-        ...this.traps.flatMap(trap => [trap.centre, trap.point])]
+        ...this.traps.flatMap(trap => [trap.centre, trap.point]), ...this.wells.map(well => well.root.position)]
       try { this.undress = addDressing(this.scene, this.player.world, seeded(0xDEAD1), keepClear) }
       catch (error) { console.warn('Dead Ink: dressing failed', error) }
       this.startGame()
@@ -436,6 +444,14 @@ export class ZombiesRuntime {
     if (benchSpot) { taken.push(benchSpot.stand); const bench = new BuildSite('shield', benchSpot, true); this.sites.set('shield', bench); this.scene.add(bench.root) }
     else console.warn('Dead Ink: no wall for the shield bench')
     if (this.pack) { const site = new BuildSite('pack', this.pack.spot, false); this.sites.set('pack', site); this.scene.add(site.root) }
+    this.soulStreams = new SoulStreams(this.scene)
+    for (const [x, y, z] of INKWELL_PLACES) {
+      const node = graph.nearest(new THREE.Vector3(x, y, z), 4)
+      if (node < 0) { console.warn(`Dead Ink: nowhere for an inkwell near ${x}, ${z}`); continue }
+      const well = new Inkwell(graph.point(node))
+      this.wells.push(well)
+      this.scene.add(well.root)
+    }
     for (const { gate, home } of TRAP_GATES) {
       const spec = ZONE_GATES.find(g => g.id === gate)
       if (!spec) continue
@@ -613,7 +629,9 @@ export class ZombiesRuntime {
       targets.push({ object: machine.root, point: machine.point, kind: 'mission', descending: false, label, use: () => this.buyPerk(machine) })
     }
     const pack = this.pack, held = this.weapons.current
-    if (pack && this.packBuilt && pack.state !== 'working') {
+    if (pack && this.packBuilt && this.questStep === 'pour' && pack.state === 'idle') {
+      targets.push({ object: pack.root, point: pack.point, kind: 'mission', descending: false, label: 'Pour the three bottles of ink into the Pack-a-Punch', use: () => this.pourInk() })
+    } else if (pack && this.packBuilt && pack.state !== 'working') {
       const label = !this.power && pack.state === 'idle' ? 'Pack-a-Punch · no power' : pack.state === 'ready' && pack.held ? `Take the ${PACKED_NAMES[pack.held.name]}`
         : !held || held.special ? 'Pack-a-Punch · hold a gun to upgrade it'
         : packCost(held) === null ? 'Pack-a-Punch · fully upgraded'
@@ -629,6 +647,10 @@ export class ZombiesRuntime {
       const label = power.state === 'ready' ? 'Turn on the power'
         : this.carried.has('lever') ? 'Put the lever back on the power switch' : 'The power switch has lost its lever'
       targets.push({ object: power.root, point: power.point, kind: 'mission', descending: false, label, use: () => this.usePower(power) })
+    }
+    for (const well of this.wells) {
+      if (!well.bottleWaiting || well.point.distanceTo(eye) > 3) continue
+      targets.push({ object: well.root, point: well.point, kind: 'mission', descending: false, label: 'Take the bottle of ink', use: () => this.takeBottle(well) })
     }
     for (const trap of this.traps) {
       if (trap.point.distanceTo(eye) > 3) continue
@@ -681,6 +703,9 @@ export class ZombiesRuntime {
     this.powerSwitch?.reset()
     for (const site of this.sites.values()) site.reset()
     for (const trap of this.traps) trap.reset()
+    this.questStep = 'power'; this.bottles = 0; this.editor = null; this.editorTimer = -1
+    for (const well of this.wells) well.reset()
+    this.soulStreams?.clear()
     this.packBuilt = false
     if (this.pack) { this.pack.root.visible = false; this.removeSolid(this.pack.root) }
     this.shield = null; this.shieldOnBench = false; this.shieldBackRound = 0
@@ -818,6 +843,84 @@ export class ZombiesRuntime {
         if (Math.random() < 0.5) this.emit({ kind: 'ink-burst', position: trap.centre.clone().setY(trap.centre.y + 0.6), radius: 30 })
       }
     }
+  }
+
+  /** The quest moves on by itself as its conditions come true; the inkwells take in their souls. */
+  private updateQuest(dt: number) {
+    if (this.questStep === 'power' && this.power) this.questStep = 'pack'
+    if (this.questStep === 'pack' && this.packBuilt) {
+      this.questStep = 'wells'
+      for (const well of this.wells) well.wake()
+      this.zombieHud.announce('The inkwells are thirsty', 3.5)
+      this.hud.notify('Kill zombies near the inkwells to fill them.', 4)
+    }
+    for (const well of this.soulStreams?.update(dt) ?? []) {
+      if (well.addSoul() && well.full) {
+        this.emit({ kind: 'pack-ready', position: well.point.clone(), radius: 40 })
+        this.hud.notify('An inkwell is full. Take its bottle.', 3)
+      }
+    }
+    for (const well of this.wells) well.update(dt)
+    if (this.questStep === 'wells' && this.bottles >= this.wells.length && this.wells.length) {
+      this.questStep = 'pour'
+      this.hud.notify('Three bottles of ink. The Pack-a-Punch is waiting.', 4)
+    }
+    if (this.editorTimer > 0 && (this.editorTimer -= dt) <= 0) this.spawnEditor()
+    const souls = this.wells.reduce((sum, well) => sum + Math.min(QUEST.souls, well.souls), 0)
+    this.zombieHud.quest(questHint(this.questStep, { souls, bottles: this.bottles }))
+  }
+
+  private takeBottle(well: Inkwell) {
+    if (!this.isActive() || well.point.distanceTo(this.camera.perspective.position) > 3 || !well.takeBottle()) return false
+    this.bottles++
+    this.emit({ kind: 'pickup', position: this.player.body.position.clone(), radius: 3 })
+    this.hud.notify(`A bottle of ink (${this.bottles} of ${this.wells.length}).`, 2.5)
+    return true
+  }
+
+  private pourInk() {
+    const pack = this.pack
+    if (!this.isActive() || !pack || this.questStep !== 'pour' || !this.canReach(pack.point, pack.root)) return false
+    this.questStep = 'editor'
+    this.bottles = 0
+    this.editorTimer = QUEST.editorDelay
+    this.shockwaves.emit(pack.root.position.clone(), 6)
+    this.emit({ kind: 'boss-slam', position: pack.point.clone(), radius: 200 })
+    this.zombieHud.announce('The press is running', 3)
+    return true
+  }
+
+  /** The Editor climbs out near the Pack-a-Punch: the Brute's body, three times its health. */
+  private spawnEditor() {
+    const director = this.director, graph = this.graph, pack = this.pack
+    if (!director || !graph || !pack) return
+    graph.flow([this.player.body.position])
+    const node = graph.nearest(pack.spot.stand, 4)
+    const spot = node >= 0 ? graph.point(node).addScaledVector(pack.spot.normal, 3) : null
+    const floorSpot = spot && director.navigation.floor(spot) ? spot : pickSpawn(graph, this.player.world, { near: 10, far: 30, eyes: [] }, this.random)
+    const feet = this.player.body.position
+    const health = Math.round(BOSS.health(this.rounds.round) * QUEST.editorHealth * DIFFICULTY[this.difficulty].health)
+    const editor = floorSpot && director.spawn(floorSpot, health, 'run', Math.atan2(feet.x - floorSpot.x, feet.z - floorSpot.z), true, true)
+    if (!editor) { this.editorTimer = 1; return }
+    this.editor = editor
+    this.riseMarks.emit(editor.position); this.riseMarks.emit(editor.position.clone().add(new THREE.Vector3(-0.7, 0, 0.5)))
+    this.zombieHud.announce('The Editor', 3.5)
+    this.emit({ kind: 'boss-roar', position: editor.position.clone().setY(editor.position.y + 3), radius: 250 })
+  }
+
+  /** The Editor is dead: the last edition is printed. Every perk, points, a Max Ammo and the song. */
+  private finishQuest(position: THREE.Vector3) {
+    this.editor = null
+    this.questStep = 'done'
+    this.award(2500)
+    for (const kind of Object.keys(PERKS) as PerkKind[]) if (!this.perks.has(kind)) this.grantPerk(kind)
+    const at = position.clone(), floor = this.player.world.floor(at.clone().setY(at.y + 2.2), 0.1, 3)
+    if (Number.isFinite(floor)) at.y = floor
+    this.powerups.spawn('maxAmmo', at)
+    if (!this.hud.reducedMotion) this.zombieHud.flash()
+    this.zombieHud.announce('The Last Edition is printed', 6, 'powerup')
+    this.hud.notify('You finished Dead Ink\'s story. Every perk is yours.', 6)
+    this.music.sting('song')
   }
 
   private removeSolid(owner: THREE.Object3D) {
@@ -1032,7 +1135,7 @@ export class ZombiesRuntime {
   /** The menu theme over menus, nothing in a round, the Brute's track while it lives, the requiem after death. */
   private updateMusic() {
     this.music.setMode(this.state.phase === 'dead' ? 'dead' : !this.player.playing ? 'menu'
-      : this.brute && this.brute.state === 'chase' ? 'boss' : 'play')
+      : (this.brute && this.brute.state === 'chase') || (this.editor && this.editor.state === 'chase') ? 'boss' : 'play')
   }
 
   /**
@@ -1146,6 +1249,16 @@ export class ZombiesRuntime {
   /** A kill by the player: the Brute pays and always leaves a Max Ammo; others may drop a power-up. */
   private killed(position: THREE.Vector3, zombie?: Zombie, weapon?: WeaponItem | null) {
     this.lastKillAt = position.clone()
+    if (this.questStep === 'wells' && zombie && !zombie.boss) {
+      // The nearest thirsty inkwell in reach takes this one's ink.
+      let best: Inkwell | null = null, bestDistance: number = QUEST.soulRadius
+      for (const well of this.wells) {
+        const distance = well.root.position.distanceTo(position)
+        if (well.awake && !well.full && distance < bestDistance) { best = well; bestDistance = distance }
+      }
+      if (best) this.soulStreams?.emit(position.clone().setY(position.y + 1.2), best)
+    }
+    if (zombie && zombie === this.editor) { this.finishQuest(position); return }
     if (weapon?.packed) this.inkBurst(position, weapon.packLevel ?? 1)
     if (zombie && zombie === this.brute) {
       this.brute = null
@@ -1544,6 +1657,7 @@ export class ZombiesRuntime {
       for (const site of this.sites.values()) site.update(dt)
       this.powerSwitch?.update(dt)
       this.updateTraps(dt)
+      this.updateQuest(dt)
       for (const machine of this.perkMachines) {
         machine.update(dt)
         // Walk up to a machine and it plays its jingle (not again for a while).
@@ -1621,7 +1735,8 @@ export class ZombiesRuntime {
     this.indicator.update(running, this.camera.perspective.position, yaw)
     this.hotbar.update(this.weapons.slots, this.weapons.selectedSlot)
     this.zombieHud.update(running, this.state.round, this.state.points)
-    this.zombieHud.boss(this.brute && this.brute.state === 'chase' ? this.brute.health / this.brute.maxHealth : null)
+    const boss = this.editor && this.editor.state === 'chase' ? this.editor : this.brute && this.brute.state === 'chase' ? this.brute : null
+    this.zombieHud.boss(boss ? boss.health / boss.maxHealth : null, boss === this.editor ? 'THE EDITOR' : 'THE BRUTE')
     this.zombieHud.grenades(this.grenadeCount, this.dollCount)
     this.updateMusic()
     // The heart shows health as a share of your maximum, which Thick Ink raises.
@@ -1650,6 +1765,8 @@ export class ZombiesRuntime {
     for (const site of this.sites.values()) site.dispose()
     this.powerSwitch?.dispose()
     for (const trap of this.traps) trap.dispose()
+    for (const well of this.wells) well.dispose()
+    this.soulStreams?.dispose()
     this.audio.dispose(); this.music.dispose(); this.hud.dispose()
     this.player.movementLocked = false; this.player.onPlayingChange = () => {}; this.player.lookSensitivity = () => 1
     this.player.actions.extraTargets = () => []; this.player.actions.onAction = () => {}
