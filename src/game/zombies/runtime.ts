@@ -35,6 +35,9 @@ import { GRENADE, Grenades } from './grenades'
 import { INK_RAY, InkRayBolts } from './wonder'
 import { REVIVE, SecondDraftRevive } from './revive'
 import { DECOY, DollBuy, animateDoll, inkDoll } from './decoy'
+import { ARMORY_PAGE, awardGame, deadInkHome, installCosmetics } from './cosmetics'
+import { addDressing } from './dressing'
+import { Explosion, MushroomCloud, createGrenadeModel } from './vfx'
 import { POWERUP_INFO, PowerupDrops, PowerupDropper } from './powerups'
 import { SEALED, ZoneGates, type ZoneGate } from './zones'
 import { MACHINE_PLACES, PACK, PERKS, PERK_EFFECT, PERK_LIMIT, PackAPunch, PackedLook, PerkBottle, PerkMachine, type PerkKind } from './perks'
@@ -121,6 +124,7 @@ export const DEAD_INK_COPY: MenuCopy = {
   missionPage: false,
   modeLink: { label: 'Hostage mission', href: './' },
   controls: [['Knife', 'V'], ['Grenade', 'Q or G'], ['Ink Doll', 'T'], ['Switch weapon', 'Wheel']],
+  pages: [ARMORY_PAGE], home: deadInkHome,
 }
 
 /**
@@ -194,6 +198,11 @@ export class ZombiesRuntime {
   private dollCooldown = 0
   private dollClap = 0
   private dollBuy: DollBuy | null = null
+  private uninstallCosmetics: () => void
+  /** Grenade blasts and the Nuke's mushroom cloud; the junk, graffiti and hidden details about the map. */
+  readonly explosions: Explosion
+  readonly nukeCloud: MushroomCloud
+  private undress: (() => void) | null = null
   /** An Ink Storm round is on; the last kill's place, for its Max Ammo. */
   private storm = false
   private lastKillAt: THREE.Vector3 | null = null
@@ -229,6 +238,7 @@ export class ZombiesRuntime {
     this.weapons = new FirstPersonWeapons({ scene, camera: camera.perspective, world: player.world,
       aimDistance: (origin, direction, maxDistance) => this.director?.aimDistance(origin, direction, maxDistance) ?? maxDistance,
       emit: event => this.emit(event), onShot: shot => this.shot(shot) })
+    this.uninstallCosmetics = installCosmetics(this.weapons)
     this.blood = new MissionBlood(scene, player.world, id => {
       const zombie = this.director?.zombies.find(z => z.id === id)
       if (!zombie || zombie.state !== 'dead' || zombie.actor.deathClip !== 'dieShotgun') return null
@@ -238,7 +248,9 @@ export class ZombiesRuntime {
     this.riseMarks = new RiseMarks(scene)
     this.sparks = new MuzzleSparks(scene)
     this.shockwaves = new Shockwaves(scene)
-    this.grenades = new Grenades(scene, player.world)
+    this.explosions = new Explosion(scene, player.world)
+    this.nukeCloud = new MushroomCloud(scene)
+    this.grenades = new Grenades(scene, player.world, createGrenadeModel)
     this.dolls = new Grenades(scene, player.world, inkDoll, { fuse: DECOY.lure + 1, upright: true })
     this.bolts = new InkRayBolts(scene, player.world, (origin, direction, max) => this.director?.aimDistance(origin, direction, max) ?? Infinity)
     this.powerups = new PowerupDrops(scene)
@@ -325,6 +337,12 @@ export class ZombiesRuntime {
       const floor = this.player.world.floor(this.spawn.clone().setY(0.6), 1, 1.5, 0.28)
       if (Number.isFinite(floor)) this.spawn.y = floor
       this.placeStations()
+      // Junk, graffiti and hidden details, kept off every station, the doll wall and the skulls.
+      const keepClear = [...this.wallBuys.map(b => b.spot.wall), ...this.boxSpots.map(s => s.wall),
+        ...this.perkMachines.map(m => m.spot.wall), ...(this.pack ? [this.pack.spot.wall] : []),
+        ...(this.dollBuy ? [this.dollBuy.spot.wall] : []), ...this.skulls.map(s => s.object.position)]
+      try { this.undress = addDressing(this.scene, this.player.world, seeded(0xDEAD1), keepClear) }
+      catch (error) { console.warn('Dead Ink: dressing failed', error) }
       this.startGame()
       this.ready = true; this.hud.ready(); this.invalidate()
     } catch (error) {
@@ -414,7 +432,7 @@ export class ZombiesRuntime {
     this.player.movementLocked = false
     this.blood.restore(undefined)
     this.stepTime = 0; this.interactionTime = 0; this.hitFlash = 0; this.lastCaptionAt = -100; this.wheelAmount = 0
-    this.bulletTrails.clear(); this.impacts.clear(); this.riseMarks.clear(); this.sparks.clear(); this.shockwaves.clear(); this.powerups.clear(); this.hits.clear(); this.indicator.clear(); this.zombieHud.clear(); this.hud.reset()
+    this.bulletTrails.clear(); this.impacts.clear(); this.riseMarks.clear(); this.sparks.clear(); this.shockwaves.clear(); this.explosions.clear(); this.nukeCloud.clear(); this.powerups.clear(); this.hits.clear(); this.indicator.clear(); this.zombieHud.clear(); this.hud.reset()
     this.startGame()
     this.invalidate()
   }
@@ -601,9 +619,7 @@ export class ZombiesRuntime {
       this.hits.hit(hit.reaction.point, hit.dealt, hit.zombie.id, false, hit.lethal)
       if (hit.lethal) { this.state.kills++; this.killed(hit.zombie.position, hit.zombie) }
     }
-    this.shockwaves.emit(at, DECOY.radius)
-    this.riseMarks.emit(at)
-    this.sparks.emit(at.clone().setY(at.y + 0.2), new THREE.Vector3(0, 1, 0), 14)
+    this.explosions.emit(at, DECOY.radius)
     this.emit({ kind: 'grenade-blast', position: at.clone(), radius: 120 })
   }
 
@@ -907,6 +923,10 @@ export class ZombiesRuntime {
         this.state.kills += killed
         this.award(POWERUPS.nukePoints)
         if (!this.hud.reducedMotion) this.zombieHud.flash()
+        // The mushroom cloud, far off ahead of you on the horizon.
+        const forward = this.camera.perspective.getWorldDirection(new THREE.Vector3()).setY(0)
+        if (forward.lengthSq() < 1e-4) forward.set(0, 0, -1)
+        this.nukeCloud.trigger(this.player.body.position.clone().addScaledVector(forward.normalize(), 230).setY(0))
         this.emit({ kind: 'nuke', position: this.player.body.position.clone(), radius: 200 })
         break
       }
@@ -1031,16 +1051,14 @@ export class ZombiesRuntime {
     const distance = eye.distanceTo(at)
     if (distance < GRENADE.selfRadius && this.player.world.visible(at.clone().setY(at.y + 0.3), eye, new THREE.Object3D()))
       this.damage(Math.round(GRENADE.selfDamage * (1 - distance / GRENADE.selfRadius)), 'zombie', at.clone())
-    this.shockwaves.emit(at, GRENADE.radius)
-    this.riseMarks.emit(at)
-    this.sparks.emit(at.clone().setY(at.y + 0.2), new THREE.Vector3(0, 1, 0), 10)
+    this.explosions.emit(at, GRENADE.radius)
     this.emit({ kind: 'grenade-blast', position: at.clone(), radius: 120 })
   }
 
   knife() {
     if (!this.isActive() || !this.director || this.knifeCooldown > 0 || this.revive.down) return false
     this.knifeCooldown = KNIFE.cooldown
-    this.weapons.cancel()
+    this.weapons.knifeSwing()
     const eye = this.camera.perspective.getWorldPosition(new THREE.Vector3())
     const forward = this.camera.perspective.getWorldDirection(new THREE.Vector3())
     const hit = this.director.knife(eye, forward, KNIFE.range, KNIFE.damage, !!this.timers.instaKill)
@@ -1083,6 +1101,9 @@ export class ZombiesRuntime {
     this.player.body.velocity.set(0, 0, 0)
     this.audio.beginDeath()
     this.hud.setScoped(false); this.hud.clearThreat(); this.hud.setDeath(this.death)
+    // Ink for the Armory: round x 10 + kills + headshots x 2.
+    const ink = awardGame({ round: this.state.round, kills: this.state.kills, headshots: this.state.headshots })
+    this.hud.notify(`+${ink} Ink`, 3)
   }
 
   // ---------------------------------------------------------------- zombies
@@ -1263,6 +1284,7 @@ export class ZombiesRuntime {
       if (boxEvent === 'landed' && this.box) this.emit({ kind: 'box-offer', position: this.box.point.clone(), radius: 25 })
       if (boxEvent === 'moved') this.moveBox()
       this.blood.update(dt); this.impacts.update(dt); this.riseMarks.update(dt); this.sparks.update(dt); this.shockwaves.update(dt)
+      this.explosions.update(dt); this.nukeCloud.update(dt)
       this.zones?.update(dt)
       this.grenadeCooldown = Math.max(0, this.grenadeCooldown - dt)
       for (const at of this.grenades.update(dt)) this.grenadeBlast(at)
@@ -1287,6 +1309,7 @@ export class ZombiesRuntime {
       this.player.world.refresh()
       this.director.update(dt, target())
       this.blood.update(dt); this.impacts.update(dt); this.riseMarks.update(dt)
+      this.explosions.update(dt); this.nukeCloud.update(dt)
     }
     const reactionActive = this.isActive()
     const yaw = new THREE.Euler().setFromQuaternion(this.camera.perspective.quaternion, 'YXZ').y
@@ -1340,7 +1363,7 @@ export class ZombiesRuntime {
     this.pack?.dispose(); this.bottle.dispose(); this.packedLook.dispose()
     this.director?.dispose()
     this.hits.dispose(); this.indicator.dispose(); this.hotbar.dispose(); this.zombieHud.dispose()
-    this.bulletTrails.dispose(); this.weapons.dispose(); this.blood.dispose(); this.impacts.dispose(); this.riseMarks.dispose(); this.sparks.dispose(); this.shockwaves.dispose(); this.grenades.dispose(); this.dolls.dispose(); this.dollBuy?.dispose(); this.bolts.dispose(); this.powerups.dispose()
+    this.uninstallCosmetics(); this.bulletTrails.dispose(); this.weapons.dispose(); this.blood.dispose(); this.impacts.dispose(); this.riseMarks.dispose(); this.sparks.dispose(); this.shockwaves.dispose(); this.explosions.dispose(); this.nukeCloud.dispose(); this.undress?.(); this.grenades.dispose(); this.dolls.dispose(); this.dollBuy?.dispose(); this.bolts.dispose(); this.powerups.dispose()
     for (const skull of this.skulls) skull.object.removeFromParent()
     delete document.body.dataset.deadInkStorm
     this.audio.dispose(); this.music.dispose(); this.hud.dispose()

@@ -1,0 +1,81 @@
+/*
+ * The Dead Ink menu: the same pages as the hostage mission's, dressed as a zombies title screen. Everything
+ * is scoped under body[data-dead-ink], which only Dead Ink sets, so the mission's menu is untouched.
+ * Ink and paper; red only on the title's wound and for danger.
+ */
+
+/* A wash of slowly drifting ink behind the card. Transform-only animation keeps it cheap. */
+body[data-dead-ink][data-mission="true"][data-mode="walk"] #walk-pause { isolation: isolate; background: #f6f5f1e6; }
+body[data-dead-ink] #walk-pause::before, body[data-dead-ink] #walk-pause::after {
+  content: ''; position: fixed; inset: -12%; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(ellipse 22% 16% at 12% 18%, #0000001f 0 40%, transparent 70%),
+    radial-gradient(ellipse 16% 22% at 88% 14%, #00000017 0 35%, transparent 72%),
+    radial-gradient(ellipse 26% 18% at 82% 86%, #0000001c 0 38%, transparent 70%),
+    radial-gradient(ellipse 14% 12% at 18% 84%, #d4332a14 0 40%, transparent 72%),
+    radial-gradient(ellipse 9% 7% at 64% 40%, #00000010 0 50%, transparent 75%);
+  animation: dead-ink-drift 38s ease-in-out infinite alternate;
+}
+body[data-dead-ink] #walk-pause::after {
+  background:
+    radial-gradient(circle at 30% 60%, #00000012 0 3px, transparent 4px),
+    radial-gradient(circle at 72% 30%, #00000014 0 2px, transparent 3px);
+  background-size: 190px 170px, 260px 230px;
+  animation-duration: 55s; animation-direction: alternate-reverse;
+}
+@keyframes dead-ink-drift {
+  from { transform: translate3d(-2%, -1%, 0) scale(1) rotate(0deg); }
+  to { transform: translate3d(2%, 1.5%, 0) scale(1.08) rotate(2deg); }
+}
+body[data-dead-ink][data-reduced-motion="true"] #walk-pause::before,
+body[data-dead-ink][data-reduced-motion="true"] #walk-pause::after { animation: none; }
+
+/* The card: heavy paper with a hard ink shadow. */
+body[data-dead-ink][data-mission="true"] .walk-card { border: 2.5px solid var(--ink); border-radius: 6px 3px 7px 4px; box-shadow: 7px 8px 0 var(--ink); }
+
+/* The title: knocked out of a splash of ink, with one red wound under it. */
+body[data-dead-ink][data-mission="true"] .walk-card[data-page="home"] h1 {
+  position: relative; display: inline-block; margin: 2px 0 20px -8px; padding: 14px 30px 16px 22px;
+  font: 700 52px/0.95 var(--hand); letter-spacing: 0.01em; white-space: nowrap; max-width: calc(100% + 8px); color: var(--paper); transform: rotate(-2.5deg);
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 140' preserveAspectRatio='none'%3E%3Cpath d='M18 40C30 12 90 18 130 14s110-12 160-4 92 4 96 34-6 42 2 62-30 30-90 26-120 4-170 2-104 6-114-20 18-26 4-44-14-18 0-30z' fill='%23000'/%3E%3Ccircle cx='392' cy='22' r='7' fill='%23000'/%3E%3Ccircle cx='376' cy='128' r='5' fill='%23000'/%3E%3Ccircle cx='10' cy='118' r='6' fill='%23000'/%3E%3Ccircle cx='28' cy='132' r='3' fill='%23000'/%3E%3Cpath d='M300 116c2 10 0 18 4 22 4-4 2-12 3-22z' fill='%23000'/%3E%3Cpath d='M92 118c0 8-2 14 1 18 3-4 3-10 3-18z' fill='%23000'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+  text-shadow: none;
+}
+body[data-dead-ink][data-mission="true"] .walk-card[data-page="home"] h1::after {
+  content: ''; position: absolute; left: 12%; right: 16%; bottom: 7px; height: 4px; border-radius: 3px;
+  background: #d4332a; transform: rotate(-2deg);
+}
+body[data-dead-ink][data-mission="true"] .walk-card #mission-premise { font: 15px/1.55 var(--notes); color: var(--ink); }
+
+/* Buttons: bold ink outlines that fill with ink from the left on hover. */
+body[data-dead-ink][data-mission="true"] .walk-card .menu-primary,
+body[data-dead-ink][data-mission="true"] #walk-start,
+body[data-dead-ink][data-mission="true"] .walk-card .menu-secondary {
+  position: relative; min-height: 54px; padding: 14px 20px; border: 2.5px solid var(--ink); border-radius: 4px 3px 5px 3px;
+  font: 700 18px/1.2 var(--notes); letter-spacing: 0.02em; color: var(--ink);
+  background: linear-gradient(90deg, var(--ink) 50%, var(--paper) 50%) right / 205% 100% no-repeat;
+  transition: background-position 0.28s cubic-bezier(0.3, 0.7, 0.2, 1), color 0.2s;
+}
+body[data-dead-ink][data-mission="true"] .walk-card .menu-primary:hover:not(:disabled),
+body[data-dead-ink][data-mission="true"] #walk-start:hover:not(:disabled),
+body[data-dead-ink][data-mission="true"] .walk-card .menu-secondary:hover:not(:disabled),
+body[data-dead-ink][data-mission="true"] .walk-card .menu-primary:focus-visible,
+body[data-dead-ink][data-mission="true"] #walk-start:focus-visible { background-position: left; color: var(--paper); }
+/* The first thing to press is already inked. */
+body[data-dead-ink][data-mission="true"] #walk-start:not(:disabled),
+body[data-dead-ink][data-mission="true"] #mission-retry { background-position: left; color: var(--paper); box-shadow: 4px 4px 0 #d4332a; }
+body[data-dead-ink][data-mission="true"] #walk-start:not(:disabled):hover,
+body[data-dead-ink][data-mission="true"] #mission-retry:hover { box-shadow: 6px 6px 0 #d4332a; transform: translate(-1px, -1px); }
+body[data-dead-ink][data-mission="true"] .walk-card button:disabled { background: var(--paper-shade); color: var(--ink-muted); border-color: var(--ink-rule); box-shadow: none; }
+body[data-dead-ink][data-mission="true"] .walk-card .menu-quiet { font-weight: 600; color: var(--ink); }
+
+body[data-dead-ink] .mission-menu-links { border-top: 2px solid var(--ink); flex-wrap: wrap; }
+body[data-dead-ink] .mission-menu-links button { font-weight: 700; color: var(--ink); }
+body[data-dead-ink] .mission-menu-links button[data-menu-open="armory"] { padding: 2px 10px; border: 2px solid var(--ink); border-radius: 3px 4px 3px 5px; }
+body[data-dead-ink] .mission-menu-links button[data-menu-open="armory"]:hover { background: var(--ink); color: var(--paper); text-decoration: none; }
+body[data-dead-ink][data-mission="true"] .walk-card h2 { font-weight: 700; }
+
+body[data-dead-ink][data-reduced-motion="true"] .walk-card :is(.menu-primary, .menu-secondary, #walk-start) { transition: none; }
+@media (max-width: 540px) {
+  body[data-dead-ink][data-mission="true"] .walk-card[data-page="home"] h1 { font-size: 40px; padding: 12px 22px 14px 16px; }
+  body[data-dead-ink][data-mission="true"] .walk-card { box-shadow: 4px 5px 0 var(--ink); }
+}

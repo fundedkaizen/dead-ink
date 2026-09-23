@@ -1,6 +1,7 @@
 import { missionObjective, type MissionState } from './mission'
 
-type MenuPage = 'home' | 'mission' | 'controls' | 'settings' | 'vr' | 'restart'
+/** The built-in pages, plus any a mode adds through `MenuCopy.pages`. */
+type MenuPage = 'home' | 'mission' | 'controls' | 'settings' | 'vr' | 'restart' | (string & {})
 type MenuCallbacks = { retry: () => void; restart: () => void }
 
 /** What the menu reads from game state. The hostage mission passes its full MissionState. */
@@ -26,7 +27,13 @@ export type MenuCopy = {
   restartWarning?: string
   /** Extra rows for the Controls page, as [action, key]. */
   controls?: [string, string][]
+  /** Pages a mode adds (Dead Ink's Armory), each opened from a link on the home page. */
+  pages?: MenuExtraPage[]
+  /** Fills a slot on the home page under the premise (Dead Ink's last game and Ink). */
+  home?: (slot: HTMLElement) => void
 }
+/** `build` fills the page once; `show` runs each time it opens. The page's own heading is `title`. */
+export type MenuExtraPage = { id: string; label: string; title: string; build: (body: HTMLElement) => void; show?: () => void }
 export const MISSION_COPY: MenuCopy = {
   title: 'Operation Safe Return', premise: 'Find the hostage. Get out together.',
   begin: 'Begin mission', resume: 'Resume mission', restart: 'Restart mission',
@@ -64,6 +71,7 @@ export class MissionMenu {
       <section data-menu-page="home">
         <h1 id="mission-menu-title">${copy.title}</h1>
         <p id="mission-premise">${copy.premise}</p>
+        ${copy.home ? '<div class="menu-home-extra"></div>' : ''}
         <div id="mission-debrief" role="status" hidden></div>
         <div class="mission-actions">
           <div class="mission-start-slot"></div>
@@ -73,6 +81,7 @@ export class MissionMenu {
         <nav class="mission-menu-links" aria-label="Mission menu">
           ${copy.missionPage === false ? '' : '<button data-menu-open="mission">Mission</button>'}
           ${copy.modeLink ? `<button data-mode-href="${copy.modeLink.href}">${copy.modeLink.label}</button>` : ''}
+          ${(copy.pages ?? []).map(page => `<button data-menu-open="${page.id}">${page.label}</button>`).join('')}
           <button data-menu-open="controls">Controls</button>
           <button data-menu-open="settings">Settings</button>
         </nav>
@@ -133,11 +142,18 @@ export class MissionMenu {
           <button id="mission-cancel-restart" class="menu-primary">Cancel</button>
           <button id="mission-confirm-restart" class="menu-secondary">${copy.restart}</button>
         </div>
-      </section>`
+      </section>
+      ${(copy.pages ?? []).map(page => `<section data-menu-page="${page.id}" hidden>
+        <button class="menu-back" data-menu-back><span aria-hidden="true">←</span> Back <kbd>Esc</kbd></button>
+        <h2 id="${page.id}-page-title">${page.title}</h2>
+        <div class="menu-extra-page"></div>
+      </section>`).join('')}`
     this.card.querySelector('.mission-start-slot')!.append(start)
     // Move the existing controls so the WebXR click handler keeps the browser's
     // user activation and session lifecycle, inside the same menu.
     this.card.querySelector('.mission-vr-slot')!.append(document.querySelector('#vr-panel')!)
+    for (const page of copy.pages ?? []) page.build(this.element(`[data-menu-page="${page.id}"] .menu-extra-page`))
+    if (copy.home) copy.home(this.element('.menu-home-extra'))
     this.title = this.element('#mission-menu-title')
     this.premise = this.element('#mission-premise')
     this.retry = this.element('#mission-retry')
@@ -174,6 +190,7 @@ export class MissionMenu {
     this.card.querySelectorAll<HTMLElement>('[data-menu-page]').forEach(section => { section.hidden = section.dataset.menuPage !== page })
     this.card.setAttribute('aria-labelledby', page === 'home' ? 'mission-menu-title' : `${page}-page-title`)
     this.pause.scrollTop = 0
+    this.copy.pages?.find(extra => extra.id === page)?.show?.()
     if (focus) {
       if (page === 'home') this.focusPrimary()
       else this.element<HTMLButtonElement>(`[data-menu-page="${page}"] ${page === 'restart' ? '#mission-cancel-restart' : '[data-menu-back]'}`).focus({ preventScroll: true })

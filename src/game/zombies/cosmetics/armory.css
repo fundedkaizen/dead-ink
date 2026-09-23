@@ -1,0 +1,72 @@
+/* Dead Ink's Armory page and home record. Ink on paper; colour only for rarity. */
+
+body[data-mission="true"] .walk-card[data-page="armory"] { width: min(820px, 100%); }
+.armory { display: grid; gap: 18px; }
+.armory-bank { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 16px; }
+.armory-ink { display: inline-flex; align-items: center; gap: 8px; font: 700 20px/1 var(--notes); color: var(--ink); }
+.armory-ink svg { width: 22px; height: 22px; }
+.armory-ink strong { font: 700 34px/1 var(--hand); font-variant-numeric: tabular-nums; }
+body[data-mission="true"] .walk-card .armory-bank small { margin: 0; font: 12px/1.4 var(--notes); color: var(--ink-muted); }
+
+.armory-case { padding: 16px; border: 2px solid var(--ink); border-radius: 5px 3px 6px 4px; background: var(--paper); box-shadow: 4px 5px 0 var(--ink); }
+.armory-case-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.armory-case h3 { margin: 0; font: 700 24px/1.1 var(--hand); color: var(--ink); }
+body[data-mission="true"] .walk-card .armory-odds { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 6px 0 0; font: 11px/1.4 var(--notes); color: var(--ink-muted); }
+.armory-odds span { padding-left: 9px; border-left: 3px solid var(--rarity); }
+body[data-mission="true"] .walk-card .armory-open { min-height: 46px; padding: 10px 18px; font: 700 15px/1 var(--notes); color: var(--paper); background: var(--ink); border: 2px solid var(--ink); border-radius: 4px 3px 5px 3px; cursor: pointer; }
+body[data-mission="true"] .walk-card .armory-open:hover:not(:disabled) { background: #2b2b2b; }
+body[data-mission="true"] .walk-card .armory-open:disabled { background: var(--paper-shade); color: var(--ink-muted); border-color: var(--ink-rule); cursor: not-allowed; }
+
+/* The reel: a strip of tiles slides under a fixed marker and stops on the won item. */
+.armory-reel { position: relative; margin-top: 14px; height: 138px; overflow: hidden; border: 1px solid var(--ink-rule); border-radius: 4px;
+  background: repeating-linear-gradient(90deg, #fafafa 0 119px, #eee 119px 120px);
+  mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent); }
+.armory-reel[hidden] { display: none; }
+.armory-strip { position: absolute; left: 0; top: 9px; display: flex; will-change: transform; }
+.armory-marker { position: absolute; left: 50%; top: 0; bottom: 0; width: 3px; margin-left: -1.5px; background: var(--ink); }
+.armory-marker::before, .armory-marker::after { content: ''; position: absolute; left: -6px; border: 7.5px solid transparent; }
+.armory-marker::before { top: 0; border-top-color: var(--ink); }
+.armory-marker::after { bottom: 0; border-bottom-color: var(--ink); }
+.armory-tile { flex: 0 0 112px; height: 118px; margin-right: 8px; display: grid; grid-template-rows: 1fr auto; justify-items: center; align-items: center;
+  padding: 8px 6px 10px; background: var(--paper); border: 1.5px solid var(--ink); border-bottom: 6px solid var(--rarity); border-radius: 4px 3px 5px 3px; color: var(--ink); }
+.armory-tile svg { width: 64px; height: 64px; }
+.armory-tile span { font: 600 12px/1.2 var(--notes); text-align: center; }
+.armory-tile.winner { box-shadow: 0 0 0 3px var(--rarity), 0 0 26px 6px var(--rarity); position: relative; z-index: 1; }
+.armory-reel.won { border-color: var(--rarity); box-shadow: inset 0 0 40px -6px var(--rarity); }
+body[data-mission="true"] .walk-card .armory-result { min-height: 24px; margin: 12px 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font: 15px/1.4 var(--notes); color: var(--ink); }
+body[data-mission="true"] .walk-card .armory-equip { min-height: 34px; padding: 4px 14px; border: 2px solid var(--ink); background: var(--paper); color: var(--ink); font: 700 13px/1 var(--notes); border-radius: 3px; cursor: pointer; }
+body[data-mission="true"] .walk-card .armory-equip:hover { background: var(--ink); color: var(--paper); }
+
+.armory-tabs, .armory-guns { display: flex; flex-wrap: wrap; gap: 6px; }
+.armory-guns[hidden] { display: none; }
+body[data-mission="true"] .walk-card :is(.armory-tabs, .armory-guns) button { min-height: 36px; padding: 6px 14px; border: 1.5px solid var(--ink-rule); background: var(--paper); color: var(--ink); border-radius: 3px 5px 3px 4px; font: 600 13px/1 var(--notes); cursor: pointer; }
+body[data-mission="true"] .walk-card :is(.armory-tabs button[aria-selected="true"], .armory-guns button[aria-pressed="true"]) { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+body[data-mission="true"] .walk-card .armory-hint { margin: -6px 0 0; font-size: 12px; }
+.armory-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 10px; }
+body[data-mission="true"] .walk-card .armory-item { min-height: 0; display: grid; justify-items: center; gap: 2px; padding: 10px 8px 12px; background: var(--paper); color: var(--ink);
+  border: 1.5px solid var(--ink); border-bottom: 5px solid var(--rarity); border-radius: 4px 3px 5px 3px; cursor: pointer; text-align: center; }
+.armory-item svg { width: 58px; height: 58px; }
+.armory-item:hover:not([aria-disabled]) { transform: translateY(-2px); box-shadow: 3px 4px 0 var(--ink); }
+.armory-item.worn { box-shadow: 0 0 0 3px var(--rarity); }
+.armory-item[aria-disabled] { cursor: default; opacity: 0.42; filter: grayscale(1); }
+.armory-name { font: 700 13px/1.2 var(--notes); }
+.armory-rarity { font: 11px/1.2 var(--notes); color: var(--ink-muted); }
+
+/* Home page record, under the premise. */
+.dead-ink-record { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px 26px; margin: 18px 0 0; padding: 14px 0 0; border-top: 2px solid var(--ink); }
+.dead-ink-record > div { display: grid; align-content: start; gap: 4px; }
+.dead-ink-record span { font: 11px/1.2 var(--notes); color: var(--ink-muted); text-transform: uppercase; letter-spacing: 0.08em; }
+.dead-ink-record strong { font: 700 16px/1.2 var(--notes); color: var(--ink); font-variant-numeric: tabular-nums; }
+body[data-mission="true"] .walk-card .dead-ink-record small { margin: 0; font: 12px/1.2 var(--notes); color: var(--ink-muted); }
+.dead-ink-best b { display: block; height: 34px; color: #d4332a; }
+.dead-ink-best svg { width: 34px; height: 34px; }
+.dead-ink-best path { fill: none; stroke: currentColor; stroke-width: 5.5; stroke-linecap: round; }
+.dead-ink-best em { font: 700 32px/1 var(--hand); font-style: normal; }
+
+body[data-reduced-motion="true"] .armory-item:hover:not([aria-disabled]) { transform: none; }
+@media (max-width: 540px) {
+  .armory-case { padding: 12px; }
+  .armory-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dead-ink-record { grid-template-columns: 1fr 1fr; }
+}
+body[data-mission="true"] .walk-card .armory-result:empty { display: none; }
