@@ -50,7 +50,7 @@ export class WallBuy {
 export type BoxState = 'idle' | 'spinning' | 'offering' | 'leaving'
 
 /** How long the teddy bear sits there before the box lifts off, and how long the lift takes. */
-export const BOX_TEDDY = { show: 1.8, lift: 1.8 } as const
+export const BOX_TEDDY = { show: 1.2, spin: 3, lift: 1.4 } as const
 /** The box's marker: a tall pale-gold column over wherever it stands, as Call of Duty's light beam. */
 const BOX_LIGHT = 0xe8c46a
 
@@ -67,7 +67,7 @@ export class MysteryBox {
   timer = 0
   /** Spins at this spot: the teddy only comes after a few. */
   uses = 0
-  offer: { name: WeaponName; rarity: Rarity } | null = null
+  offer: { name: WeaponName; rarity: Rarity; special?: 'rayGun' } | null = null
   private teddyNext = false
   private lid = new THREE.Group()
   private body = new THREE.Group()
@@ -81,6 +81,7 @@ export class MysteryBox {
   private floatingName: WeaponName | null = null
   private beam: THREE.Group | null = null
   private cycle = 0
+  private cycleLength = 0.07
   private baseY: number
 
   constructor(spot: WallSpot) {
@@ -132,6 +133,7 @@ export class MysteryBox {
     this.root.position.copy(centre)
     this.root.rotation.y = facing(spot.normal)
     this.body.position.set(0, 0, 0)
+    this.body.rotation.set(0, 0, 0)
     this.body.visible = true
     this.point.copy(centre).setY(spot.stand.y + height + 0.1).addScaledVector(spot.normal, depth / 2)
     this.uses = 0
@@ -139,7 +141,7 @@ export class MysteryBox {
   }
 
   /** Start a spin with the gun it will land on, or with the teddy bear. */
-  spin(result: { name: WeaponName; rarity: Rarity }, teddy = false) {
+  spin(result: { name: WeaponName; rarity: Rarity; special?: 'rayGun' }, teddy = false) {
     this.offer = teddy ? null : result
     this.teddyNext = teddy
     this.state = 'spinning'
@@ -191,7 +193,7 @@ export class MysteryBox {
         const pool = spinNames.length ? spinNames : [this.offer?.name ?? 'pistol']
         const next = pool[Math.floor(Math.random() * pool.length)]
         this.setFloating(next)
-        this.cycle = 0.07 + 0.25 * (this.timer / BOX_SPIN) ** 2
+        this.cycleLength = this.cycle = 0.07 + 0.25 * (this.timer / BOX_SPIN) ** 2
       }
       if (this.timer >= BOX_SPIN) {
         this.timer = 0
@@ -201,35 +203,42 @@ export class MysteryBox {
           this.teddy.visible = true
         } else {
           this.state = 'offering'
-          this.setFloating(this.offer!.name, this.offer!.rarity)
+          this.setFloating(this.offer!.name, this.offer!.rarity, this.offer!.special)
           return 'landed'
         }
       }
     } else if (this.state === 'leaving') {
-      // The bear sits there; the lid slams; the box shudders and lifts away into the sky.
+      // The bear sits there; the lid slams; the box spins up faster and faster, rising a little, and
+      // then shoots off into the sky.
       this.teddy.position.set(0, this.baseY + 0.3 + Math.sin(this.timer * 3) * 0.04, 0)
       this.teddy.rotation.y = Math.sin(this.timer * 2) * 0.4
-      const lift = Math.max(0, this.timer - BOX_TEDDY.show)
-      if (lift > 0) {
+      const spin = Math.max(0, this.timer - BOX_TEDDY.show), lift = Math.max(0, spin - BOX_TEDDY.spin)
+      if (spin > 0) {
         this.teddy.visible = false
         this.lid.rotation.x = 0
-        this.body.position.set(Math.sin(lift * 60) * 0.02 * (1 - lift / BOX_TEDDY.lift), (lift / BOX_TEDDY.lift) ** 2 * 18, 0)
+        const s = Math.min(spin, BOX_TEDDY.spin)
+        this.body.rotation.y = s * s * 2.2 + lift * 14
+        this.body.position.set(Math.sin(spin * 50) * 0.015, 0.45 * (s / BOX_TEDDY.spin) ** 2 + (lift / BOX_TEDDY.lift) ** 2 * 22, 0)
       }
-      if (lift >= BOX_TEDDY.lift) { this.body.visible = false; this.state = 'idle'; this.teddyNext = false; return 'moved' }
+      if (lift >= BOX_TEDDY.lift) { this.body.visible = false; this.body.rotation.y = 0; this.state = 'idle'; this.teddyNext = false; return 'moved' }
       return null
     } else if (this.timer >= BOX_OFFER) {
       this.close()
       return 'expired'
     }
     if (this.floating) {
+      // Side-on, like the reel of a slot machine: each gun slides up through the opening, slower and
+      // slower, until the last one stops in the middle and sinks back in as the offer runs out.
       const rise = this.state === 'spinning' ? Math.min(1, this.timer / BOX_SPIN) : 1 - Math.min(1, this.timer / BOX_OFFER) * 0.6
-      this.floating.position.set(0, this.baseY + 0.45 * rise, 0)
-      this.floating.rotation.y += dt * (this.state === 'spinning' ? 5 : 1.2)
+      const reel = this.state === 'spinning' ? 1 - this.cycle / this.cycleLength - 0.5 : 0
+      this.floating.position.set(0, this.baseY + 0.45 * rise + reel * 0.34, 0)
+      this.floating.rotation.set(0, Math.PI / 2, 0)
+      this.floating.scale.setScalar(this.state === 'spinning' ? 1 - Math.abs(reel) * 0.5 : 1 + Math.sin(this.timer * 3) * 0.02)
     }
     return null
   }
 
-  private setFloating(name: WeaponName | null, rarity?: Rarity) {
+  private setFloating(name: WeaponName | null, rarity?: Rarity, special?: 'rayGun') {
     if (name !== this.floatingName || rarity) {
       if (this.floating) { disposeGun(this.floating); this.floating = null }
       // The beam's material is shared across all loot of a colour; only its shapes are this box's.
@@ -237,7 +246,7 @@ export class MysteryBox {
       this.beam?.removeFromParent(); this.beam = null
       this.floatingName = name
       if (name) {
-        this.floating = createMissionGun(name)
+        this.floating = createMissionGun(name, special)
         this.floating.name = `Mystery box gun · ${name}`
         this.floating.userData.noCollision = true
         this.body.add(this.floating)

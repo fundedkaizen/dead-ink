@@ -34,7 +34,7 @@ export const MACHINE_PLACES: readonly [PerkKind | 'pack', [number, number, numbe
   ['doubleLine', [40, 0, 40]], ['spareNib', [125, 0, -10]], ['pack', [117, 0, -5]],
 ]
 /** Pack-a-Punch: price, how long the machine works on a gun, and how long it waits for you to take it. */
-export const PACK = { cost: PRICES.packAPunch, work: 3.2, wait: 15 } as const
+export const PACK = { cost: PRICES.packAPunch, costs: [PRICES.packAPunch, 10000, 20000], work: 3.2, wait: 15 } as const
 
 // ---------------------------------------------------------------- icons
 
@@ -458,7 +458,7 @@ function labelTexture(name: string, css: string) {
 
 /**
  * The Pack-a-Punch camo on the gun in your hands: its paper faces shimmer slowly through the colours,
- * which no rarity uses, and specks of light drift off the barrel.
+ * which no rarity uses. (Motes drifting off the barrel were too busy in play.)
  */
 export class PackedLook {
   private model: THREE.Object3D | null = null
@@ -466,8 +466,9 @@ export class PackedLook {
   private motes = new LightMotes(60, 0.018)
   private time = 0
 
-  update(dt: number, model: THREE.Object3D | null, packed: boolean) {
-    const target = packed ? model : null
+  /** `level`: 0 not upgraded; 1 a slow shimmer; 2 faster and gold-bright; 3 deep, saturated and quick. */
+  update(dt: number, model: THREE.Object3D | null, level: number) {
+    const target = level > 0 ? model : null
     if (target !== this.model) {
       this.motes.removeFromParent(); this.motes.reset()
       this.model = target
@@ -480,10 +481,10 @@ export class PackedLook {
     }
     if (!this.model || !this.material) return
     this.time += dt
-    const hue = (this.time * 0.12) % 1
-    this.material.color.setHSL(hue, 0.7, 0.74)
-    this.motes.update(dt, 16, p => p.set((Math.random() - 0.5) * 0.05, 0.06 + Math.random() * 0.05, 0.1 + Math.random() * 0.45),
-      new THREE.Color().setHSL((hue + 0.35) % 1, 0.9, 0.6), 0.22)
+    const look = [[0.12, 0.7, 0.74], [0.3, 0.85, 0.66], [0.55, 1, 0.52]][Math.min(3, level) - 1]
+    const hue = (this.time * look[0]) % 1
+    this.material.color.setHSL(hue, look[1], look[2])
+    this.motes.update(dt, 0, p => p.set(0, 0, 0), 0xffffff, 0)
   }
 
   dispose() { this.motes.dispose(); this.material?.dispose() }

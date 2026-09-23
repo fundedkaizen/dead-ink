@@ -32,6 +32,8 @@ export class ZombieHud {
   private powerupsEl = document.createElement('div')
   private powerupCells = new Map<PowerupKind, { cell: HTMLElement; time: HTMLElement }>()
   private perksEl = document.createElement('div')
+  private grenadesEl = document.createElement('div')
+  private shownGrenades = -1
   private bossEl = document.createElement('div')
   private bossFill = document.createElement('div')
   private shownBoss = -1
@@ -58,6 +60,9 @@ export class ZombieHud {
     this.bossEl.innerHTML = '<span>THE BRUTE</span><div class="dead-ink-boss-bar"></div>'
     this.bossEl.querySelector('.dead-ink-boss-bar')!.append(this.bossFill)
     this.bossEl.hidden = true
+    this.grenadesEl.className = 'dead-ink-grenades'
+    this.grenadesEl.setAttribute('role', 'status')
+    this.pointsEl.append(this.grenadesEl)
     this.root.append(this.roundEl, this.pointsEl, this.banner, this.powerupsEl, this.perksEl, this.bossEl)
     parent.append(this.root)
   }
@@ -106,6 +111,15 @@ export class ZombieHud {
       image.alt = image.title = PERKS[kind].name
       return image
     }))
+  }
+
+  /** Grenades you are carrying, as little ink frags beside your points. */
+  grenades(count: number) {
+    if (count === this.shownGrenades) return
+    this.shownGrenades = count
+    const frag = '<svg viewBox="0 0 20 24" aria-hidden="true"><rect x="7" y="1" width="6" height="4" rx="1"/><path d="M13 4 L17 9" /><ellipse cx="10" cy="14" rx="7" ry="8.5"/><line x1="3" y1="14" x2="17" y2="14" class="band"/></svg>'
+    this.grenadesEl.innerHTML = frag.repeat(Math.max(0, count))
+    this.grenadesEl.setAttribute('aria-label', `${count} grenade${count === 1 ? '' : 's'}`)
   }
 
   /** The Brute's health across the top of the screen while it lives; null hides it. */
@@ -181,6 +195,7 @@ export class ZombieHud {
     this.powerups([])
     this.perks([])
     this.boss(null)
+    this.shownGrenades = -1
     this.flashTimer = 0
     delete document.body.dataset.deadInkNuke
     this.shownRound = -1

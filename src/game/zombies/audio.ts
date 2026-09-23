@@ -38,7 +38,8 @@ export class DeadInkAudio extends MissionAudio {
   play(event: SoundEvent) {
     const context = this.context
     const handled = ['zombie-groan', 'zombie-scream', 'zombie-snarl', 'zombie-swipe', 'zombie-rise', 'powerup-drop', 'powerup-grab', 'nuke', 'round-start', 'round-end',
-      'perk-drink', 'perk-jingle', 'pack-work', 'pack-ready', 'boss-roar', 'boss-growl', 'boss-slam', 'box-leave', 'box-open', 'box-spin', 'box-offer']
+      'perk-drink', 'perk-jingle', 'pack-work', 'pack-ready', 'boss-roar', 'boss-growl', 'boss-slam', 'box-leave', 'box-open', 'box-spin', 'box-offer', 'ink-burst', 'grenade-blast', 'grenade-throw']
+    if (event.kind === 'door' && this.context && this.active && !this.muted) this.slam(event)
     if (!handled.includes(event.kind)) { super.play(FOOTSTEP_VOLUME[event.kind] ? { ...event, volume: FOOTSTEP_VOLUME[event.kind] } : event); return }
     if (!context || !this.master || !this.active || this.muted || this.volume <= 0 || this.disposed || this.dying) return
     if (event.position && event.position.distanceTo(this.listenerPosition) > (event.radius ?? 60)) return
@@ -55,7 +56,8 @@ export class DeadInkAudio extends MissionAudio {
       case 'powerup-grab': this.arpeggio(event, [659.3, 880, 1318.5], 0.07, 'triangle', 0.22); break
       case 'nuke': this.boom(event); break
       case 'round-start': this.bell(event, [55, 82.4, 110], 3.2, 0.5); break
-      case 'round-end': this.arpeggio(event, [1318.5, 1046.5, 880], 0.34, 'sine', 0.16, 1.4); break
+      // The round is over, not won: a low minor chord under a tolling, slightly sour bell.
+      case 'round-end': this.bell(event, [73.4, 87.3, 110, 103.8], 4.2, 0.55); break
       case 'perk-drink': this.glugs(event); break
       case 'perk-jingle': { const tune = JINGLES[event.voice ?? '']; if (tune) this.melody(event, tune.notes, tune.step, 0.09); break }
       case 'pack-work': this.pound(event); break
@@ -67,6 +69,9 @@ export class DeadInkAudio extends MissionAudio {
       // The box leaving: a music box winding down, out of tune.
       case 'box-leave': this.arpeggio(event, [987.8, 932.3, 880, 830.6, 784, 698.5, 622.3], 0.19, 'sine', 0.14, 1.1); break
       case 'box-open': this.creak(event); break
+      case 'ink-burst': this.dirt(event); this.whoosh(event); break
+      case 'grenade-blast': this.boom(event); this.dirt(event); break
+      case 'grenade-throw': this.whoosh(event); break
       // The spin: a wind-up music box, original tune, the length of the spin.
       case 'box-spin': this.melody(event, BOX_TUNE, 0.13, 0.08); break
       case 'box-offer': this.arpeggio(event, [880, 1108.7, 1318.5, 1760], 0.05, 'triangle', 0.2, 0.8); break
@@ -106,21 +111,51 @@ export class DeadInkAudio extends MissionAudio {
     this.whoosh(event)
   }
 
-  /** Three gulps from a bottle. */
+  /**
+   * Drinking: three gulps (a throat's pitch drop with a wet click at the start of each), then the
+   * swallow and a breath out.
+   */
   private glugs(event: SoundEvent) {
     const context = this.context!, t = context.currentTime
     for (let i = 0; i < 3; i++) {
-      const at = t + 0.35 + i * 0.28
+      const at = t + 0.5 + i * 0.3
       const { gain } = this.output({ kind: event.kind })
-      const noise = context.createBufferSource(), band = context.createBiquadFilter()
-      noise.buffer = this.noise; noise.playbackRate.value = 0.9
-      band.type = 'bandpass'; band.Q.value = 6
-      band.frequency.setValueAtTime(260, at); band.frequency.exponentialRampToValueAtTime(520, at + 0.12)
-      gain.gain.setValueAtTime(0.0001, at); gain.gain.exponentialRampToValueAtTime(0.7, at + 0.03); gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.16)
-      noise.connect(band).connect(gain)
-      this.track(noise, [band, gain])
-      noise.start(at); noise.stop(at + 0.18)
+      const throat = context.createOscillator(), shape = context.createBiquadFilter()
+      throat.type = 'triangle'
+      throat.frequency.setValueAtTime(190 - i * 12, at); throat.frequency.exponentialRampToValueAtTime(85, at + 0.16)
+      shape.type = 'lowpass'; shape.frequency.value = 700; shape.Q.value = 8
+      gain.gain.setValueAtTime(0.0001, at); gain.gain.exponentialRampToValueAtTime(0.9, at + 0.015); gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.2)
+      throat.connect(shape).connect(gain)
+      this.track(throat, [shape, gain]); throat.start(at); throat.stop(at + 0.22)
+      const { gain: click } = this.output({ kind: event.kind })
+      const wet = context.createBufferSource(), band = context.createBiquadFilter()
+      wet.buffer = this.noise; wet.playbackRate.value = 2.5
+      band.type = 'bandpass'; band.frequency.value = 1400; band.Q.value = 5
+      click.gain.setValueAtTime(0.0001, at); click.gain.exponentialRampToValueAtTime(0.35, at + 0.005); click.gain.exponentialRampToValueAtTime(0.0001, at + 0.05)
+      wet.connect(band).connect(click)
+      this.track(wet, [band, click]); wet.start(at); wet.stop(at + 0.06)
     }
+    // "Ahh": a breath out after the last gulp.
+    const at = t + 1.45
+    const { gain } = this.output({ kind: event.kind })
+    const breath = context.createBufferSource(), band = context.createBiquadFilter()
+    breath.buffer = this.noise; breath.playbackRate.value = 1.1
+    band.type = 'bandpass'; band.frequency.value = 900; band.Q.value = 1.2
+    gain.gain.setValueAtTime(0.0001, at); gain.gain.exponentialRampToValueAtTime(0.45, at + 0.08); gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.5)
+    breath.connect(band).connect(gain)
+    this.track(breath, [band, gain]); breath.start(at); breath.stop(at + 0.52)
+  }
+
+  /** A door swinging to: a creak and a heavy wooden knock at the end. */
+  private slam(event: SoundEvent) {
+    this.creak(event)
+    const context = this.context!, at = context.currentTime + 0.45
+    const { gain, panner } = this.output(event)
+    const knock = context.createOscillator()
+    knock.type = 'sine'; knock.frequency.setValueAtTime(140, at); knock.frequency.exponentialRampToValueAtTime(55, at + 0.18)
+    gain.gain.setValueAtTime(0.0001, at); gain.gain.exponentialRampToValueAtTime(0.7, at + 0.01); gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.3)
+    knock.connect(gain)
+    this.track(knock, [gain, ...(panner ? [panner] : [])]); knock.start(at); knock.stop(at + 0.32)
   }
 
   /** The Pack-a-Punch at work: heavy strokes of the press under a rising whine. */

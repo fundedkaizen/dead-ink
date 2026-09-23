@@ -58,6 +58,8 @@ export function wallOffer(name: WeaponName, price: number, slots: readonly (Weap
  * letdown every box has. Weights are relative.
  */
 export const BOX_WEIGHTS: Record<WeaponName, number> = { ak: 24, smg: 22, shotgun: 22, sniper: 18, pistol: 14 }
+/** The chance a box roll is the Ink Ray, Dead Ink's wonder weapon (Call of Duty's Ray Gun is a rare draw too). */
+export const RAY_GUN_CHANCE = 0.05
 /** Seconds the box spins before showing its gun, and how long you have to take it. */
 export const BOX_SPIN = 3.2, BOX_OFFER = 12
 
@@ -65,7 +67,9 @@ export const BOX_SPIN = 3.2, BOX_OFFER = 12
  * One box roll: never a gun you are already carrying (as in Call of Duty), and a rarity with chest
  * odds, so the box never gives grey. Falls back to any gun if you somehow hold every one.
  */
-export function rollBox(random: Random, held: readonly (WeaponItem | null)[]): { name: WeaponName; rarity: Rarity } {
+export function rollBox(random: Random, held: readonly (WeaponItem | null)[]): { name: WeaponName; rarity: Rarity; special?: 'rayGun' } {
+  // The wonder weapon: rare, always gold, never twice.
+  if (!held.some(item => item?.special === 'rayGun') && random() < RAY_GUN_CHANCE) return { name: 'pistol', rarity: 'legendary', special: 'rayGun' }
   const weights = { ...BOX_WEIGHTS }
   for (const item of held) if (item) weights[item.name] = 0
   const pool = Object.values(weights).some(w => w > 0) ? weights : BOX_WEIGHTS

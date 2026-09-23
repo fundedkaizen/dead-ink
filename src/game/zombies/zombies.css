@@ -39,6 +39,11 @@ body[data-reduced-motion="true"] .dead-ink-powerup.ending { animation: none; opa
 .dead-ink-perks { position: absolute; left: 24px; bottom: 96px; display: flex; gap: 6px; }
 .dead-ink-perks img { width: 38px; height: 38px; display: block; }
 
+/* Grenades carried, beside the points. */
+.dead-ink-grenades { display: flex; gap: 3px; margin-top: 4px; }
+.dead-ink-grenades svg { width: 16px; height: 19px; fill: var(--ink); stroke: var(--ink); stroke-width: 1.5; filter: drop-shadow(0 0 1px #fff); }
+.dead-ink-grenades svg .band { stroke: #fff; stroke-width: 1.4; }
+
 /* The Brute's health: red, because it is the danger. */
 .dead-ink-boss { position: absolute; left: 50%; top: 22px; transform: translateX(-50%); width: min(460px, 70vw); display: grid; gap: 4px; justify-items: center;
   font: 700 20px/1 var(--notes, "Chalkboard SE", "Comic Sans MS", cursive); color: #d4332a; letter-spacing: 2px;

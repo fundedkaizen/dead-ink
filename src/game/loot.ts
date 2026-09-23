@@ -58,20 +58,31 @@ export type ScaledRules = { -readonly [K in keyof Rules]: Widen<Rules[K]> }
  * including the label, so existing text and checks see exactly what they always did.
  */
 /**
- * Dead Ink's Death Machine power-up, a minigun on the AK's handling: about 1,100 rounds a minute,
- * harder hits, almost no kick. Tuned by play.
+ * Dead Ink's Death Machine power-up, a minigun on the AK's handling: about 1,100 rounds a minute, and
+ * each round nearly always kills (as in Call of Duty) until the late rounds; almost no kick. Tuned by play.
  */
-export const DEATH_MACHINE = { interval: 0.055, damage: 1.7, kick: 0.005, settle: 0.4 } as const
+export const DEATH_MACHINE = { interval: 0.055, damage: 20, kick: 0.005, settle: 0.4 } as const
 
 /**
  * Dead Ink's Pack-a-Punch: an upgraded gun hits twice as hard and gets its own name, as upgraded guns do
  * in Call of Duty. Names are the ink's own.
  */
-export const PACKED = { damage: 2 } as const
+export const PACKED = { damage: [2, 3.2, 4.8] } as const
+/**
+ * Bodies a bullet passes through (Dead Ink). A sniper round goes through a line of them; an upgraded
+ * gun's rounds go through one more (two more for the sniper); the Death Machine through two.
+ */
+export function pierceOf(item: { name: WeaponName; special?: string; packLevel?: number; packed?: boolean }) {
+  if (item.special === 'deathMachine') return 2
+  const level = item.packLevel ?? (item.packed ? 1 : 0)
+  return (item.name === 'sniper' ? 3 : 1) + (level > 0 ? (item.name === 'sniper' ? 2 : 1) : 0)
+}
 export const PACKED_NAMES: Record<WeaponName, string> = { pistol: 'Fountain Pen', smg: 'Inkjet', ak: 'Blotter', shotgun: 'Splatter', sniper: 'Quill' }
 
-export function weaponRules(item: { name: WeaponName; rarity?: Rarity; special?: 'deathMachine'; packed?: boolean }): ScaledRules {
+export function weaponRules(item: { name: WeaponName; rarity?: Rarity; special?: 'deathMachine' | 'rayGun'; packed?: boolean; packLevel?: number }): ScaledRules {
   const base = WEAPON_RULES[item.name]
+  // The Ink Ray's bolts do their damage by bursting (the runtime's blast), so its rules are its handling.
+  if (item.special === 'rayGun') return { ...base, label: 'Ink Ray', interval: 0.3, kick: 0.02, settle: 0.5, range: 120 }
   if (item.special === 'deathMachine') return { ...base, label: 'Death Machine', automatic: true,
     interval: DEATH_MACHINE.interval, damage: base.damage * DEATH_MACHINE.damage, kick: DEATH_MACHINE.kick, settle: DEATH_MACHINE.settle }
   const rules: ScaledRules = { ...base }
@@ -79,7 +90,11 @@ export function weaponRules(item: { name: WeaponName; rarity?: Rarity; special?:
     const info = RARITY_INFO[item.rarity]
     rules.label = `${info.label} ${base.label}`; rules.damage *= info.damage; rules.reload *= info.reload
   }
-  if (item.packed) { rules.label = PACKED_NAMES[item.name]; rules.damage *= PACKED.damage }
+  if (item.packed) {
+    const level = Math.max(1, Math.min(3, item.packLevel ?? 1))
+    rules.label = `${PACKED_NAMES[item.name]}${level > 1 ? ` ${'I'.repeat(level)}` : ''}`
+    rules.damage *= PACKED.damage[level - 1]
+  }
   return rules
 }
 

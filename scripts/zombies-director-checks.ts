@@ -322,6 +322,35 @@ const run = (seconds: number, targets: ZombieTarget[], fps = 60) => {
   console.log(`  indoors: ${times.join(', ')}`)
 }
 
+// ---- 5h. Bullets through bodies, and blasts ---------------------------------------------------------
+{
+  const yard = graph.point(graph.nearest(v(-30, 0, -25), 4))
+  const line = [0, 1.2, 2.4].map(dz => director.spawn(yard.clone().add(v(0, 0, -dz)), 5000, 'walk', 0)!)
+  run(0.1, [])
+  const eye = yard.clone().add(v(0, 1.3, 6))
+  const aim = line[0].actor.rig.bones.chest.getWorldPosition(v())
+  const shot: Shot = { origin: eye, direction: aim.clone().sub(eye).normalize(), range: 100, damage: 65, weapon: 'sniper' }
+  const one = director.hitAll(shot, 100, ZOMBIE_DAMAGE_SCALE, false, 1)
+  assert.equal(one.length, 1, 'an ordinary round stops in the first body')
+  const through = director.hitAll(shot, 100, ZOMBIE_DAMAGE_SCALE, false, 3)
+  assert.equal(through.length, 3, `a sniper round goes through the line (${through.length})`)
+  assert(through[0].zombie === line[0] && through[2].zombie === line[2], 'nearest first')
+  director.clear()
+  // A blast: close zombies hurt, far ones untouched.
+  const near = director.spawn(yard.clone().add(v(1.5, 0, 0)), 400, 'walk', 0)!
+  const far = director.spawn(yard.clone().add(v(9, 0, 0)), 400, 'walk', 0)!
+  run(0.1, [])
+  const hits = director.blast(yard.clone().setY(yard.y + 0.3), 5, 1000)
+  assert(hits.some(h => h.zombie === near && h.lethal), 'a blast kills a zombie 1.5 m away')
+  assert(!hits.some(h => h.zombie === far), 'and does not reach 9 m')
+  director.clear()
+  const nearZ = director.spawn(yard.clone().add(v(1.5, 0, 0)), 5000, 'walk', 0)!, brute = director.spawn(yard.clone().add(v(-2, 0, 0)), 5000, 'run', 0, false, true)!
+  run(0.1, [])
+  director.blast(yard.clone().setY(yard.y + 0.3), 5, 400)
+  assert(nearZ.health < 5000 && brute.health < 5000, 'the Brute is hurt by blasts too')
+  director.clear()
+}
+
 // ---- 5f. The Brute -------------------------------------------------------------------------------
 {
   swipes.length = 0

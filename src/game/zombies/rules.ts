@@ -88,12 +88,12 @@ export const wallAmmoPrice = (price: number) => Math.ceil(price / 2)
  * Power-ups. VERIFIED (search results citing the Call of Duty wiki): at most 4 per round, an
  * uncollected power-up vanishes after 30 s, Nuke gives every player 400 points, Carpenter 200.
  * UNVERIFIED: Insta-Kill, Double Points and the Death Machine last 30 s; a guaranteed drop whenever team
- * points pass a threshold that starts at 2000 and grows x1.14 per drop, plus a 2% chance on any kill
- * (3% felt like too many in play).
+ * points pass a threshold that starts at 2000 and grows per drop, plus a small chance on any kill. Tuned
+ * down by play (Call of Duty's x1.14 and 2-3% felt like too many): x1.22 and 1%.
  */
 export const POWERUPS = {
   maxPerRound: 4, lifetime: 30, nukePoints: 400, carpenterPoints: 200,
-  timed: 30, firstThreshold: 2000, thresholdGrowth: 1.14, randomChance: 0.02,
+  timed: 30, firstThreshold: 2000, thresholdGrowth: 1.22, randomChance: 0.01,
 } as const
 export type PowerupKind = 'maxAmmo' | 'instaKill' | 'doublePoints' | 'nuke' | 'carpenter' | 'deathMachine'
 
@@ -120,8 +120,8 @@ export const ZOMBIE_DAMAGE_SCALE = 3.5
 export const BOSS = {
   every: 5, delay: 8, points: 500, scale: 1.9, speed: 2.4,
   health: (round: number) => 2000 + 600 * round,
-  attack: { range: 2.3, windup: 0.6, reach: 2.9, swing: 1.0, recover: 0.8, damage: 80 },
-  slam: { every: 10, windup: 1.0, radius: 6.5, damage: 70 },
+  attack: { range: 2.3, windup: 0.6, reach: 2.9, swing: 1.0, recover: 0.8, damage: 95 },
+  slam: { every: 10, windup: 1.0, radius: 6.5, damage: 90 },
 } as const
 export const isBossRound = (round: number) => round > 0 && round % BOSS.every === 0
 

@@ -19,16 +19,16 @@ import { BOSS, PLAYER_HEALTH } from './rules'
  * spawn. A zombie is 'idle' in the pool, 'chase' while alive, and 'dead' while its body lies there.
  */
 export type ZombieGait = 'walk' | 'run' | 'sprint'
-/** Metres per second. Players walk at 4.2 and sprint at 7.6, so a sprint outruns even a sprinter. */
-export const ZOMBIE_SPEED: Record<ZombieGait, number> = { walk: 1.1, run: 3.6, sprint: 5.2 }
+/** Metres per second. Players walk at 4.2 and sprint at 7.6: a sprinter keeps up with a walking player and only a sprint gets away. */
+export const ZOMBIE_SPEED: Record<ZombieGait, number> = { walk: 1.2, run: 4.4, sprint: 6.2 }
 
 export const ATTACK = {
   /** Start a swipe within this horizontal distance of the target. */
-  range: 1.35,
+  range: 1.45,
   /** The swipe connects this long after it starts, if the target is still close. Dodgeable. */
   windup: 0.3,
   /** A landed swipe needs the target within this distance at the moment of impact. */
-  reach: 1.7,
+  reach: 1.85,
   /** Whole swipe duration, then a short recovery before the next one. */
   swing: 0.6, recover: 0.45,
 } as const
@@ -40,14 +40,14 @@ export const CORPSE = { lie: 6, sink: 2.2, depth: 0.8 } as const
 /** Clawing up out of the ground, as Call of Duty's zombies do outdoors: how long, and how deep it starts. */
 export const RISE = { seconds: 1.7, depth: 1.9 } as const
 /** Metres per second on ladders and ledges. Walkers are slower, as on the ground. */
-export const CLIMB_SPEED = { up: 1.8, down: 3, across: 2.2 } as const
+export const CLIMB_SPEED = { up: 3.4, down: 4.5, across: 3 } as const
 /**
  * A zombie asks to respawn when it cannot reach anyone, is too far from everyone, or simply stops
  * getting closer. The last one matters: a baked map graph can promise a way through that a body cannot
  * actually take, and a chaser would otherwise shuffle in place forever. Call of Duty does the same,
  * moving zombies that cannot path to you back into play near you.
  */
-export const STRANDED = { seconds: 7, distance: 75, noProgressSeconds: 6, progressMetres: 1.5 } as const
+export const STRANDED = { seconds: 7, distance: 75, noProgressSeconds: 6, progressMetres: 1.5, near: 18 } as const
 /** How long a bullet's jolt lasts. */
 const FLINCH_SECONDS = 0.22
 /** How often the shared flow field is recomputed. */
@@ -333,8 +333,10 @@ export class ZombieDirector {
         const progress = Number.isFinite(walking) ? walking : flat
         if (progress < zombie.bestDistance - STRANDED.progressMetres) { zombie.bestDistance = progress; zombie.noProgress = 0 }
         else zombie.noProgress += dt
-        zombie.stranded = zombie.unreachable > STRANDED.seconds || flat > STRANDED.distance
-          || (flat > 4 && zombie.noProgress > STRANDED.noProgressSeconds)
+        // Never one close by: a crowd jammed around the player (or around the Brute) is making no
+        // walking progress, yet moving it away would make it vanish from the fight.
+        zombie.stranded = flat > STRANDED.near && (zombie.unreachable > STRANDED.seconds || flat > STRANDED.distance
+          || zombie.noProgress > STRANDED.noProgressSeconds)
       }
       zombie.flinch = Math.max(0, zombie.flinch - dt)
       zombie.actor.root.position.copy(zombie.position)
@@ -392,7 +394,7 @@ export class ZombieDirector {
   /** Start up a ladder or over a ledge, unless someone is just ahead on the same one. */
   private startClimb(zombie: Zombie, from: number, to: number, points: THREE.Vector3[]) {
     const key = from < to ? `${from}:${to}` : `${to}:${from}`
-    if (this.zombies.some(z => z !== zombie && z.state === 'chase' && z.climb?.key === key && z.climb.travelled < 1.6)) return false
+    if (this.zombies.some(z => z !== zombie && z.state === 'chase' && z.climb?.key === key && z.climb.travelled < 0.9)) return false
     const path = [zombie.position.clone()]
     for (const point of points) {
       const last = path[path.length - 1]
@@ -414,7 +416,7 @@ export class ZombieDirector {
   /** Along the climb's fixed path. */
   private climbStep(zombie: Zombie, dt: number) {
     const climb = zombie.climb!
-    const pace = zombie.gait === 'walk' ? 0.7 : zombie.gait === 'sprint' ? 1.25 : 1
+    const pace = zombie.gait === 'walk' ? 0.85 : zombie.gait === 'sprint' ? 1.25 : 1
     let budget = dt, vertical = false
     while (budget > 1e-6 && climb.index < climb.points.length) {
       const goal = climb.points[climb.index]
@@ -747,12 +749,45 @@ export class ZombieDirector {
    * any hit lethal. Returns what happened, or null for a miss.
    */
   hit(shot: Shot, maxDistance: number, scale: number, instaKill = false): ZombieHit | null {
-    const { nearest, best, normalized } = this.nearestHit(shot.origin, shot.direction, Math.min(maxDistance, shot.range))
-    if (!nearest || !best) return null
-    const falloff = shot.weapon === 'shotgun' ? shotgunDamageMultiplier(best.distance) : 1
-    // Insta-Kill does not one-shot the Brute, as it does not Call of Duty's bosses.
-    const damage = instaKill && !nearest.boss ? nearest.health : hitDamage(shot.weapon, best.zone, shot.damage * scale) * falloff
-    return this.applyHit(nearest, damage, best.zone, best.point, normalized, best.bone, shot.weapon)
+    return this.hitAll(shot, maxDistance, scale, instaKill, 1)[0] ?? null
+  }
+
+  /**
+   * A bullet that can pass through bodies: the first `pierce` zombies along the ray are hit, nearest
+   * first, each for full damage (a sniper round goes through a line of them, as in Call of Duty).
+   */
+  hitAll(shot: Shot, maxDistance: number, scale: number, instaKill = false, pierce = 1): ZombieHit[] {
+    const normalized = shot.direction.clone().normalize(), range = Math.min(maxDistance, shot.range)
+    const struck: { zombie: Zombie; hit: NonNullable<ReturnType<ZombieDirector['bodyHit']>> }[] = []
+    for (const zombie of this.zombies) {
+      if (zombie.state !== 'chase') continue
+      const hit = this.bodyHit(zombie, shot.origin, normalized, range)
+      if (hit) struck.push({ zombie, hit })
+    }
+    struck.sort((a, b) => a.hit.distance - b.hit.distance)
+    return struck.slice(0, Math.max(1, pierce)).map(({ zombie, hit }) => {
+      const falloff = shot.weapon === 'shotgun' ? shotgunDamageMultiplier(hit.distance) : 1
+      // Insta-Kill does not one-shot the Brute, as it does not Call of Duty's bosses.
+      const damage = instaKill && !zombie.boss ? zombie.health : hitDamage(shot.weapon, hit.zone, shot.damage * scale) * falloff
+      return this.applyHit(zombie, damage, hit.zone, hit.point, normalized, hit.bone, shot.weapon)
+    })
+  }
+
+  /**
+   * A blast (a grenade, an upgraded gun's ink burst): every living zombie within `radius` that the
+   * blast can see takes `damage`, less toward the edge, and a kill is thrown outward.
+   */
+  blast(centre: THREE.Vector3, radius: number, damage: number): ZombieHit[] {
+    const hits: ZombieHit[] = [], from = centre.clone().setY(centre.y + 0.4)
+    for (const zombie of this.zombies) {
+      if (zombie.state !== 'chase') continue
+      const chest = zombie.position.clone().setY(zombie.position.y + 1.1 * (zombie.boss ? BOSS.scale : 1))
+      const distance = chest.distanceTo(centre)
+      if (distance > radius || !this.context.world.visible(from, chest, zombie.actor.root)) continue
+      const outward = chest.clone().sub(centre).setY(0.3).normalize()
+      hits.push(this.applyHit(zombie, damage * (1 - 0.5 * distance / radius), 'torso', chest, outward, undefined, 'shotgun'))
+    }
+    return hits
   }
 
   /** A knife swipe: the nearest living zombie in front of `origin`, within `range`. */

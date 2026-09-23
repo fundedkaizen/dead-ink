@@ -121,15 +121,20 @@ assert.equal(freshWeapon('z', 'smg').reserve, WEAPON_RULES.smg.capacity * RESERV
   const draws = 20000
   for (let i = 0; i < draws; i++) {
     const roll = rollBox(random, held)
-    names[roll.name] = (names[roll.name] ?? 0) + 1
+    // The Ink Ray is its own weapon, whatever handling it borrows.
+    const kind = roll.special ?? roll.name
+    names[kind] = (names[kind] ?? 0) + 1
     rarities[roll.rarity] = (rarities[roll.rarity] ?? 0) + 1
   }
   assert(!names.pistol && !names.ak, 'the box never gives a gun you are carrying')
+  const rays = names.rayGun ?? 0
+  assert(rays > draws * 0.03 && rays < draws * 0.07, `the Ink Ray is a rare draw (${(rays / draws * 100).toFixed(1)}%)`)
   assert(!rarities.common, 'the box never gives grey')
-  assert(rarities.legendary > 0 && rarities.legendary < draws * 0.12, `gold is rare (${rarities.legendary} of ${draws})`)
-  // The remaining guns come up in proportion to their weights.
+  // Ordinary guns: gold is rare among them, and each comes up in proportion to its weight.
+  const ordinary = draws - rays, gold = rarities.legendary - rays
+  assert(gold > 0 && gold < ordinary * 0.12, `gold is rare (${gold} of ${ordinary})`)
   const pool = (['smg', 'shotgun', 'sniper'] as WeaponName[]), total = pool.reduce((s, n) => s + BOX_WEIGHTS[n], 0)
-  for (const n of pool) assert(Math.abs(names[n] / draws - BOX_WEIGHTS[n] / total) < 0.015, `${n} share`)
+  for (const n of pool) assert(Math.abs(names[n] / ordinary - BOX_WEIGHTS[n] / total) < 0.015, `${n} share`)
   for (const r of Object.keys(rarities)) assert(RARITIES.includes(r as never))
 }
 

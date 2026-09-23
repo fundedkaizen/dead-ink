@@ -104,8 +104,11 @@ export class ZoneGates {
       if (!g.closed.parent) this.scene.add(g.closed)
       this.world.addObject(g.closed)
       if (g.opened) {
+        // Hidden AND out of the collision world: its swung-open leaves would otherwise stand there as
+        // invisible walls beside the shut gate.
         g.opened.visible = false
-        if (g.ownOpened && g.opened.parent) { this.world.removeObject(g.opened); g.opened.removeFromParent() }
+        this.world.removeObject(g.opened)
+        if (g.ownOpened) g.opened.removeFromParent()
       }
       g.gap = this.graph.closeGap(g.segment[0], g.segment[1])
       g.state = 'closed'
@@ -120,7 +123,8 @@ export class ZoneGates {
     g.gap = null
     if (g.opened) {
       g.opened.visible = true
-      if (g.ownOpened) { this.scene.add(g.opened); this.world.addObject(g.opened) }
+      if (g.ownOpened) this.scene.add(g.opened)
+      this.world.addObject(g.opened)
     }
     g.state = 'opening'
     g.sink = 0
@@ -148,7 +152,11 @@ export class ZoneGates {
   dispose() {
     for (const g of this.gates) {
       this.world.removeObject(g.closed); g.closed.removeFromParent()
-      if (g.opened) { g.opened.visible = true; if (g.ownOpened) { this.world.removeObject(g.opened); g.opened.removeFromParent() } }
+      if (g.opened) {
+        this.world.removeObject(g.opened)
+        if (g.ownOpened) g.opened.removeFromParent()
+        else { g.opened.visible = true; this.world.addObject(g.opened) }
+      }
       if (g.gap !== null) this.graph.openGap(g.gap)
     }
     for (const run of this.fences) { this.world.removeObject(run); run.removeFromParent() }

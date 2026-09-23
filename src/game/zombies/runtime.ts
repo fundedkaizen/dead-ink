@@ -1,7 +1,8 @@
 import * as THREE from 'three'
+import { Capsule } from 'three/addons/math/Capsule.js'
 import { BulletTrails } from '../bullet-trails'
 import { WEAPON_RULES, fallDamage } from '../balance'
-import { PACKED_NAMES } from '../loot'
+import { PACKED_NAMES, pierceOf } from '../loot'
 import type { EnvironmentCamera } from '../../camera'
 import type { FirstPersonController } from '../../player/controller'
 import type { ActionTarget } from '../../player/actions'
@@ -15,7 +16,7 @@ import { MissionImpacts } from '../impacts'
 import { PlayerHitReactions } from '../player-hit-reactions'
 import { PlayerDeathSequence } from '../player-death'
 import type { MenuCopy } from '../menu'
-import type { MissionWorld, Shot, SoundEvent, WeaponName, WeaponSnapshot } from '../types'
+import type { MissionWorld, Shot, SoundEvent, WeaponItem, WeaponName, WeaponSnapshot } from '../types'
 import { HitMarkers } from '../shared/hitmarkers'
 import { DamageIndicator } from '../shared/damage-indicator'
 import { Hotbar } from '../shared/hotbar'
@@ -30,6 +31,8 @@ import { BOX_WEIGHTS, WALL_WEAPONS, ZOMBIE_SLOTS, freshWeapon, pointsForHit, rol
 import { MysteryBox, WallBuy } from './stations'
 import { ZombieHud } from './hud'
 import { MuzzleSparks, RiseMarks, Shockwaves } from './effects'
+import { GRENADE, Grenades } from './grenades'
+import { INK_RAY, InkRayBolts } from './wonder'
 import { POWERUP_INFO, PowerupDrops, PowerupDropper } from './powerups'
 import { SEALED, ZoneGates, type ZoneGate } from './zones'
 import { MACHINE_PLACES, PACK, PERKS, PERK_EFFECT, PERK_LIMIT, PackAPunch, PackedLook, PerkBottle, PerkMachine, type PerkKind } from './perks'
@@ -52,8 +55,39 @@ type TimedPowerup = 'instaKill' | 'doublePoints' | 'deathMachine'
  * Where else the Mystery Box can turn up once the teddy bear takes it: a point in each of three other
  * zones (the nearest good wall to it). After a few spins at one spot, each spin has this chance of the bear.
  */
+/** Pack-a-Punch prices: 5000, then 10000, then 20000 to upgrade the same gun again; null when maxed. */
+function packCost(item: WeaponItem) {
+  const level = item.packed ? item.packLevel ?? 1 : 0
+  return level >= PACK.costs.length ? null : PACK.costs[level]
+}
 const BOX_PLACES: readonly [number, number, number][] = [[-60, 0, 45], [0, 0, 40], [145, 0, 5]]
 const BOX_TEDDY_AFTER = 3, BOX_TEDDY_CHANCE = 0.2
+/** Where the three Easter-egg skulls hide: up the water tower, inside the southwest stores, in the annex. */
+const SKULL_PLACES: readonly [number, number, number][] = [[10.9, 12.6, -30], [-62, 0.7, 62], [140, 0, -45]]
+
+/** A little ink skull, the size of a fist, for the Easter egg. */
+function inkSkull() {
+  const g = new THREE.Group()
+  g.name = 'Easter egg skull'
+  g.userData.noCollision = true
+  const ink = new THREE.MeshBasicMaterial({ color: 0x111111, toneMapped: false }), paper = new THREE.MeshBasicMaterial({ color: 0xfbfaf5, toneMapped: false })
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.09, 14, 10), paper)
+  head.position.y = 0.11
+  const jaw = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.05, 0.08), paper)
+  jaw.position.set(0, 0.04, 0.02)
+  const outline = new THREE.Mesh(new THREE.SphereGeometry(0.097, 14, 10), new THREE.MeshBasicMaterial({ color: 0x111111, side: THREE.BackSide, toneMapped: false }))
+  outline.position.y = 0.11
+  g.add(head, jaw, outline)
+  for (const side of [-1, 1]) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.022, 8, 6), ink)
+    eye.position.set(side * 0.035, 0.12, 0.075)
+    g.add(eye)
+  }
+  return g
+}
+
+/** A zombie's body is this wide to a player walking into it (the Brute's scales with it). */
+const ZOMBIE_BODY = 0.34, PLAYER_BODY = 0.3
 /** The chosen difficulty is remembered in this browser; storage can be missing or blocked. */
 const DIFFICULTY_KEY = 'dead-ink-difficulty'
 function savedDifficulty(): Difficulty {
@@ -75,7 +109,7 @@ export const DEAD_INK_COPY: MenuCopy = {
   restartWarning: 'This game ends and a new one starts at round 1.',
   missionPage: false,
   modeLink: { label: 'Hostage mission', href: './' },
-  controls: [['Knife', 'V'], ['Switch weapon', 'Wheel']],
+  controls: [['Knife', 'V'], ['Grenade', 'Q or G'], ['Switch weapon', 'Wheel']],
 }
 
 /**
@@ -101,6 +135,11 @@ export class ZombiesRuntime {
   readonly riseMarks: RiseMarks
   readonly sparks: MuzzleSparks
   readonly shockwaves: Shockwaves
+  readonly grenades: Grenades
+  readonly bolts: InkRayBolts
+  /** Frags carried, and seconds before another can be thrown. */
+  grenadeCount: number = GRENADE.start
+  private grenadeCooldown = 0
   /** The Brute, while it lives; and the seconds until it comes, on a boss round. */
   brute: Zombie | null = null
   private bruteTimer = -1
@@ -155,6 +194,10 @@ export class ZombiesRuntime {
   private wheelAmount = 0
   private wheelAt = 0
   private disposed = false
+  private pushCapsule = new Capsule(new THREE.Vector3(), new THREE.Vector3(), 0.3)
+  /** Solid boxes for the things you should not walk through: the Mystery Box and the machines. */
+  private solids = new Map<THREE.Object3D, THREE.Mesh>()
+  private skulls: { object: THREE.Object3D; found: boolean }[] = []
 
   constructor(private scene: THREE.Scene, private camera: EnvironmentCamera, readonly player: FirstPersonController,
     readonly world: MissionWorld, private invalidate: () => void, seed = Math.floor(Math.random() * 2 ** 31)) {
@@ -174,6 +217,8 @@ export class ZombiesRuntime {
     this.riseMarks = new RiseMarks(scene)
     this.sparks = new MuzzleSparks(scene)
     this.shockwaves = new Shockwaves(scene)
+    this.grenades = new Grenades(scene, player.world)
+    this.bolts = new InkRayBolts(scene, player.world, (origin, direction, max) => this.director?.aimDistance(origin, direction, max) ?? Infinity)
     this.powerups = new PowerupDrops(scene)
     this.bottle = new PerkBottle(camera.perspective)
     this.dropper = new PowerupDropper(this.random)
@@ -192,7 +237,7 @@ export class ZombiesRuntime {
     // One more cell than you start with, for Spare Nib's third gun; the hotbar hides cells you do not have.
     this.hotbar = new Hotbar(hudRoot, ZOMBIE_SLOTS + 1)
     this.addDifficultySetting()
-    player.onPlayingChange = playing => { this.hud.setPlaying(playing); this.music.setMode(playing ? 'play' : 'menu') }
+    player.onPlayingChange = playing => { this.hud.setPlaying(playing); this.updateMusic() }
     player.actions.extraTargets = () => this.targets()
     player.actions.onAction = target => {
       this.weapons.cancel(); this.aiming = false; this.interactionTime = Math.max(this.interactionTime, 0.25)
@@ -294,7 +339,10 @@ export class ZombiesRuntime {
       this.perkMachines.push(machine)
       this.scene.add(machine.root)
     }
+    this.placeSkulls()
     if (this.box) this.boxSpots = [this.box.spot]
+    for (const machine of this.perkMachines) this.makeSolid(machine.root, [1.05, 2.05, 0.7], [0, 1.025, 0])
+    if (this.pack) this.makeSolid(this.pack.root, [2.05, 1.1, 1.1], [0, 0.55, 0])
     for (const [x, y, z] of BOX_PLACES) {
       graph.flow([new THREE.Vector3(x, y, z)])
       const [spot] = findWallSpots(graph, this.player.world, this.random, { count: 1, near: 0, far: 35, spacing: 7, avoid: taken })
@@ -310,11 +358,14 @@ export class ZombiesRuntime {
     this.director?.clear()
     this.zones?.closeAll()
     this.director?.navigation.clear()
-    if (this.box && this.boxSpots[0]) this.box.place(this.boxSpots[0])
+    if (this.box && this.boxSpots[0]) { this.box.place(this.boxSpots[0]); this.makeSolid(this.box.root, [1.44, 0.66, 0.64], [0, 0.33, 0]) }
     this.box?.close()
     this.powerups.clear(); this.timers = {}; this.earned = 0; this.heldWeapons = null
     this.perks.clear(); this.pendingPerk = null; this.reviveGrace = 0; this.applyPerks(); this.zombieHud.perks([])
     this.brute = null; this.bruteTimer = -1
+    for (const skull of this.skulls) { skull.found = false; skull.object.userData.found = false }
+    this.music.stopStings()
+    this.grenades.clear(); this.bolts.clear(); this.grenadeCount = GRENADE.start; this.grenadeCooldown = 0
     if (this.pack && this.pack.state !== 'idle') this.pack.take()
     this.dropper = new PowerupDropper(this.random)
     this.weapons.restore({ slots: [startingPistol(), null], selected: 0, pickups: [], nextId: 1 })
@@ -348,7 +399,8 @@ export class ZombiesRuntime {
     const options = { signal: this.abort.signal }
     document.querySelector('#walk-start')!.addEventListener('click', () => { void this.audio.unlock() }, options)
     // Music may only start after the first click or key press on the page.
-    for (const type of ['pointerdown', 'keydown'] as const) window.addEventListener(type, () => this.music.unlock(), options)
+    // Capturing, so a menu button that stops the event still counts as the first interaction.
+    for (const type of ['pointerdown', 'keydown'] as const) window.addEventListener(type, () => this.music.unlock(), { ...options, capture: true })
     document.addEventListener('visibilitychange', () => this.music.setHidden(document.hidden), options)
     window.addEventListener('keydown', this.keyDown, options)
     document.querySelector('#world')!.addEventListener('wheel', event => {
@@ -393,6 +445,12 @@ export class ZombiesRuntime {
     if (event.ctrlKey || event.metaKey || event.altKey || (event.repeat && !zoomKey) || !this.player.enabled || this.player.immersive) return
     if (event.target instanceof HTMLElement && event.target.closest('button,input,select,textarea,summary,[contenteditable="true"]')) return
     if (!this.isActive()) return
+    // Q zooms a scoped sniper; otherwise it throws a grenade (so does G).
+    const scoped = this.aiming && this.weapons.current?.name === 'sniper'
+    if ((event.code === 'KeyQ' && !scoped) || event.code === 'KeyG') {
+      if (!event.repeat && this.throwGrenade()) { event.preventDefault(); this.invalidate() }
+      return
+    }
     if (zoomKey) {
       if (!this.aiming || !this.weapons.adjustScopeZoom(event.code === 'KeyE' ? 1 : -1)) return
       event.preventDefault(); this.invalidate(); return
@@ -441,13 +499,17 @@ export class ZombiesRuntime {
     if (pack && pack.state !== 'working') {
       const label = pack.state === 'ready' && pack.held ? `Take the ${PACKED_NAMES[pack.held.name]}`
         : !held || held.special ? 'Pack-a-Punch · hold a gun to upgrade it'
-        : held.packed ? 'Pack-a-Punch · already upgraded'
-        : `Pack-a-Punch · upgrade your ${WEAPON_RULES[held.name].label} · ${PACK.cost}${this.state.points >= PACK.cost ? '' : ` · need ${PACK.cost - this.state.points} more`}`
+        : packCost(held) === null ? 'Pack-a-Punch · fully upgraded'
+        : `Pack-a-Punch · ${held.packed ? 'upgrade again' : 'upgrade'} your ${this.weapons.label} · ${packCost(held)}${this.state.points >= packCost(held)! ? '' : ` · need ${packCost(held)! - this.state.points} more`}`
       targets.push({ object: pack.root, point: pack.point, kind: 'mission', descending: false, label, use: () => this.usePack(pack) })
+    }
+    for (const skull of this.skulls) {
+      if (skull.found || skull.object.position.distanceTo(eye) > 2.6) continue
+      targets.push({ object: skull.object, point: skull.object.position.clone().setY(skull.object.position.y + 0.12), kind: 'mission', descending: false, label: '...', use: () => this.touchSkull(skull) })
     }
     const box = this.box
     if (box && box.state !== 'spinning' && box.state !== 'leaving') {
-      const label = box.state === 'offering' && box.offer ? `Take ${box.offer.rarity === 'common' ? '' : `${box.offer.rarity[0].toUpperCase()}${box.offer.rarity.slice(1)} `}${WEAPON_RULES[box.offer.name].label}`
+      const label = box.state === 'offering' && box.offer ? box.offer.special ? 'Take the Ink Ray' : `Take ${box.offer.rarity === 'common' ? '' : `${box.offer.rarity[0].toUpperCase()}${box.offer.rarity.slice(1)} `}${WEAPON_RULES[box.offer.name].label}`
         : this.state.points >= PRICES.box ? `Mystery Box · ${PRICES.box}` : `Mystery Box · ${PRICES.box} · need ${PRICES.box - this.state.points} more`
       targets.push({ object: box.root, point: box.point, kind: 'mission', descending: false, label, use: () => this.useBox(box) })
     }
@@ -554,7 +616,8 @@ export class ZombiesRuntime {
       return true
     }
     const current = this.weapons.current
-    if (pack.state !== 'idle' || !current || current.special || current.packed || this.timers.deathMachine || !this.spend(PACK.cost)) return false
+    const cost = current ? packCost(current) : null
+    if (pack.state !== 'idle' || !current || current.special || cost === null || this.timers.deathMachine || !this.spend(cost)) return false
     // The gun goes in: your hands move to your other gun, or stay empty, until it comes out.
     const snapshot = this.weapons.snapshot()
     snapshot.slots[snapshot.selected] = null
@@ -562,9 +625,92 @@ export class ZombiesRuntime {
     if (other >= 0) snapshot.selected = other
     this.weapons.restore(snapshot)
     const capacity = WEAPON_RULES[current.name].capacity
-    pack.insert({ ...current, id: `${current.id}-packed`, packed: true, magazine: capacity, reserve: capacity * RESERVE_MAGAZINES * 2 })
+    const level = (current.packed ? current.packLevel ?? 1 : 0) + 1
+    pack.insert({ ...current, id: `${current.id}-packed${level}`, packed: true, packLevel: level, magazine: capacity, reserve: capacity * RESERVE_MAGAZINES * 2 })
     this.emit({ kind: 'pack-work', position: pack.point.clone(), radius: 30 })
     this.invalidate()
+    return true
+  }
+
+  /**
+   * Zombies are solid to you, as in Call of Duty: walk into one and you stop; get surrounded and you are
+   * boxed in. Runs after both have moved; a push never takes you into a wall.
+   */
+  private blockByZombies() {
+    const body = this.player.body, feet = body.position
+    const push = new THREE.Vector3()
+    for (const zombie of this.director?.zombies ?? []) {
+      if (zombie.state !== 'chase' || zombie.rise > 0 || zombie.climb) continue
+      if (Math.abs(zombie.position.y - feet.y) > 1.2) continue
+      const reach = PLAYER_BODY + ZOMBIE_BODY * (zombie.boss ? BOSS.scale : 1)
+      const dx = feet.x - zombie.position.x, dz = feet.z - zombie.position.z, d = Math.hypot(dx, dz)
+      if (d >= reach) continue
+      if (d < 1e-4) push.x += reach; else { push.x += dx / d * (reach - d); push.z += dz / d * (reach - d) }
+    }
+    if (push.lengthSq() < 1e-8) return
+    const target = feet.clone().add(push)
+    this.pushCapsule.start.copy(target).y += 0.3 + 0.05
+    this.pushCapsule.end.copy(target).y += 1.74 - 0.3
+    if (!this.player.world.fits(this.pushCapsule)) return
+    feet.copy(target)
+    // Stop pressing on into them.
+    const into = push.clone().normalize(), along = body.velocity.x * into.x + body.velocity.z * into.z
+    if (along < 0) { body.velocity.x -= into.x * along; body.velocity.z -= into.z * along }
+    this.camera.perspective.position.x += push.x
+    this.camera.perspective.position.z += push.z
+  }
+
+  /** Make something solid to the player: an invisible box around it in the collision world. */
+  private makeSolid(owner: THREE.Object3D, size: [number, number, number], offset: [number, number, number]) {
+    const old = this.solids.get(owner)
+    if (old) this.player.world.removeObject(old)
+    const box = new THREE.Mesh(new THREE.BoxGeometry(...size), new THREE.MeshBasicMaterial({ visible: false }))
+    box.name = `${owner.name} · solid`
+    // Solid to walk into only: bullets, sight lines and the reach test for its own prompt pass through.
+    box.userData.blocksSight = false
+    box.userData.blocksShots = false
+    owner.updateWorldMatrix(true, false)
+    box.position.set(...offset).applyMatrix4(owner.matrixWorld)
+    box.quaternion.copy(owner.getWorldQuaternion(new THREE.Quaternion()))
+    box.updateMatrixWorld(true)
+    this.player.world.addObject(box)
+    this.solids.set(owner, box)
+  }
+
+  /** The menu theme over menus, nothing in a round, the Brute's track while it lives, the requiem after death. */
+  private updateMusic() {
+    this.music.setMode(this.state.phase === 'dead' ? 'dead' : !this.player.playing ? 'menu'
+      : this.brute && this.brute.state === 'chase' ? 'boss' : 'play')
+  }
+
+  /**
+   * The Easter egg: three little ink skulls hidden about the compound. Touch one and it hums; touch all
+   * three in one game and the hidden song plays, as Call of Duty's maps hide theirs.
+   */
+  private placeSkulls() {
+    const graph = this.graph!, taken: THREE.Vector3[] = []
+    for (const [x, y, z] of SKULL_PLACES) {
+      const node = graph.nearest(new THREE.Vector3(x, y, z), 4)
+      if (node < 0) continue
+      graph.flow([graph.point(node)])
+      const [spot] = findWallSpots(graph, this.player.world, this.random, { count: 1, near: 0, far: 12, spacing: 4, avoid: taken })
+      const at = spot ? spot.wall.clone().addScaledVector(spot.normal, 0.18).setY(spot.stand.y) : graph.point(node)
+      taken.push(at.clone())
+      const skull = inkSkull()
+      skull.position.copy(at)
+      if (spot) skull.rotation.y = Math.atan2(spot.normal.x, spot.normal.z)
+      this.scene.add(skull)
+      this.skulls.push({ object: skull, found: false })
+    }
+  }
+
+  private touchSkull(skull: { object: THREE.Object3D; found: boolean }) {
+    if (!this.isActive() || skull.found) return false
+    if (this.camera.perspective.position.distanceTo(skull.object.position) > 2.6) return false
+    skull.found = true
+    skull.object.userData.found = true
+    this.emit({ kind: 'box-leave', position: skull.object.position.clone(), radius: 8 })
+    if (this.skulls.every(s => s.found)) this.music.sting('song')
     return true
   }
 
@@ -576,6 +722,7 @@ export class ZombiesRuntime {
     this.zombieHud.gain(PRICES.box)
     const others = this.boxSpots.filter(spot => spot !== box.spot)
     box.place(others[Math.floor(this.random() * others.length)] ?? box.spot)
+    this.makeSolid(box.root, [1.44, 0.66, 0.64], [0, 0.33, 0])
     this.hud.notify('The Mystery Box has moved. Follow its light.', 3.5)
     this.emit({ kind: 'box-leave', position: this.player.body.position.clone(), radius: 5 })
   }
@@ -599,7 +746,8 @@ export class ZombiesRuntime {
     if (box.state === 'offering') {
       const offer = box.take()
       if (!offer) return false
-      this.weapons.give(freshWeapon(`box-${offer.name}-${Math.floor(this.state.elapsed * 1000)}`, offer.name, offer.rarity))
+      const item = freshWeapon(`box-${offer.name}-${Math.floor(this.state.elapsed * 1000)}`, offer.name, offer.rarity)
+      this.weapons.give(offer.special ? { ...item, special: offer.special } : item)
       this.invalidate()
       return true
     }
@@ -607,7 +755,7 @@ export class ZombiesRuntime {
     const teddy = box.uses >= BOX_TEDDY_AFTER && this.boxSpots.length > 1 && this.random() < BOX_TEDDY_CHANCE
     box.spin(rollBox(this.random, this.weapons.slots), teddy)
     this.emit({ kind: 'box-open', position: box.point.clone(), radius: 25 })
-    this.emit({ kind: 'box-spin', position: box.point.clone(), radius: 30 })
+    this.music.sting('boxSpin')
     this.invalidate()
     return true
   }
@@ -622,8 +770,28 @@ export class ZombiesRuntime {
     this.zombieHud.gain(points)
   }
 
+  /**
+   * A gun upgraded twice or more sometimes bursts its kill in ink: every zombie close by takes a heavy
+   * blow. Area damage for the late rounds, where picking zombies off one by one gets slow.
+   */
+  private inkBurst(position: THREE.Vector3, level: number) {
+    const director = this.director
+    if (!director || level < 2 || this.random() >= (level >= 3 ? 0.4 : 0.25)) return
+    const centre = position.clone().setY(position.y + 0.8)
+    const damage = zombieHealth(this.rounds.round) * DIFFICULTY[this.difficulty].health * 0.9
+    for (const hit of director.blast(centre, 3.4, damage)) {
+      this.award(pointsForHit({ lethal: hit.lethal, zone: 'torso' }))
+      this.hits.hit(hit.reaction.point, hit.dealt, hit.zombie.id, false, hit.lethal)
+      if (hit.lethal) { this.state.kills++; this.killed(hit.zombie.position, hit.zombie) }
+    }
+    this.shockwaves.emit(position, 3.4)
+    this.riseMarks.emit(position)
+    this.emit({ kind: 'ink-burst', position: centre, radius: 40 })
+  }
+
   /** A kill by the player: the Brute pays and always leaves a Max Ammo; others may drop a power-up. */
-  private killed(position: THREE.Vector3, zombie?: Zombie) {
+  private killed(position: THREE.Vector3, zombie?: Zombie, weapon?: WeaponItem | null) {
+    if (weapon?.packed) this.inkBurst(position, weapon.packLevel ?? 1)
     if (zombie && zombie === this.brute) {
       this.brute = null
       this.award(BOSS.points)
@@ -656,6 +824,7 @@ export class ZombiesRuntime {
         break
       }
       case 'maxAmmo':
+        this.grenadeCount = GRENADE.max
         for (const item of [...this.weapons.slots, ...(this.heldWeapons?.slots ?? [])]) {
           if (!item || item.special) continue
           item.reserve = Math.max(item.reserve, WEAPON_RULES[item.name].capacity * RESERVE_MAGAZINES * (item.packed ? 2 : 1))
@@ -703,12 +872,19 @@ export class ZombiesRuntime {
     const distance = surface?.distance ?? shot.range
     this.impactPoint = null
     const scale = ZOMBIE_DAMAGE_SCALE * (this.perks.has('doubleLine') ? PERK_EFFECT.damage : 1)
-    const hit = this.director.hit(shot, distance, scale, !!this.timers.instaKill)
-    if (hit) {
+    const held = this.weapons.current
+    if (held?.special === 'rayGun') {
+      // A bolt, not a bullet: it flies, and bursts where it lands.
+      this.bolts.fire(shot.origin, shot.direction)
+      return
+    }
+    const struck = this.director.hitAll(shot, distance, scale, !!this.timers.instaKill, held ? pierceOf(held) : 1)
+    const hit = struck[0] ?? null
+    for (const each of struck) {
       this.hitFlash = 0.15
-      this.award(pointsForHit({ lethal: hit.lethal, zone: hit.reaction.zone }))
-      this.hits.hit(hit.reaction.point, hit.dealt, hit.zombie.id, hit.reaction.zone === 'head', hit.lethal)
-      if (hit.lethal) { this.state.kills++; if (hit.reaction.zone === 'head') this.state.headshots++; this.killed(hit.zombie.position, hit.zombie) }
+      this.award(pointsForHit({ lethal: each.lethal, zone: each.reaction.zone }))
+      this.hits.hit(each.reaction.point, each.dealt, each.zombie.id, each.reaction.zone === 'head', each.lethal)
+      if (each.lethal) { this.state.kills++; if (each.reaction.zone === 'head') this.state.headshots++; this.killed(each.zombie.position, each.zombie, held) }
     }
     const end = this.impactPoint ?? shot.origin.clone().addScaledVector(shot.direction, distance)
     const impact = !hit && surface ? () => {
@@ -716,6 +892,60 @@ export class ZombiesRuntime {
       this.impacts.emit(end, shot.direction, surface, shot.weapon)
     } : undefined
     this.bulletTrails.emit(shot.origin, end, shot.weapon, undefined, impact)
+  }
+
+  /** Throw a frag the way you are looking, a little up, carrying your own speed with it. */
+  throwGrenade() {
+    if (!this.isActive() || this.grenadeCount <= 0 || this.grenadeCooldown > 0) return false
+    this.grenadeCount--
+    this.grenadeCooldown = GRENADE.cooldown
+    this.weapons.cancel()
+    this.interactionTime = Math.max(this.interactionTime, 0.35)
+    const camera = this.camera.perspective
+    const forward = camera.getWorldDirection(new THREE.Vector3())
+    const origin = camera.getWorldPosition(new THREE.Vector3()).addScaledVector(forward, 0.45).add(new THREE.Vector3(0, -0.12, 0))
+    this.grenades.throw(origin, forward, this.player.body.velocity.clone().multiplyScalar(0.5))
+    this.emit({ kind: 'grenade-throw', position: origin, radius: 6 })
+    return true
+  }
+
+  /** An Ink Ray bolt bursts: a splash that kills most things near it, and stings you point-blank. */
+  private boltBurst(at: THREE.Vector3) {
+    const director = this.director
+    if (!director) return
+    const damage = Math.max(1500, zombieHealth(this.rounds.round) * DIFFICULTY[this.difficulty].health * 1.6)
+    for (const hit of director.blast(at, INK_RAY.radius, damage)) {
+      this.hitFlash = 0.15
+      this.award(pointsForHit({ lethal: hit.lethal, zone: 'torso' }))
+      this.hits.hit(hit.reaction.point, hit.dealt, hit.zombie.id, false, hit.lethal)
+      if (hit.lethal) { this.state.kills++; this.killed(hit.zombie.position, hit.zombie) }
+    }
+    const eye = this.camera.perspective.getWorldPosition(new THREE.Vector3())
+    const distance = eye.distanceTo(at)
+    if (distance < INK_RAY.selfRadius) this.damage(Math.round(INK_RAY.selfDamage * (1 - distance / INK_RAY.selfRadius)), 'zombie', at.clone())
+    this.shockwaves.emit(at.clone().setY(at.y - 0.5), INK_RAY.radius)
+    this.sparks.emit(at, new THREE.Vector3(0, 1, 0), 8)
+    this.emit({ kind: 'ink-burst', position: at.clone(), radius: 60 })
+  }
+
+  /** A frag goes off: every zombie in reach takes a heavy blow; you too, if you stood too close. */
+  private grenadeBlast(at: THREE.Vector3) {
+    const director = this.director
+    if (!director) return
+    const damage = Math.max(600, zombieHealth(this.rounds.round) * DIFFICULTY[this.difficulty].health * 1.2)
+    for (const hit of director.blast(at, GRENADE.radius, damage)) {
+      this.award(pointsForHit({ lethal: hit.lethal, zone: 'torso' }))
+      this.hits.hit(hit.reaction.point, hit.dealt, hit.zombie.id, false, hit.lethal)
+      if (hit.lethal) { this.state.kills++; this.killed(hit.zombie.position, hit.zombie) }
+    }
+    const eye = this.camera.perspective.getWorldPosition(new THREE.Vector3())
+    const distance = eye.distanceTo(at)
+    if (distance < GRENADE.selfRadius && this.player.world.visible(at.clone().setY(at.y + 0.3), eye, new THREE.Object3D()))
+      this.damage(Math.round(GRENADE.selfDamage * (1 - distance / GRENADE.selfRadius)), 'zombie', at.clone())
+    this.shockwaves.emit(at, GRENADE.radius)
+    this.riseMarks.emit(at)
+    this.sparks.emit(at.clone().setY(at.y + 0.2), new THREE.Vector3(0, 1, 0), 10)
+    this.emit({ kind: 'grenade-blast', position: at.clone(), radius: 120 })
   }
 
   knife() {
@@ -867,8 +1097,9 @@ export class ZombiesRuntime {
       const events = stepRounds(this.rounds, dt, this.director.aliveCount, 1, DIFFICULTY[this.difficulty].spawnDelay)
       this.state.round = this.rounds.round
       if (events.roundStarted) {
-        this.zombieHud.announce(`Round ${events.roundStarted}`); this.dropper.newRound(); this.emit({ kind: 'round-start' })
+        this.zombieHud.announce(`Round ${events.roundStarted}`); this.dropper.newRound(); this.music.sting('roundStart')
         if (isBossRound(events.roundStarted)) this.bruteTimer = BOSS.delay
+        if (events.roundStarted > 1) this.grenadeCount = Math.min(GRENADE.max, this.grenadeCount + GRENADE.perRound)
       }
       if (this.bruteTimer > 0 && (this.bruteTimer -= dt) <= 0) this.spawnBrute()
       let failed = 0
@@ -876,6 +1107,7 @@ export class ZombiesRuntime {
       returnSpawns(this.rounds, failed)
       if (events.roundEnded) { this.zombieHud.announce(`Round ${events.roundEnded} survived`, 3.5); this.emit({ kind: 'round-end' }) }
       this.director.update(dt, target())
+      this.blockByZombies()
       this.relocateStranded(dt)
       // Health comes back after a few seconds without being hit, as in Call of Duty.
       if (this.state.phase === 'active' && this.state.elapsed - this.lastHurt > PLAYER_HEALTH.regenDelay)
@@ -902,6 +1134,9 @@ export class ZombiesRuntime {
       if (boxEvent === 'moved') this.moveBox()
       this.blood.update(dt); this.impacts.update(dt); this.riseMarks.update(dt); this.sparks.update(dt); this.shockwaves.update(dt)
       this.zones?.update(dt)
+      this.grenadeCooldown = Math.max(0, this.grenadeCooldown - dt)
+      for (const at of this.grenades.update(dt)) this.grenadeBlast(at)
+      for (const at of this.bolts.update(dt)) this.boltBurst(at)
       this.tickPowerups(dt)
       const speed = Math.hypot(body.velocity.x, body.velocity.z)
       if (speed > 0.5 && body.grounded || this.player.actions.climbing) {
@@ -937,7 +1172,8 @@ export class ZombiesRuntime {
         moving: this.player.body.velocity.length(), aiming: this.aiming, reducedMotion: this.hud.reducedMotion, feet: this.player.body.position, hitPose })
     }
     this.bottle.update(dt)
-    this.packedLook.update(dt, this.weapons.heldModel, !!this.weapons.current?.packed)
+    const held = this.weapons.current
+    this.packedLook.update(dt, this.weapons.heldModel, held?.packed ? held.packLevel ?? 1 : 0)
     this.audio.update(this.camera.perspective)
     this.hud.setScoped(this.weapons.scoped, this.weapons.scopeMagnification)
     const running = active || deathPlaying ? dt : 0
@@ -948,6 +1184,8 @@ export class ZombiesRuntime {
     this.hotbar.update(this.weapons.slots, this.weapons.selectedSlot)
     this.zombieHud.update(running, this.state.round, this.state.points)
     this.zombieHud.boss(this.brute && this.brute.state === 'chase' ? this.brute.health / this.brute.maxHealth : null)
+    this.zombieHud.grenades(this.grenadeCount)
+    this.updateMusic()
     // The heart shows health as a share of your maximum, which Thick Ink raises.
     this.hud.update(dt, { ...this.state, health: this.state.health / this.maxHealth() * 100 }, { playing: this.player.playing, enabled: this.player.enabled && !this.player.immersive,
       weapon: this.weapons.current, reloading: this.weapons.reloading, position: this.player.body.position,
@@ -962,11 +1200,13 @@ export class ZombiesRuntime {
     for (const buy of this.wallBuys) buy.dispose()
     this.box?.dispose()
     this.zones?.dispose()
+    for (const box of this.solids.values()) { this.player.world.removeObject(box); box.geometry.dispose() }
     for (const machine of this.perkMachines) machine.dispose()
     this.pack?.dispose(); this.bottle.dispose(); this.packedLook.dispose()
     this.director?.dispose()
     this.hits.dispose(); this.indicator.dispose(); this.hotbar.dispose(); this.zombieHud.dispose()
-    this.bulletTrails.dispose(); this.weapons.dispose(); this.blood.dispose(); this.impacts.dispose(); this.riseMarks.dispose(); this.sparks.dispose(); this.shockwaves.dispose(); this.powerups.dispose()
+    this.bulletTrails.dispose(); this.weapons.dispose(); this.blood.dispose(); this.impacts.dispose(); this.riseMarks.dispose(); this.sparks.dispose(); this.shockwaves.dispose(); this.grenades.dispose(); this.bolts.dispose(); this.powerups.dispose()
+    for (const skull of this.skulls) skull.object.removeFromParent()
     this.audio.dispose(); this.music.dispose(); this.hud.dispose()
     this.player.movementLocked = false; this.player.onPlayingChange = () => {}; this.player.lookSensitivity = () => 1
     this.player.actions.extraTargets = () => []; this.player.actions.onAction = () => {}
