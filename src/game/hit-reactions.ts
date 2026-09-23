@@ -133,6 +133,8 @@ export class MissionBlood {
   private scale = new THREE.Vector3()
   private disposed = false
   private regions = new Map<string, CollisionWorld>()
+  /** The Blood setting: red, black ink, or none at all. */
+  private stainColor = new THREE.Color(bloodPalette.stain)
 
   constructor(scene: THREE.Scene, private world: Pick<CollisionWorld, 'floor' | 'rayDistance'> & Partial<Pick<CollisionWorld, 'region'>>,
     private followBody?: (targetId: string) => THREE.Vector3 | null) {
@@ -149,6 +151,13 @@ export class MissionBlood {
     this.marks.renderOrder = 1
     this.root.add(this.drops, this.marks)
     scene.add(this.root)
+  }
+
+  /** Red (as it was), black ink to match the art, or off: nothing drawn at all. */
+  setMode(mode: 'red' | 'ink' | 'off') {
+    this.root.visible = mode !== 'off'
+    this.stainColor.setHex(mode === 'ink' ? 0x161616 : bloodPalette.stain)
+    ;(this.drops.material as THREE.MeshBasicMaterial).color.setHex(mode === 'ink' ? 0x111111 : bloodPalette.fresh)
   }
 
   private random() { this.seed = (Math.imul(this.seed, 1664525) + 1013904223) >>> 0; return this.seed / 4294967296 }
@@ -311,7 +320,7 @@ export class MissionBlood {
       this.orientation.setFromAxisAngle(up, mark.angle)
       this.scale.set(mark.size, 1, mark.size * 1.15)
       this.marks.setMatrixAt(index, this.matrix.compose(this.position, this.orientation, this.scale))
-      this.marks.setColorAt(index, new THREE.Color(bloodPalette.stain))
+      this.marks.setColorAt(index, this.stainColor)
       this.surface.stamps.setXY(index, mark.stamp, 1)
     })
     this.marks.instanceMatrix.needsUpdate = this.surface.stamps.needsUpdate = true

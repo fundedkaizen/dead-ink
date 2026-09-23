@@ -424,6 +424,7 @@ export class ZombiesRuntime {
         onRise: position => { this.riseMarks.emit(position); this.emit({ kind: 'zombie-rise', position, radius: 30 }) },
         onSlam: (position, radius) => { this.shockwaves.emit(position, radius); this.riseMarks.emit(position) } })
       await this.director.init(POOL_SIZE)
+      this.applySettings()
       if (this.disposed) return
       // Every zone but the first shut behind its gate, before anything is placed.
       this.zones = new ZoneGates(this.scene, this.player.world, graph)
@@ -1326,6 +1327,10 @@ export class ZombiesRuntime {
   /** Volumes and mute from the settings store: master x music for the songs, master x effects for the rest. */
   private applySettings() {
     const s = getSettings()
+    // Blood: red, black ink, or off (the ink gore goes with it when off).
+    const blood = (s as { blood?: 'red' | 'ink' | 'off' }).blood ?? 'red'
+    this.blood.setMode(blood)
+    if (this.director) this.director.gore.root.visible = blood !== 'off'
     this.audio.setMuted(s.muted); this.music.setMuted(s.muted)
     this.audio.setVolume(volumeFor(s, 'effects')); this.music.setVolume(volumeFor(s, 'music'))
   }

@@ -9,7 +9,7 @@ import { EnemyDirector } from './ai'
 import { FirstPersonWeapons } from './weapons'
 import { MissionAudio } from './audio'
 import { MissionHUD } from './hud'
-import { getSettings, lookScale, volumeFor } from './settings'
+import { getSettings, lookScale, subscribeSettings, volumeFor } from './settings'
 import { MissionBlood, type BloodSnapshot } from './hit-reactions'
 import { MissionImpacts } from './impacts'
 import { PlayerHitReactions, type PlayerBulletHit } from './player-hit-reactions'
@@ -75,6 +75,10 @@ export class MissionRuntime {
       if (!enemy || enemy.state !== 'dead' || enemy.deathClip !== 'dieShotgun') return null
       return enemy.actor.rig.bones.chest.getWorldPosition(new THREE.Vector3())
     })
+    // The Blood setting: red, black ink, or off.
+    const applyBlood = () => this.blood.setMode((getSettings() as { blood?: 'red' | 'ink' | 'off' }).blood ?? 'red')
+    this.stopBlood = subscribeSettings(applyBlood)
+    applyBlood()
     this.impacts = new MissionImpacts(scene, player.world)
     this.bulletTrails = new BulletTrails(scene, 'Player bullet')
     this.escapeDust = new EscapeDust(scene)
@@ -532,5 +536,6 @@ export class MissionRuntime {
   }
 
   finishFrame() { this.playerHits.removeCamera() }
-  dispose() { this.escape.reset(this.camera.perspective);this.escapeDust.dispose();this.playerHits.clear();this.disposed=true;this.abort.abort();this.bulletTrails.dispose();this.escort.dispose();this.weapons.dispose();this.ai.dispose();this.blood.dispose();this.impacts.dispose();this.audio.dispose();this.hud.dispose();this.player.movementLocked=false;this.player.onPlayingChange=()=>{};this.player.lookSensitivity=()=>1;this.player.actions.extraTargets=()=>[];this.player.actions.onAction=()=>{} }
+  private stopBlood: () => void = () => {}
+  dispose() { this.stopBlood(); this.escape.reset(this.camera.perspective);this.escapeDust.dispose();this.playerHits.clear();this.disposed=true;this.abort.abort();this.bulletTrails.dispose();this.escort.dispose();this.weapons.dispose();this.ai.dispose();this.blood.dispose();this.impacts.dispose();this.audio.dispose();this.hud.dispose();this.player.movementLocked=false;this.player.onPlayingChange=()=>{};this.player.lookSensitivity=()=>1;this.player.actions.extraTargets=()=>[];this.player.actions.onAction=()=>{} }
 }
