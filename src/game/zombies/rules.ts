@@ -126,6 +126,16 @@ export const BOSS = {
 export const isBossRound = (round: number) => round > 0 && round % BOSS.every === 0
 
 /**
+ * The Ink Storm, Dead Ink's answer to Call of Duty's hellhound rounds: now and then ink floods the
+ * compound and the light goes, and a smaller pack comes all at a sprint, weaker but quicker to arrive.
+ * Clear it and a Max Ammo drops where the last one fell. Our own design, tuned by play: round 7, then
+ * every seventh round, never on a Brute round.
+ */
+export const STORM = { first: 7, every: 7, count: 0.6, health: 0.6, spawnDelay: 0.5 } as const
+export const isStormRound = (round: number) =>
+  round >= STORM.first && (round - STORM.first) % STORM.every === 0 && !isBossRound(round)
+
+/**
  * Difficulty, our own: health and damage multipliers on Call of Duty's numbers, how many rounds earlier
  * (or later) sprinters take over, and how fast zombies come. Normal is Call of Duty as it is.
  */

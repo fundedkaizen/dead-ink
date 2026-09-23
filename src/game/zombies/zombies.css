@@ -56,6 +56,9 @@ body[data-reduced-motion="true"] .dead-ink-powerup.ending { animation: none; opa
 body[data-dead-ink-nuke="true"] #world { animation: dead-ink-nuke 0.7s ease-out; }
 @keyframes dead-ink-nuke { 0% { filter: invert(1) contrast(1.4); } 35% { filter: invert(1); } 100% { filter: none; } }
 body[data-reduced-motion="true"][data-dead-ink-nuke="true"] #world { animation: none; }
+/* The Ink Storm: the light goes while it lasts. */
+#world { transition: filter 2.5s ease; }
+body[data-dead-ink-storm="true"] #world { filter: brightness(0.58) contrast(1.3) saturate(0.55); }
 /* Second Draft: down in grey, swimming; up again as the colour floods back, blue for the perk. */
 body[data-dead-ink-revive="true"] #world { animation: dead-ink-revive 2.4s linear; }
 @keyframes dead-ink-revive {

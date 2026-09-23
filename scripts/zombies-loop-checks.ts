@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import * as THREE from 'three'
-import { MAX_ALIVE, POWERUPS, ROUND_BREAK, zombiesInRound } from '../src/game/zombies/rules'
+import { MAX_ALIVE, POWERUPS, ROUND_BREAK, isBossRound, isStormRound, zombiesInRound } from '../src/game/zombies/rules'
 import { DROPPED_KINDS, PowerupDropper } from '../src/game/zombies/powerups'
 import { FIRST_ROUND_DELAY, newGame, returnSpawns, stepRounds } from '../src/game/zombies/rounds'
 import { BOX_WEIGHTS, RESERVE_MAGAZINES, WALL_WEAPONS, ZOMBIE_SLOTS, freshWeapon, pointsForHit, rollBox, startingPistol, wallOffer } from '../src/game/zombies/economy'
@@ -228,4 +228,12 @@ assert.equal(freshWeapon('z', 'smg').reserve, WEAPON_RULES.smg.capacity * RESERV
     spots.map(s => s.wall.toArray()), 'the same seed gives the same layout')
   console.log(`zombies loop checks passed; wall spots at walking distances ${spots.map(s => s.walk.toFixed(0)).join(', ')} m`)
   world.dispose()
+}
+
+// Ink Storm rounds: round 7 and every seventh after, never a Brute round.
+{
+  const storms = Array.from({ length: 50 }, (_, i) => i + 1).filter(isStormRound)
+  assert.deepEqual(storms.slice(0, 4), [7, 14, 21, 28], `storms on ${storms.slice(0, 4)}`)
+  assert(!storms.some(isBossRound), 'a storm never lands on a Brute round')
+  assert(!storms.includes(35), 'round 35 is the Brute round')
 }

@@ -55,6 +55,8 @@ export class DeadInkAudio extends MissionAudio {
       case 'powerup-drop': this.shimmer(event); break
       case 'powerup-grab': this.arpeggio(event, [659.3, 880, 1318.5], 0.07, 'triangle', 0.22); break
       case 'nuke': this.boom(event); break
+      // The Ink Storm rolling in: thunder, then the rain of grit.
+      case 'storm': this.boom(event); this.dirt(event); break
       case 'round-start': this.bell(event, [55, 82.4, 110], 3.2, 0.5); break
       // The round is over, not won: a low minor chord under a tolling, slightly sour bell.
       case 'round-end': this.bell(event, [73.4, 87.3, 110, 103.8], 4.2, 0.55); break

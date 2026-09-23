@@ -26,7 +26,7 @@ import { NavGraph, geometryHash, type NavData } from './navgraph'
 import { pickSpawn } from './spawn'
 import { findWallSpots, type WallSpot } from './placement'
 import { newGame, returnSpawns, stepRounds, type RoundState } from './rounds'
-import { BOSS, DIFFICULTY, MAX_ALIVE, PLAYER_HEALTH, POWERUPS, PRICES, STARTING_POINTS, ZOMBIE_DAMAGE_SCALE, isBossRound, movementMix, zombieHealth, type Difficulty, type PowerupKind } from './rules'
+import { BOSS, DIFFICULTY, MAX_ALIVE, PLAYER_HEALTH, POWERUPS, PRICES, STARTING_POINTS, STORM, ZOMBIE_DAMAGE_SCALE, isBossRound, isStormRound, movementMix, zombieHealth, type Difficulty, type PowerupKind } from './rules'
 import { BOX_WEIGHTS, WALL_WEAPONS, ZOMBIE_SLOTS, freshWeapon, pointsForHit, rollBox, startingPistol, wallOffer, RESERVE_MAGAZINES } from './economy'
 import { MysteryBox, WallBuy } from './stations'
 import { ZombieHud } from './hud'
@@ -178,6 +178,9 @@ export class ZombiesRuntime {
   /** Seconds of grace after Second Draft gets you back up. */
   private reviveGrace = 0
   private revive = new SecondDraftRevive()
+  /** An Ink Storm round is on; the last kill's place, for its Max Ammo. */
+  private storm = false
+  private lastKillAt: THREE.Vector3 | null = null
   private random: Random
   private spawn = new THREE.Vector3(...SPAWN_POINT)
   private abort = new AbortController()
@@ -365,6 +368,7 @@ export class ZombiesRuntime {
     this.powerups.clear(); this.timers = {}; this.earned = 0; this.heldWeapons = null
     this.perks.clear(); this.pendingPerk = null; this.reviveGrace = 0; this.applyPerks(); this.zombieHud.perks([])
     this.revive.reset(); this.player.movementLocked = false
+    this.setStorm(false)
     this.brute = null; this.bruteTimer = -1
     for (const skull of this.skulls) { skull.found = false; skull.object.userData.found = false }
     this.music.stopStings()
@@ -800,6 +804,7 @@ export class ZombiesRuntime {
 
   /** A kill by the player: the Brute pays and always leaves a Max Ammo; others may drop a power-up. */
   private killed(position: THREE.Vector3, zombie?: Zombie, weapon?: WeaponItem | null) {
+    this.lastKillAt = position.clone()
     if (weapon?.packed) this.inkBurst(position, weapon.packLevel ?? 1)
     if (zombie && zombie === this.brute) {
       this.brute = null
@@ -1029,8 +1034,26 @@ export class ZombiesRuntime {
     const spot = pickSpawn(graph, this.player.world, { near: 14, far: 42, eyes: [] }, this.random)
     if (!spot) return false
     const feet = this.player.body.position
-    const health = Math.round(zombieHealth(this.rounds.round) * DIFFICULTY[this.difficulty].health)
-    return !!director.spawn(spot, health, this.gait(), Math.atan2(feet.x - spot.x, feet.z - spot.z), true)
+    const health = Math.round(zombieHealth(this.rounds.round) * DIFFICULTY[this.difficulty].health * (this.storm ? STORM.health : 1))
+    return !!director.spawn(spot, health, this.storm ? 'sprint' : this.gait(), Math.atan2(feet.x - spot.x, feet.z - spot.z), true)
+  }
+
+  /** The Ink Storm darkens the page while it lasts. */
+  private setStorm(on: boolean) {
+    this.storm = on
+    this.lastKillAt = null
+    if (on && !this.hud.reducedMotion) document.body.dataset.deadInkStorm = 'true'
+    else delete document.body.dataset.deadInkStorm
+  }
+
+  /** The storm is cleared: a Max Ammo where the last one fell, and the light comes back. */
+  private stormReward() {
+    const at = (this.lastKillAt ?? this.player.body.position).clone()
+    const floor = this.player.world.floor(at.clone().setY(at.y + 2.2), 0.1, 3)
+    if (Number.isFinite(floor)) at.y = floor
+    this.powerups.spawn('maxAmmo', at)
+    this.emit({ kind: 'powerup-drop', position: at.clone(), radius: 40 })
+    this.setStorm(false)
   }
 
   /** The Brute climbs out of the ground somewhere it can walk to you from, and roars. */
@@ -1103,10 +1126,17 @@ export class ZombiesRuntime {
         this.hud.notify('That is the edge of the map.', 3)
       } else if (!this.player.actions.traversing) this.damage(fallDamage(landingSpeed), 'fall')
       // Rounds: announce, feed zombies in, and hand back any that found nowhere to stand.
-      const events = stepRounds(this.rounds, dt, this.director.aliveCount, 1, DIFFICULTY[this.difficulty].spawnDelay)
+      const events = stepRounds(this.rounds, dt, this.director.aliveCount, 1, DIFFICULTY[this.difficulty].spawnDelay * (this.storm ? STORM.spawnDelay : 1))
       this.state.round = this.rounds.round
       if (events.roundStarted) {
-        this.zombieHud.announce(`Round ${events.roundStarted}`); this.dropper.newRound(); this.music.sting('roundStart')
+        this.dropper.newRound(); this.music.sting('roundStart')
+        this.setStorm(isStormRound(events.roundStarted))
+        if (this.storm) {
+          // A smaller pack: this step may already have fed some in.
+          this.rounds.toSpawn = Math.max(0, Math.ceil((this.rounds.toSpawn + events.spawn) * STORM.count) - events.spawn)
+          this.zombieHud.announce(`Round ${events.roundStarted}: Ink Storm`, 3.5)
+          this.emit({ kind: 'storm' })
+        } else this.zombieHud.announce(`Round ${events.roundStarted}`)
         if (isBossRound(events.roundStarted)) this.bruteTimer = BOSS.delay
         if (events.roundStarted > 1) this.grenadeCount = Math.min(GRENADE.max, this.grenadeCount + GRENADE.perRound)
       }
@@ -1114,7 +1144,10 @@ export class ZombiesRuntime {
       let failed = 0
       for (let i = 0; i < events.spawn; i++) if (!this.spawnZombie()) failed++
       returnSpawns(this.rounds, failed)
-      if (events.roundEnded) { this.zombieHud.announce(`Round ${events.roundEnded} survived`, 3.5); this.emit({ kind: 'round-end' }) }
+      if (events.roundEnded) {
+        this.zombieHud.announce(this.storm ? 'The storm passes' : `Round ${events.roundEnded} survived`, 3.5); this.emit({ kind: 'round-end' })
+        if (this.storm) this.stormReward()
+      }
       this.director.update(dt, target())
       this.blockByZombies()
       this.relocateStranded(dt)
@@ -1227,6 +1260,7 @@ export class ZombiesRuntime {
     this.hits.dispose(); this.indicator.dispose(); this.hotbar.dispose(); this.zombieHud.dispose()
     this.bulletTrails.dispose(); this.weapons.dispose(); this.blood.dispose(); this.impacts.dispose(); this.riseMarks.dispose(); this.sparks.dispose(); this.shockwaves.dispose(); this.grenades.dispose(); this.bolts.dispose(); this.powerups.dispose()
     for (const skull of this.skulls) skull.object.removeFromParent()
+    delete document.body.dataset.deadInkStorm
     this.audio.dispose(); this.music.dispose(); this.hud.dispose()
     this.player.movementLocked = false; this.player.onPlayingChange = () => {}; this.player.lookSensitivity = () => 1
     this.player.actions.extraTargets = () => []; this.player.actions.onAction = () => {}
