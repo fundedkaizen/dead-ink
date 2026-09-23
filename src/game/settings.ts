@@ -6,6 +6,9 @@
  * The menu writes here; runtime code reads `getSettings()` and applies changes through `subscribeSettings`.
  */
 export type Quality = 'low' | 'medium' | 'high'
+/** Red blood, black ink instead of red, or no blood or gore at all. */
+export type Blood = 'red' | 'ink' | 'off'
+export const BLOOD_LABELS: Record<Blood, string> = { red: 'Red', ink: 'Ink', off: 'Off' }
 export type Settings = {
   /** Vertical field of view in degrees while walking, unscoped. */
   fov: number
@@ -13,6 +16,11 @@ export type Settings = {
   sensitivity: number
   /** Multiplies the look speed again while aiming down sights (on top of any scope's own slowdown). */
   adsSensitivity: number
+  /** Multiplies a gamepad's right-stick look speed (the aiming multiplier applies on top, as for the mouse). */
+  controllerSensitivity: number
+  /** Pushing the right stick up looks down (gamepad only). */
+  invertY: boolean
+  blood: Blood
   quality: Quality
   /** 0 to 100. Master scales music and effects. */
   masterVolume: number
@@ -23,15 +31,16 @@ export type Settings = {
   reducedMotion: boolean | null
 }
 
-/** What the game used before settings existed: 75 degrees walking, 55% volume, full resolution. */
+/** What the game used before settings existed: 75 degrees walking, 55% volume, full resolution, red blood. */
 export const DEFAULT_SETTINGS: Readonly<Settings> = {
-  fov: 75, sensitivity: 1, adsSensitivity: 1, quality: 'high',
+  fov: 75, sensitivity: 1, adsSensitivity: 1, controllerSensitivity: 1, invertY: false, blood: 'red', quality: 'high',
   masterVolume: 55, musicVolume: 100, effectsVolume: 100, muted: false, reducedMotion: null,
 }
 export const SETTING_LIMITS = {
   fov: { min: 60, max: 110, step: 1 },
   sensitivity: { min: 0.2, max: 3, step: 0.05 },
   adsSensitivity: { min: 0.3, max: 1.5, step: 0.05 },
+  controllerSensitivity: { min: 0.3, max: 3, step: 0.05 },
   volume: { min: 0, max: 100, step: 1 },
 } as const
 
@@ -62,6 +71,9 @@ export function sanitizeSettings(raw: unknown): Settings {
     fov: Math.round(clamp(data.fov, L.fov.min, L.fov.max, d.fov)),
     sensitivity: clamp(data.sensitivity, L.sensitivity.min, L.sensitivity.max, d.sensitivity),
     adsSensitivity: clamp(data.adsSensitivity, L.adsSensitivity.min, L.adsSensitivity.max, d.adsSensitivity),
+    controllerSensitivity: clamp(data.controllerSensitivity, L.controllerSensitivity.min, L.controllerSensitivity.max, d.controllerSensitivity),
+    invertY: typeof data.invertY === 'boolean' ? data.invertY : d.invertY,
+    blood: data.blood === 'red' || data.blood === 'ink' || data.blood === 'off' ? data.blood : d.blood,
     quality: typeof data.quality === 'string' && data.quality in QUALITY ? data.quality as Quality : d.quality,
     masterVolume: Math.round(clamp(data.masterVolume, 0, 100, d.masterVolume)),
     musicVolume: Math.round(clamp(data.musicVolume, 0, 100, d.musicVolume)),

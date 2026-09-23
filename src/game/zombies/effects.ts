@@ -85,7 +85,9 @@ export class RiseMarks {
       this.scale.setScalar(mark.size * (0.4 + 0.6 * grow))
       this.quaternion.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, mark.angle)
       this.marks.setMatrixAt(i, this.matrix.compose(mark.position, this.quaternion, this.scale))
-      this.marks.setColorAt(i, this.color.copy(INK).lerp(PAPER, fade))
+      // Grey while the zombie claws out, so its black fists read against it; ink once it is up.
+      const settle = THREE.MathUtils.smoothstep(mark.age, 0.6, 1.9)
+      this.marks.setColorAt(i, this.color.copy(INK).lerp(PAPER, Math.max(fade, 0.55 * (1 - settle))))
     })
     this.marks.count = this.active.length
     this.marks.instanceMatrix.needsUpdate = true

@@ -343,7 +343,7 @@ export class NavGraph {
       if (d < dist[start]) { dist[start] = d; this.heap.push(start, d) }
     }
     while (this.heap.length) {
-      const [node, d] = this.heap.pop()
+      const node = this.heap.pop(), d = this.heap.poppedKey
       if (d > dist[node]) continue
       this.point(node, a)
       if (node < this.cells) {
@@ -764,14 +764,16 @@ export class NavGraph {
 
 /** A small binary min-heap of (node, priority). */
 class MinHeap {
+  // Parallel arrays that only ever grow: the flow field refills this several times a second, and emptying
+  // an array by setting its length frees its storage, so every refresh used to allocate it all again.
   private nodes: number[] = []
   private keys: number[] = []
-  get length() { return this.nodes.length }
-  clear() { this.nodes.length = 0; this.keys.length = 0 }
+  private size = 0
+  get length() { return this.size }
+  clear() { this.size = 0 }
   push(node: number, key: number) {
     const nodes = this.nodes, keys = this.keys
-    let i = nodes.length
-    nodes.push(node); keys.push(key)
+    let i = this.size++
     while (i > 0) {
       const parent = (i - 1) >> 1
       if (keys[parent] <= key) break
@@ -780,13 +782,16 @@ class MinHeap {
     }
     nodes[i] = node; keys[i] = key
   }
-  pop(): [number, number] {
+  /** The key of the node pop() last returned (no tuple per pop: the flow field pops thousands a refresh). */
+  poppedKey = 0
+  pop(): number {
     const nodes = this.nodes, keys = this.keys
-    const top: [number, number] = [nodes[0], keys[0]]
-    const lastNode = nodes.pop()!, lastKey = keys.pop()!
-    if (nodes.length) {
+    const top = nodes[0]
+    this.poppedKey = keys[0]
+    const n = --this.size
+    const lastNode = nodes[n], lastKey = keys[n]
+    if (n > 0) {
       let i = 0
-      const n = nodes.length
       while (true) {
         const l = 2 * i + 1, r = l + 1
         let smallest = i, sk = lastKey

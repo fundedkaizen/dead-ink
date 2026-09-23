@@ -73,6 +73,9 @@ function* gridPathJob(start: GridPoint, goal: GridPoint, traversable: (x: number
   return []
 }
 
+const doorSegment = new THREE.Line3(), doorClosest = new THREE.Vector3()
+const stepDirection = new THREE.Vector3(), stepAhead = new THREE.Vector3(), stepNext = new THREE.Vector3()
+
 /** A low-resolution shared navigation cache built from the real player collision geometry. */
 export class EnemyNavigation {
   private capsule = new Capsule(new THREE.Vector3(), new THREE.Vector3(), 0.27)
@@ -126,6 +129,12 @@ export class EnemyNavigation {
     const candidate = new THREE.Vector3(position.x, height + 0.024, position.z)
     return this.fits(candidate, planning) ? candidate : null
   }
+
+  /**
+   * floor(position) for a spot that step() or floor() just returned: the ground is already found, so only
+   * the planning clearance is tested (the ground search is half the cost of a zombie's step).
+   */
+  fitsPlanned(position: THREE.Vector3) { return this.fits(position, true) }
 
   /** Samples the swept capsule, including floor continuity; never authorizes crossing a wall. */
   segment(from: THREE.Vector3, to: THREE.Vector3, planning = true) {
@@ -214,12 +223,14 @@ export class EnemyNavigation {
 
   /** Open a threshold only when the planned direction crosses it; physical clearance still gates movement. */
   prepareDoor(position: THREE.Vector3, next: THREE.Vector3) {
-    const segment = new THREE.Line3(position, next)
+    // Every zombie step asks this, so it allocates nothing until a door is actually near.
     for (const entry of this.doorPositions) {
       if (entry.door.userData.missionLocked) continue
-      if (Math.hypot(position.x - entry.position.x, position.z - entry.position.z) > 2.2) continue
-      const closest = segment.closestPointToPoint(entry.position, true, new THREE.Vector3())
-      if (Math.hypot(closest.x - entry.position.x, closest.z - entry.position.z) > 0.85) continue
+      const ax = position.x - entry.position.x, az = position.z - entry.position.z
+      if (ax * ax + az * az > 2.2 * 2.2) continue
+      const closest = doorSegment.set(position, next).closestPointToPoint(entry.position, true, doorClosest)
+      const bx = closest.x - entry.position.x, bz = closest.z - entry.position.z
+      if (bx * bx + bz * bz > 0.85 * 0.85) continue
       if (!entry.door.userData.open) {
         setDoorOpen(entry.door, true)
         this.emit({ kind: 'door', position: entry.position.clone(), radius: 4 })
@@ -240,12 +251,12 @@ export class EnemyNavigation {
   }
 
   step(position: THREE.Vector3, destination: THREE.Vector3, distance: number) {
-    const direction = destination.clone().sub(position).setY(0)
+    const direction = stepDirection.copy(destination).sub(position).setY(0)
     const travel = Math.min(distance, direction.length())
     if (!travel) return position.clone()
-    const next = position.clone().addScaledVector(direction.normalize(), travel)
-    this.prepareDoor(position, position.clone().addScaledVector(direction, 1.8))
-    return this.floor(next, false)
+    direction.normalize()
+    this.prepareDoor(position, stepAhead.copy(position).addScaledVector(direction, 1.8))
+    return this.floor(stepNext.copy(position).addScaledVector(direction, travel), false)
   }
 
   clear() { this.samples.clear(); this.routes.clear() }

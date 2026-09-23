@@ -4,6 +4,7 @@ import { EnvironmentInteractions } from '../interactions'
 import { CollisionWorld } from './collision'
 import { PlayerBody } from './body'
 import { PlayerActions } from './actions'
+import { SprintStamina } from './stamina'
 
 const movementKeys = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight', 'ShiftLeft', 'ShiftRight', 'Space']
 
@@ -19,6 +20,18 @@ export class FirstPersonController {
   canPlay: () => boolean = () => true
   onPlayingChange: (playing: boolean) => void = () => {}
   lookSensitivity: () => number = () => 1
+  /** Sprint stamina: a sprint lasts a few seconds, then recovers (see SPRINT). */
+  readonly stamina = new SprintStamina()
+  /** Remove the sprint limit (a Stamin-Up style perk). */
+  get unlimitedSprint() { return this.stamina.unlimited }
+  set unlimitedSprint(on: boolean) { this.stamina.unlimited = on }
+  /** Sprinting this frame (stamina allowing). */
+  get sprinting() { return this.stamina.sprinting }
+  /** A gamepad's left stick (-1 to 1, y forward) and its sprint click; see src/player/gamepad.ts. */
+  readonly padMove = new THREE.Vector2()
+  padSprint = false
+  /** The last input came from a gamepad: resuming then skips the pointer lock, which a pad press cannot request. */
+  usingPad = false
   private fallback = false
   /** The browser has granted a lock at least once, so a later refusal is momentary, not a missing feature. */
   private lockWorked = false
@@ -54,7 +67,9 @@ export class FirstPersonController {
     document.querySelector('#inspect-mode')!.addEventListener('click', () => camera.setView('overview'), options)
     canvas.addEventListener('pointerdown', event => {
       if (!this.enabled || this.immersive || event.button !== 0) return
-      if (!this.playing) this.requestControl()
+      if (event.isTrusted) this.usingPad = false
+      // Playing on a pad without the lock, then a click: the mouse takes over.
+      if (!this.playing || (!this.fallback && document.pointerLockElement !== this.canvas)) this.requestControl()
       this.dragging = true
       if (this.fallback) canvas.setPointerCapture(event.pointerId)
     }, options)
@@ -89,6 +104,7 @@ export class FirstPersonController {
 
   respawn() {
     this.actions.reset()
+    this.stamina.reset()
     const ladder = this.actions.ladders.find(object => object.name.includes('west exterior')) ?? this.actions.ladders[0]
     const spawn = ladder ? this.actions.ladderPoint(ladder, false) : new THREE.Vector3(-39, 0.1, 4)
     if (ladder) {
@@ -110,6 +126,8 @@ export class FirstPersonController {
   requestControl() {
     if (!this.enabled || this.immersive || !this.canPlay()) return
     this.canvas.focus({ preventScroll: true })
+    // A gamepad plays without the pointer lock (a pad press cannot request one); a click on the canvas locks it later.
+    if (this.usingPad) { this.resume(); return }
     if (!this.canvas.requestPointerLock || this.fallback) { this.useFallback(); return }
     try {
       // Raw mouse input, as PC shooters use: no OS acceleration, and none of the bogus jumps Chrome on
@@ -154,6 +172,7 @@ export class FirstPersonController {
 
   pause = () => {
     this.pressed.clear()
+    this.padMove.set(0, 0); this.padSprint = false
     this.dragging = false
     this.playing = false
     this.body.velocity.x = 0
@@ -184,6 +203,21 @@ export class FirstPersonController {
     this.invalidate()
   }
 
+  /** Turn the view by a gamepad's right stick: radians, already scaled by its sensitivity. */
+  padLook(yaw: number, pitch: number) {
+    if (!this.enabled || !this.playing || this.immersive) return
+    this.rotation.setFromQuaternion(this.camera.active.quaternion, 'YXZ')
+    this.rotation.y -= yaw
+    this.rotation.x = THREE.MathUtils.clamp(this.rotation.x + pitch, -1.5, 1.5)
+    this.camera.active.quaternion.setFromEuler(this.rotation)
+    this.invalidate()
+  }
+
+  /** A gamepad's jump, as Space. */
+  padJump() {
+    if (this.enabled && this.playing && !this.immersive && !this.movementLocked && !this.actions.traversing) this.body.jump()
+  }
+
   private keyDown = (event: KeyboardEvent) => {
     if (!this.enabled || this.immersive || event.ctrlKey || event.metaKey || event.altKey) return
     if (event.target instanceof HTMLElement && event.target.closest('button, summary, input, textarea, select, [contenteditable="true"]')) return
@@ -208,14 +242,19 @@ export class FirstPersonController {
     }
     this.world.refresh()
     if (!this.actions.updateTraversal(dt)) {
-      const x = Number(this.pressed.has('KeyD') || this.pressed.has('ArrowRight')) - Number(this.pressed.has('KeyA') || this.pressed.has('ArrowLeft'))
-      const z = Number(this.pressed.has('KeyW') || this.pressed.has('ArrowUp')) - Number(this.pressed.has('KeyS') || this.pressed.has('ArrowDown'))
+      let x = Number(this.pressed.has('KeyD') || this.pressed.has('ArrowRight')) - Number(this.pressed.has('KeyA') || this.pressed.has('ArrowLeft'))
+      let z = Number(this.pressed.has('KeyW') || this.pressed.has('ArrowUp')) - Number(this.pressed.has('KeyS') || this.pressed.has('ArrowDown'))
+      // Keys win; otherwise the stick, whose push sets the pace (a light push walks).
+      const analog = !x && !z && this.padMove.lengthSq() > 0
+      if (analog) { x = this.padMove.x; z = this.padMove.y }
       this.camera.active.getWorldDirection(this.forward)
       this.forward.y = 0
       this.forward.normalize()
-      this.direction.set(-this.forward.z, 0, this.forward.x).multiplyScalar(x).addScaledVector(this.forward, z).normalize()
-      this.body.update(dt, this.direction, this.pressed.has('ShiftLeft') || this.pressed.has('ShiftRight'))
-    }
+      this.direction.set(-this.forward.z, 0, this.forward.x).multiplyScalar(x).addScaledVector(this.forward, z)
+      if (!analog || this.direction.lengthSq() > 1) this.direction.normalize()
+      const wantsSprint = this.pressed.has('ShiftLeft') || this.pressed.has('ShiftRight') || this.padSprint
+      this.body.update(dt, this.direction, this.stamina.update(dt, wantsSprint, this.direction.lengthSq() > 0.01))
+    } else this.stamina.update(dt, false, false)
     if (this.body.position.y < -20 || Math.max(Math.abs(this.body.position.x), Math.abs(this.body.position.z)) > 1150) this.respawn()
     this.actions.syncCamera(this.camera.active, dt)
     const target = this.actions.findTarget(this.camera.active)
@@ -234,7 +273,7 @@ export class FirstPersonController {
     const state = ride ? `Riding to ${ride.destination} · ${Math.round((1 - ride.remaining / ride.distance) * 100)}%` :
       this.actions.climbing ? (this.actions.climbing.descending ? 'Climbing down' : 'Climbing up') :
       !this.body.grounded ? 'In the air' : this.direction.lengthSq() > 0 ?
-        (this.pressed.has('ShiftLeft') || this.pressed.has('ShiftRight') ? 'Sprinting' : 'Walking') : 'On foot'
+        (this.sprinting ? 'Sprinting' : 'Walking') : 'On foot'
     this.status.textContent = this.fallback ? `${state} · drag to look` : state
     return true
   }

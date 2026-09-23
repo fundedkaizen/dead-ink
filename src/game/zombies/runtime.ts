@@ -986,7 +986,7 @@ export class ZombiesRuntime {
   private questLine(souls: number) {
     if (this.questStep === 'power' && this.powerSwitch) {
       if (this.powerSwitch.state === 'ready') return 'Pull the power switch'
-      return this.carried.has('lever') ? 'Fit the lever on the power switch' : 'Find the power lever (look for its light)'
+      return this.carried.has('lever') ? 'Fit the lever on the power switch' : 'Find the power lever (it glints)'
     }
     return questHint(this.questStep, { souls, bottles: this.bottles })
   }
@@ -1502,6 +1502,8 @@ export class ZombiesRuntime {
   private applyPerks() {
     this.weapons.reloadScale = this.perks.has('quickDip') ? PERK_EFFECT.reloadScale : 1
     this.weapons.fireScale = this.perks.has('doubleLine') ? PERK_EFFECT.fireScale : 1
+    // Long Stroke: sprint for as long as you like.
+    this.player.unlimitedSprint = this.perks.has('longStroke')
   }
 
   private buyPerk(machine: PerkMachine) {

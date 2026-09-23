@@ -31,6 +31,77 @@ const none: never[] = []
 // Shared by every world and region view, because views share collider records.
 let queries = 0
 
+/**
+ * Octree.capsuleIntersect, the same arithmetic in the same order, without its garbage: three.js builds a
+ * triangle list, a line array per triangle and a result object per contact, and a zombie crowd asks this
+ * thousands of times a second. The result is reused: read it before the next call. These trees hold each
+ * face in exactly one leaf (collisionTree), so the duplicate scan is not needed either.
+ */
+const capsuleScratch = { capsule: new Capsule(), plane: new THREE.Plane(), point: new THREE.Vector3(), line1: new THREE.Line3(), line2: new THREE.Line3(),
+  p1: new THREE.Vector3(), p2: new THREE.Vector3(), r: new THREE.Vector3(), s: new THREE.Vector3(), w: new THREE.Vector3(),
+  centre: new THREE.Vector3(), other: new THREE.Vector3(), normal: new THREE.Vector3(), faces: [] as THREE.Triangle[], count: 0 }
+const capsuleResult = { normal: new THREE.Vector3(), depth: 0 }
+function gatherCapsule(tree: Octree, capsule: Capsule) {
+  const c = capsuleScratch
+  for (const subTree of tree.subTrees) {
+    if (!capsule.intersectsBox(subTree.box!)) continue
+    if (subTree.triangles.length > 0) for (const face of subTree.triangles) c.faces[c.count++] = face
+    else gatherCapsule(subTree, capsule)
+  }
+}
+function closestPoints(line1: THREE.Line3, line2: THREE.Line3, target1: THREE.Vector3, target2: THREE.Vector3) {
+  const c = capsuleScratch
+  const r = c.r.copy(line1.end).sub(line1.start), s = c.s.copy(line2.end).sub(line2.start), w = c.w.copy(line2.start).sub(line1.start)
+  const a = r.dot(s), b = r.dot(r), cc = s.dot(s), d = s.dot(w), e = r.dot(w)
+  let t1: number, t2: number
+  const divisor = b * cc - a * a
+  if (Math.abs(divisor) < 1e-10) {
+    const d1 = -d / cc, d2 = (a - d) / cc
+    if (Math.abs(d1 - 0.5) < Math.abs(d2 - 0.5)) { t1 = 0; t2 = d1 } else { t1 = 1; t2 = d2 }
+  } else { t1 = (d * a + e * cc) / divisor; t2 = (t1 * a - d) / cc }
+  t2 = Math.max(0, Math.min(1, t2)); t1 = Math.max(0, Math.min(1, t1))
+  target1.copy(r).multiplyScalar(t1).add(line1.start)
+  target2.copy(s).multiplyScalar(t2).add(line2.start)
+}
+/** Octree.triangleCapsuleIntersect: the push-out (into capsuleScratch.normal) and its depth, or -1. */
+function triangleCapsule(capsule: Capsule, triangle: THREE.Triangle) {
+  const c = capsuleScratch
+  triangle.getPlane(c.plane)
+  const d1 = c.plane.distanceToPoint(capsule.start) - capsule.radius, d2 = c.plane.distanceToPoint(capsule.end) - capsule.radius
+  if ((d1 > 0 && d2 > 0) || (d1 < -capsule.radius && d2 < -capsule.radius)) return -1
+  const delta = Math.abs(d1 / (Math.abs(d1) + Math.abs(d2)))
+  const point = c.point.copy(capsule.start).lerp(capsule.end, delta)
+  if (triangle.containsPoint(point)) { c.normal.copy(c.plane.normal); return Math.abs(Math.min(d1, d2)) }
+  const r2 = capsule.radius * capsule.radius
+  const line1 = c.line1.set(capsule.start, capsule.end)
+  for (let i = 0; i < 3; i++) {
+    const line2 = c.line2.set(i === 0 ? triangle.a : i === 1 ? triangle.b : triangle.c, i === 0 ? triangle.b : i === 1 ? triangle.c : triangle.a)
+    closestPoints(line1, line2, c.p1, c.p2)
+    if (c.p1.distanceToSquared(c.p2) < r2) {
+      c.normal.copy(c.p1).sub(c.p2).normalize()
+      return capsule.radius - c.p1.distanceTo(c.p2)
+    }
+  }
+  return -1
+}
+function capsuleIntersect(tree: Octree, capsule: Capsule) {
+  const c = capsuleScratch, moved = c.capsule.copy(capsule)
+  c.count = 0
+  gatherCapsule(tree, moved)
+  let hit = false
+  for (let i = 0; i < c.count; i++) {
+    const depth = triangleCapsule(moved, c.faces[i])
+    if (depth === -1) continue
+    hit = true
+    moved.translate(c.normal.multiplyScalar(depth))
+  }
+  if (!hit) return false
+  const collision = moved.getCenter(c.centre).sub(capsule.getCenter(c.other))
+  capsuleResult.depth = collision.length()
+  capsuleResult.normal.copy(collision.normalize())
+  return capsuleResult
+}
+
 /** Partition triangles without duplicating large coplanar slabs into many octants. */
 function collisionTree(geometry: THREE.BufferGeometry) {
   const position = geometry.getAttribute('position'), index = geometry.index
@@ -190,7 +261,7 @@ export class CollisionWorld {
     this.capsule.copy(capsule)
     this.capsule.start.applyMatrix4(collider.inverse)
     this.capsule.end.applyMatrix4(collider.inverse)
-    const hit = this.tree(collider).capsuleIntersect(this.capsule)
+    const hit = capsuleIntersect(this.tree(collider), this.capsule)
     if (!hit || hit.depth < 0.00001) return null
     hit.normal.transformDirection(collider.mesh.matrixWorld)
     return hit

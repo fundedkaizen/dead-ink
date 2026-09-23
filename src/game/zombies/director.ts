@@ -5,7 +5,7 @@ import { EnemyActor } from '../actors'
 import { EnemyNavigation } from '../navigation'
 import { rayCapsuleDistance, reactionClipName, type HitReaction, type HitZone } from '../hit-reactions'
 import { hitDamage, shotgunDamageMultiplier } from '../balance'
-import type { BoneName } from '../../lab/rig'
+import { BONE_NAMES, type BoneName } from '../../lab/rig'
 import type { EmitSound, Shot } from '../types'
 import { zombieEyeMaterial } from '../../render/ink'
 import type { NavGraph } from './navgraph'
@@ -44,8 +44,16 @@ export const ATTACK = {
  * a body that blinks out of existence reads as a bug.
  */
 export const CORPSE = { lie: 6, sink: 2.2, depth: 0.8 } as const
-/** Clawing up out of the ground, as Call of Duty's zombies do outdoors: how long, and how deep it starts. */
-export const RISE = { seconds: 1.7, depth: 1.9 } as const
+/**
+ * Clawing up out of the ground, as Call of Duty's zombies do: how long it takes, how deep the body starts
+ * (its feet, in metres), and when each beat lands, as fractions of the whole: a hand bursts up, then the
+ * other, both claw down onto the ground, the head and shoulders heave up in two pulls, a knee plants, and it
+ * drags itself up to stand (handing over to its normal stance from `stand` on).
+ */
+export const RISE = {
+  seconds: 1.9, depth: 1.62,
+  beats: { firstHand: 0.04, secondHand: 0.15, plant: 0.27, knee: 0.6, stand: 0.8 },
+} as const
 /** Metres per second on ladders and ledges. Walkers are slower, as on the ground. */
 export const CLIMB_SPEED = { up: 3.4, down: 4.5, across: 3 } as const
 /**
@@ -76,8 +84,16 @@ export const GORE_ODDS = {
   leg: { shotgun: 0.06, sniper: 0.35, magnum: 0.3 } as Partial<Record<string, number>>,
   arm: { shotgun: 0.1, sniper: 0.5, magnum: 0.4 } as Partial<Record<string, number>>,
 } as const
+/**
+ * The crowd around a player: a zombie that only other zombies block walks round them (up to `orbit`
+ * radians off its line), and after `claw` seconds boxed in within `reach` metres beyond its swipe range, it
+ * claws over them rather than standing still.
+ */
+export const CROWD = { claw: 0.5, reach: 1.6, orbit: [1.8, 2.3], near: 5 } as const
 /** How long a bullet's jolt lasts. */
 const FLINCH_SECONDS = 0.22
+/** How much further a zombie reaches when it is clawing up at a player on something it cannot get onto. */
+const REACH_UP = 0.8
 /** How often the shared flow field is recomputed. */
 export const FLOW_INTERVAL = 0.35
 
@@ -119,6 +135,8 @@ export type Zombie = {
   noProgress: number
   /** Seconds left climbing out of the ground. */
   rise: number
+  /** How long only other zombies have stood in its way (the crowd around its prey). */
+  crowded: number
   /** A ladder or ledge being climbed: a fixed path, no collision. */
   climb: Climb | null
   /** Seconds until it next groans (or screams, if it sprints). */
@@ -206,6 +224,14 @@ const BODY_CENTRE = new THREE.Vector3(0, 0.75, 0)
 const scratch = { q: new THREE.Quaternion(), p: new THREE.Quaternion(), d: new THREE.Vector3(), v: new THREE.Vector3(),
   f: new THREE.Vector3(), s: new THREE.Vector3(), a: new THREE.Vector3(), b: new THREE.Vector3(), t: new THREE.Vector3(), e: new THREE.Vector3() }
 
+const SIDESTEP = [0.45, 0.9, 1.35], SIDESTEP_CROWD = [...SIDESTEP, ...CROWD.orbit]
+/** Knee to sole in the rest pose (the rig has no foot bone). */
+const SHIN_LENGTH = 0.405
+/** The climb out of the ground hands over to the normal stance through these, blended bone by bone. */
+const RISE_BONES = BONE_NAMES
+const risePose = { quaternions: RISE_BONES.map(() => new THREE.Quaternion()), hips: new THREE.Vector3(), root: new THREE.Vector3(), rotation: new THREE.Quaternion() }
+const rs = { shoulder: new THREE.Vector3(), target: new THREE.Vector3(), point: new THREE.Vector3(), pole: new THREE.Vector3() }
+
 export class ZombieDirector {
   readonly zombies: Zombie[] = []
   readonly navigation: EnemyNavigation
@@ -240,7 +266,7 @@ export class ZombieDirector {
         id: `zombie-${i + 1}`, actor, position: new THREE.Vector3(), yaw: 0, moving: false, health: 0, maxHealth: 0, gait: 'walk',
         state: 'idle', stuck: 0, unreachable: 0, swing: 0, swingLanded: false,
         recover: 0, stagger: 0, deadFor: 0, stranded: false, footstep: 0, route: [], routeTimer: 0, routeNode: -1, routeFrom: -1, blocked: -1, avoidTimer: 0, edgeFail: 0, probeFail: -1, probeFails: 0, bestDistance: Infinity, noProgress: 0,
-        rise: 0, climb: null, voice: 0, carriage: randomCarriage('walk'), flinch: 0, flinchBack: 0, flinchSide: 0,
+        rise: 0, crowded: 0, climb: null, voice: 0, carriage: randomCarriage('walk'), flinch: 0, flinchBack: 0, flinchSide: 0,
         boss: false, slam: 0, slamTimer: 0, direct: false, directTimer: 0, sideBias: 0, sideTimer: 0,
         crawler: false, crawlFall: 0, crawled: 0, pitch: 0, lift: 0.82, blot: false, drip: 0, lost: { head: false, L: false, R: false }, gibbed: false,
       })
@@ -278,7 +304,7 @@ export class ZombieDirector {
     zombie.stranded = false; zombie.footstep = 0
     zombie.route = []; zombie.routeTimer = 0; zombie.routeNode = -1; zombie.routeFrom = -1; zombie.blocked = -1; zombie.avoidTimer = 0; zombie.edgeFail = 0; zombie.probeFail = -1; zombie.probeFails = 0
     zombie.bestDistance = Infinity; zombie.noProgress = 0
-    zombie.rise = rise ? RISE.seconds : 0; zombie.climb = null
+    zombie.rise = rise ? RISE.seconds : 0; zombie.climb = null; zombie.crowded = 0
     zombie.voice = 1 + Math.random() * 3
     zombie.carriage = randomCarriage(gait); zombie.flinch = 0
     zombie.boss = boss; zombie.slam = 0; zombie.slamTimer = BOSS.slam.every * 0.6
@@ -375,6 +401,10 @@ export class ZombieDirector {
         const dx = target.feet.x - zombie.position.x, dz = target.feet.z - zombie.position.z
         const flat = Math.hypot(dx, dz), level = Math.abs(target.feet.y - zombie.position.y) < 1.3
         const attack = attackOf(zombie)
+        // A player up on a desk or a crate, with the chairs or the edge keeping this one from getting
+        // closer: it claws up at them from where it stands, as Call of Duty's zombies do.
+        const up = target.feet.y - zombie.position.y
+        const extra = up > 0.4 && up < 1.5 && !zombie.moving && !zombie.crawler ? REACH_UP : 0
         if (zombie.boss) {
           zombie.slamTimer -= dt
           if (zombie.slam > 0) {
@@ -395,14 +425,19 @@ export class ZombieDirector {
           if (!zombie.swingLanded && elapsed >= attack.windup) {
             zombie.swingLanded = true
             const now = Math.hypot(target.feet.x - zombie.position.x, target.feet.z - zombie.position.z)
-            if (target.alive && now <= attack.reach && Math.abs(target.feet.y - zombie.position.y) < 1.3)
+            // Only if nothing solid stands between them: no swipes through walls or windows.
+            if (target.alive && now <= attack.reach + extra && Math.abs(target.feet.y - zombie.position.y) < 1.5 && this.canTouch(zombie, target.feet))
               this.context.damagePlayer(target.id, attack.damage, zombie.position.clone().add(new THREE.Vector3(0, zombie.crawler ? 0.4 : 1.3, 0)))
             this.context.emit({ kind: 'zombie-swipe', position: zombie.position.clone(), radius: 10 })
           }
           if (zombie.swing <= 0) zombie.recover = attack.recover
-        } else if (flat <= attack.range && level && zombie.recover <= 0 && zombie.stagger <= 0) {
+        } else if (flat <= attack.range + extra && (level || extra > 0) && zombie.recover <= 0 && zombie.stagger <= 0) {
           zombie.swing = attack.swing; zombie.swingLanded = false
           this.context.emit({ kind: zombie.boss ? 'boss-growl' : 'zombie-snarl', position: zombie.position.clone().setY(zombie.position.y + 1.6), radius: 14 })
+        } else if (zombie.crowded > CROWD.claw && flat <= attack.range + CROWD.reach && level && zombie.recover <= 0 && zombie.stagger <= 0 && !zombie.crawler) {
+          // Behind the front row with no way round: it claws at its prey over the others instead of
+          // standing there. Out of reach, so it cannot land, and quiet, or a crowd would never stop snarling.
+          zombie.swing = attack.swing; zombie.swingLanded = false; zombie.crowded = 0
         } else if (zombie.stagger <= 0) {
           moving = this.chase(zombie, target.feet, flat, dt)
         }
@@ -449,8 +484,9 @@ export class ZombieDirector {
       if (z.state === 'idle') return
       const flags = (z.crawler ? 1 : 0) | (z.blot ? 2 : 0) | (z.boss ? 4 : 0) | (z.lost.head ? 8 : 0) | (z.lost.L ? 16 : 0) | (z.lost.R ? 32 : 0)
         | (z.gibbed ? 64 : 0) | (z.climb ? 128 : 0) | (z.slam > 0 ? 256 : 0)
-      const p = z.climb || z.rise > 0 ? z.actor.root.position : z.position
-      rows.push([i, z.state === 'dead' ? 2 : 1, round2(p.x), round2(z.rise > 0 ? z.position.y : p.y), round2(p.z), round2(z.yaw), GAITS.indexOf(z.gait),
+      // Climbing out of the ground is posed from where it stands, so the guest needs that spot, not the body's.
+      const p = z.climb ? z.actor.root.position : z.position
+      rows.push([i, z.state === 'dead' ? 2 : 1, round2(p.x), round2(p.y), round2(p.z), round2(z.yaw), GAITS.indexOf(z.gait),
         z.moving ? 1 : 0, round2(z.swing), flags, round2(z.rise), z.maxHealth > 0 ? round2(z.health / z.maxHealth) : 0])
     })
     return rows
@@ -506,7 +542,7 @@ export class ZombieDirector {
         this.context.emit({ kind: zombie.boss ? 'boss-growl' : zombie.blot ? 'blot-gurgle' : sprint ? 'zombie-scream' : 'zombie-groan',
           position: zombie.position.clone().setY(zombie.position.y + (zombie.crawler ? 0.4 : 1.6)), radius: zombie.boss ? 70 : 32 })
       }
-      if (rise > 0) { zombie.rise = rise; this.rise(zombie, null, 0); continue }
+      if (rise > 0) { const before = zombie.rise; zombie.rise = rise; this.rise(zombie, null, 0, before > rise ? before : rise); continue }
       zombie.rise = 0
       if (zombie.crawler) {
         zombie.crawlFall = Math.max(0, zombie.crawlFall - dt)
@@ -533,6 +569,12 @@ export class ZombieDirector {
     })
   }
 
+  /** A clear line from the zombie's chest to the target's chest: its claws can reach, no wall between. */
+  private canTouch(zombie: Zombie, feet: THREE.Vector3) {
+    const chest = zombie.position.clone().setY(zombie.position.y + (zombie.crawler ? 0.4 : 1.2) * (zombie.boss ? BOSS.scale : 1))
+    return this.context.world.visible(chest, feet.clone().setY(feet.y + 1.2), zombie.actor.root)
+  }
+
   /** A body on the ground: its death pose, then it sinks into the paper and goes back to the pool. */
   private lieDead(zombie: Zombie, dt: number) {
     zombie.deadFor += dt
@@ -543,21 +585,139 @@ export class ZombieDirector {
     if (sinking >= CORPSE.sink) { zombie.state = 'idle'; zombie.actor.root.visible = false }
   }
 
-  /** Clawing out of the ground: it cannot walk or swipe until it is out, but it can be shot. */
-  private rise(zombie: Zombie, target: ZombieTarget | null, dt: number) {
+  /**
+   * Clawing out of the ground (see RISE): it cannot walk or swipe until it is out, but it can be shot. The
+   * pose is a pure function of the time left, so a co-op guest draws exactly what the host does; `before`
+   * is the time left last frame, for the bursts of dirt as each beat passes.
+   */
+  private rise(zombie: Zombie, target: ZombieTarget | null, dt: number, before = zombie.rise) {
     zombie.rise = Math.max(0, zombie.rise - dt)
-    if (target) this.face(zombie, target.feet, dt, 3)
-    const t = 1 - zombie.rise / RISE.seconds, out = t * t * (3 - 2 * t)
-    const { actor } = zombie
+    const u = 1 - zombie.rise / RISE.seconds, beats = RISE.beats
+    // It turns toward its prey while it can; once both hands are planted it only shifts a little.
+    if (target) this.face(zombie, target.feet, dt, u < beats.plant ? 2.5 : 1)
+    this.riseDirt(zombie, 1 - before / RISE.seconds, u)
+    const { actor } = zombie, bones = actor.rig.bones
+    // Its normal stance, which the climb hands over to from `stand` on.
+    const blend = THREE.MathUtils.smoothstep(u, beats.stand, 1)
     actor.root.position.copy(zombie.position)
-    actor.root.position.y -= RISE.depth * (1 - out)
-    // Hunched over the hole, straightening as it comes out.
-    actor.root.rotation.set(0.5 * (1 - out), zombie.yaw, 0, 'YXZ')
+    actor.root.rotation.set(0, zombie.yaw, 0)
     actor.update(dt, 'patrol', false, undefined, 0)
     actor.gun.visible = false
-    // Both hands claw at the ground above, one after the other.
-    const claw = THREE.MathUtils.lerp(1.5, -0.28, out)
-    poseArms(zombie, claw + 0.45 * Math.sin(t * 17) * (1 - out), claw + 0.45 * Math.sin(t * 17 + Math.PI) * (1 - out))
+    if (blend >= 1) { this.carry(zombie, false); reachArms(zombie); return }
+    if (blend > 0) {
+      this.carry(zombie, false); reachArms(zombie)
+      for (let i = 0; i < RISE_BONES.length; i++) risePose.quaternions[i].copy(bones[RISE_BONES[i]].quaternion)
+      risePose.hips.copy(bones.hips.position)
+      risePose.root.copy(actor.root.position); risePose.rotation.copy(actor.root.quaternion)
+    }
+    this.climbOut(zombie, u)
+    if (blend > 0) {
+      for (let i = 0; i < RISE_BONES.length; i++) bones[RISE_BONES[i]].quaternion.slerp(risePose.quaternions[i], blend)
+      bones.hips.position.lerp(risePose.hips, blend)
+      actor.root.position.lerp(risePose.root, blend)
+      actor.root.quaternion.slerp(risePose.rotation, blend)
+    }
+    actor.root.updateMatrixWorld(true)
+  }
+
+  /**
+   * The climb itself at `u` (0 to 1 of RISE), posed from the rest pose each frame: where the hips are, how
+   * far the body pitches over the hole, and where each hand, knee and foot is put, the limbs solved to reach.
+   */
+  private climbOut(zombie: Zombie, u: number) {
+    const { actor } = zombie, bones = actor.rig.bones, rest = actor.rig.rest, c = zombie.carriage, b = RISE.beats
+    const s = zombie.boss ? BOSS.scale : 1, ground = zombie.position.y, hole = zombie.position
+    const ease = (from: number, to: number) => THREE.MathUtils.smoothstep(u, from, to)
+    const forward = scratch.f.set(Math.sin(zombie.yaw), 0, Math.cos(zombie.yaw))
+    const left = scratch.s.set(Math.cos(zombie.yaw), 0, -Math.sin(zombie.yaw))
+    // Two heaves between planting the hands and the knee: each pull jerks the body up, then it hangs a beat.
+    const pullT = THREE.MathUtils.clamp((u - b.plant) / (b.knee - b.plant), 0, 1)
+    const pulled = pullT - Math.sin(pullT * Math.PI * 4) / (Math.PI * 4)
+    const pulling = u > b.plant && u < b.knee ? Math.sin(pullT * Math.PI * 4) : 0
+    // Straining against the ground: a tremor through the body until it is up.
+    const strain = u < b.stand ? (Math.sin(u * 83) * 0.6 + Math.sin(u * 51 + c.phase) * 0.4) * (1 - ease(b.knee, b.stand)) : 0
+    // Hips height above the ground (negative is still under it) and how far the whole body pitches forward.
+    // Bent double in the hole, head tucked, so the hands break the surface before the head does.
+    const hipsHeight = -0.95 + 0.26 * ease(0, b.firstHand + 0.08) + 0.08 * ease(b.secondHand, b.plant) + 0.61 * pulled
+      + 0.44 * ease(b.knee, b.knee + 0.12) + 0.4 * ease(b.stand, 1) + 0.012 * strain
+    const pitch = 0.6 + 0.15 * pulled - 0.3 * ease(b.knee, b.stand) - 0.45 * ease(b.stand, 1) + 0.05 * pulling
+    const hips = scratch.b.copy(hole).addScaledVector(forward, (0.04 + 0.14 * pulled - 0.18 * ease(b.knee, 1)) * s)
+    hips.y = ground + hipsHeight * s
+    actor.rig.resetPose()
+    actor.root.rotation.set(pitch, zombie.yaw, 0.04 * strain + 0.05 * pulling, 'YXZ')
+    actor.root.position.copy(hips).sub(scratch.a.copy(rest.hips.pos).multiplyScalar(s).applyEuler(actor.root.rotation))
+    // The back rounds over the hole and the chest heaves with each pull; the head cranes up at its prey once
+    // it is out, against the pitch of the body.
+    const out = ease(b.plant, b.knee)
+    bend(bones.spine, 0.12 * out + 0.06 * pulling, 0, 0.05 * strain)
+    bend(bones.chest, 0.1 * out - 0.12 * pulling * out, 0.12 * pulling, 0)
+    const tuck = 0.8 * (1 - ease(b.plant - 0.04, b.plant + 0.12))
+    const lookUp = (pitch + 0.2) * ease(b.plant, b.plant + 0.15) * (1 - ease(b.stand, 1))
+    bend(bones.neck, (tuck - lookUp) * 0.45, 0, 0)
+    bend(bones.head, (tuck - lookUp) * 0.55 + c.nod * ease(b.knee, 1), 0.1 * strain, c.tilt * ease(b.knee, 1))
+    actor.root.updateMatrixWorld(true)
+    // The hands: each bursts up through the ground, claws the air, slams down ahead of the hole, scrapes
+    // back with its pull, and lets go as the body comes up onto its knee.
+    for (const [key, sign, burst, slam] of [['R', -1, b.firstHand, b.plant], ['L', 1, b.secondHand - 0.02, b.plant + 0.06]] as const) {
+      if (zombie.lost[key]) continue
+      const upper = bones[`upper_arm.${key}`]
+      const shoulder = upper.getWorldPosition(rs.shoulder)
+      // Straight up from the shoulder, through the ground.
+      const target = rs.target.copy(shoulder).addScaledVector(left, sign * 0.06 * s)
+      target.y = ground + (-0.3 + 0.8 * ease(burst, burst + 0.08) + 0.06 * Math.sin(u * 40 + sign)) * s
+      // Down onto the ground, a forearm's length ahead, then dragged back toward the body with each pull.
+      const planted = ease(slam - 0.04, slam)
+      const scrape = key === 'R' ? Math.max(0, pulling) : Math.max(0, -pulling)
+      target.lerp(rs.point.copy(hole).addScaledVector(forward, (0.5 - 0.14 * scrape) * s).addScaledVector(left, sign * 0.26 * s)
+        .setY(ground + 0.03 * s + 0.05 * s * scrape), planted)
+      // Letting go: the arm comes up into the zombie's reach.
+      const release = ease(b.knee + 0.06, b.stand + 0.08)
+      if (release > 0) target.lerp(rs.point.copy(shoulder).addScaledVector(forward, 0.42 * s).setY(shoulder.y - 0.12 * s), release)
+      const pole = rs.pole.copy(left).multiplyScalar(sign * 0.8).addScaledVector(UP, 0.4).addScaledVector(forward, -0.3)
+      // A fist punching up points up; a claw on the ground points ahead and down.
+      solveArm(upper, bones[`forearm.${key}`], bones[`hand.${key}`], target, pole, forward, (1 - planted) * (1 - release) > 0.5 ? UP : undefined)
+    }
+    // The legs: dangling in the hole, then the right knee plants in front and the left foot beside it, and
+    // both straighten as it stands.
+    const knee = ease(b.knee - 0.04, b.knee + 0.1), stand = ease(b.stand, 1)
+    for (const [key, sign] of [['R', -1], ['L', 1]] as const) {
+      const thigh = bones[`thigh.${key}`]
+      const hip = thigh.getWorldPosition(rs.shoulder)
+      const foot = rs.target.copy(hip).addScaledVector(forward, 0.05 * s).setY(hip.y - 0.78 * s)
+      const pole = rs.pole.copy(forward)
+      if (key === 'R') {
+        // Kneeling: the knee on the ground just ahead of the hips, the shin back along the ground.
+        foot.lerp(rs.point.copy(hole).addScaledVector(forward, -0.34 * s).addScaledVector(left, -0.12 * s).setY(ground + 0.05 * s), knee)
+        pole.addScaledVector(UP, -0.9 * knee)
+      } else {
+        // Its other foot planted beside the hole, knee up, ready to push.
+        foot.lerp(rs.point.copy(hole).addScaledVector(forward, 0.26 * s).addScaledVector(left, 0.14 * s).setY(ground + 0.02 * s), knee)
+        pole.addScaledVector(UP, 0.3 * knee)
+      }
+      // Standing: feet under the hips.
+      foot.lerp(rs.point.copy(hole).addScaledVector(left, sign * 0.11 * s).setY(ground + 0.02 * s), stand)
+      solveLeg(thigh, bones[`shin.${key}`], foot, pole.normalize(), s)
+    }
+  }
+
+  /** Earth thrown up as each beat of the climb lands: the hands bursting through, the knee, tearing free. */
+  private riseDirt(zombie: Zombie, from: number, to: number) {
+    if (to <= from) return
+    const b = RISE.beats, s = zombie.boss ? BOSS.scale : 1, ground = zombie.position.y
+    const passed = (beat: number) => from < beat && to >= beat
+    const at = (forwardBy: number, side: number) => scratch.t.copy(zombie.position)
+      .addScaledVector(scratch.f.set(Math.sin(zombie.yaw), 0, Math.cos(zombie.yaw)), forwardBy * s)
+      .addScaledVector(scratch.s.set(Math.cos(zombie.yaw), 0, -Math.sin(zombie.yaw)), side * s).setY(ground + 0.04)
+    const burst = (point: THREE.Vector3, drops: number, clods: number, speed: number) => {
+      this.gore.spray(point, UP, drops, ground, speed, false)
+      if (clods) this.gore.fling(point, UP, clods, ground, 0.55 * s, 1.3, 1.2)
+    }
+    if (passed(b.firstHand + 0.03)) burst(at(0.12, -0.2), 10, 3, 2.2)
+    if (passed(b.secondHand + 0.03)) burst(at(0.12, 0.2), 10, 3, 2.2)
+    if (passed(b.plant)) burst(at(0.5, -0.26), 4, 0, 1.2)
+    if (passed(b.plant + 0.06)) burst(at(0.5, 0.26), 4, 0, 1.2)
+    if (passed(b.knee + 0.06)) burst(at(0.1, -0.12), 6, 2, 1.6)
+    if (passed(b.stand)) burst(at(0, 0), 8, 3, 2)
   }
 
   /**
@@ -873,11 +1033,20 @@ export class ZombieDirector {
     // Movement allows a slightly slimmer body than planning does. Stepping into that margin wedges a
     // zombie somewhere no plan can start from, so only move where planning clearance also holds.
     const candidate = this.navigation.step(zombie.position, waypoint, step)
-    const stepped = candidate && this.navigation.floor(candidate) ? candidate : this.stepOver(zombie.position, waypoint, step)
+    const stepped = candidate && this.navigation.fitsPlanned(candidate) ? candidate : this.stepOver(zombie.position, waypoint, step)
     // Chairs, table corners, a doorframe, another zombie: slide around it rather than stall against it.
-    const next = stepped && this.clearOfOthers(zombie, stepped) ? stepped : this.sidestep(zombie, waypoint, step)
+    // Near its prey with only the crowd in the way, it may also go a long way round the others.
+    const crowd = !!stepped && flat < CROWD.near
+    const next = stepped && this.clearOfOthers(zombie, stepped) ? stepped : this.sidestep(zombie, waypoint, step, crowd)
     zombie.sideTimer = Math.max(0, zombie.sideTimer - dt)
     if (zombie.sideTimer <= 0) zombie.sideBias = 0
+    if (!next && stepped) {
+      // Only other zombies in the way: no fine planning (there is no way through a body), and update()
+      // has it claw over them if this goes on.
+      zombie.crowded += dt
+      return false
+    }
+    zombie.crowded = 0
     if (!next) {
       zombie.stuck += dt
       // Only the step itself failing counts against the link; a neighbour in the way is not its fault.
@@ -896,7 +1065,7 @@ export class ZombieDirector {
       // Already wedged (spawned into a gap, or shoved by the crowd): one bigger step frees it.
       if (zombie.stuck > 0.35 && !this.navigation.floor(zombie.position.clone())) {
         const shove = this.navigation.step(zombie.position, waypoint, 0.8)
-        if (shove && this.navigation.floor(shove.clone())) {
+        if (shove && this.navigation.fitsPlanned(shove)) {
           zombie.position.copy(shove)
           zombie.stuck = 0
           return true
@@ -942,15 +1111,15 @@ export class ZombieDirector {
    * A step at an angle to the way it wants to go, for when that way is blocked by something small. It
    * keeps to the side it last chose, so it works around an obstacle instead of dithering in front of it.
    */
-  private sidestep(zombie: Zombie, goal: THREE.Vector3, step: number) {
+  private sidestep(zombie: Zombie, goal: THREE.Vector3, step: number, crowd = false) {
     const base = Math.atan2(goal.x - zombie.position.x, goal.z - zombie.position.z)
     const side = zombie.sideBias || (Math.random() < 0.5 ? 1 : -1)
     const target = scratch.d
-    for (const angle of [0.45, 0.9, 1.35]) for (const turn of [side, -side]) {
+    for (const angle of crowd ? SIDESTEP_CROWD : SIDESTEP) for (const turn of [side, -side]) {
       const a = base + turn * angle
       target.set(zombie.position.x + Math.sin(a) * 0.6, zombie.position.y, zombie.position.z + Math.cos(a) * 0.6)
       const candidate = this.navigation.step(zombie.position, target, step * 0.85)
-      if (!candidate || !this.navigation.floor(candidate) || !this.clearOfOthers(zombie, candidate)) continue
+      if (!candidate || !this.navigation.fitsPlanned(candidate) || !this.clearOfOthers(zombie, candidate)) continue
       zombie.sideBias = turn; zombie.sideTimer = 0.6
       return candidate
     }
@@ -977,7 +1146,7 @@ export class ZombieDirector {
       if (graph.linkKind(here, option.index) === 'climb') { zombie.probeFail = -1; zombie.probeFails = 0; return option.index }
       graph.point(option.index, point)
       const probe = this.navigation.step(zombie.position, point, 0.35)
-      if (!probe || !this.navigation.floor(probe.clone())) {
+      if (!probe || !this.navigation.fitsPlanned(probe)) {
         // A link toward the player that keeps refusing the first step is not really there: after a few
         // tries, delete it so the flow field routes everyone around instead of shuffling on the spot.
         if (option.distance < current) {
@@ -1036,12 +1205,13 @@ export class ZombieDirector {
    */
   private clearOfOthers(zombie: Zombie, next: THREE.Vector3) {
     const dirX = next.x - zombie.position.x, dirZ = next.z - zombie.position.z
-    const length = Math.hypot(dirX, dirZ) || 1
+    const length = Math.sqrt(dirX * dirX + dirZ * dirZ) || 1
     for (const other of this.zombies) {
       if (other === zombie || other.state !== 'chase') continue
-      const ox = other.position.x - next.x, oz = other.position.z - next.z
-      const gap = Math.hypot(ox, oz)
-      if (gap < 0.5 && Math.abs(other.position.y - next.y) < 1 && (ox * dirX + oz * dirZ) / (gap * length || 1) > 0.2) return false
+      const ox = other.position.x - next.x, oz = other.position.z - next.z, gap2 = ox * ox + oz * oz
+      if (gap2 >= 0.25) continue
+      const gap = Math.sqrt(gap2)
+      if (Math.abs(other.position.y - next.y) < 1 && (ox * dirX + oz * dirZ) / (gap * length || 1) > 0.2) return false
     }
     return true
   }
@@ -1171,8 +1341,11 @@ export class ZombieDirector {
       zombie.actor.root.position.copy(zombie.position)
       zombie.climb = null
     }
-    // Shot while climbing out: it falls back where it was, half in the ground.
-    if (zombie.rise > 0) { zombie.position.y = zombie.actor.root.position.y; zombie.rise = 0 }
+    // Shot while climbing out: it falls back where it was, half in the ground, unless it was already up on its knee.
+    if (zombie.rise > 0) {
+      if (1 - zombie.rise / RISE.seconds < RISE.beats.knee) zombie.position.y = Math.min(zombie.position.y, zombie.actor.root.position.y)
+      zombie.rise = 0
+    }
     if (!zombie.crawler) zombie.actor.root.rotation.set(0, zombie.yaw, 0)
     zombie.state = 'dead'
     zombie.deadFor = 0
@@ -1346,16 +1519,20 @@ export class ZombieDirector {
  * Point a bone's +Y axis (glTF bones run along +Y) toward `direction` in world space, keeping the rest
  * of the skeleton, and refresh its children so the next bone in the chain sees the new pose.
  */
-export function aimBone(bone: THREE.Object3D, direction: THREE.Vector3) {
-  bone.updateWorldMatrix(true, false)
-  const world = bone.getWorldQuaternion(scratch.q)
+export function aimBone(bone: THREE.Object3D, direction: THREE.Vector3, parentFresh = false) {
+  // The parent's world rotation, once: the bone's own is that times its local one (the rig scales evenly).
+  const parent = scratch.p.identity()
+  if (bone.parent) {
+    if (!parentFresh) bone.parent.updateWorldMatrix(true, false)
+    bone.parent.matrixWorld.decompose(scratch.e, parent, scratch.a)
+  }
+  const world = scratch.q.copy(parent).multiply(bone.quaternion)
   const current = scratch.d.copy(UP).applyQuaternion(world).normalize()
-  const delta = new THREE.Quaternion().setFromUnitVectors(current, scratch.v.copy(direction).normalize())
-  const target = delta.multiply(world)
-  const parent = bone.parent ? bone.parent.getWorldQuaternion(scratch.p).invert() : new THREE.Quaternion()
-  bone.quaternion.copy(parent.multiply(target))
+  const target = aimDelta.setFromUnitVectors(current, scratch.v.copy(direction).normalize()).multiply(world)
+  bone.quaternion.copy(parent.invert().multiply(target))
   bone.updateMatrixWorld(true)
 }
+const aimDelta = new THREE.Quaternion()
 
 /**
  * Arms out in front, one often hanging lower; bouncing with the stride while it moves. Through a swipe
@@ -1421,7 +1598,7 @@ function setSpikes(actor: EnemyActor, on: boolean) {
  * Two-bone reach: the upper arm and forearm placed so the wrist lands on `target` (or as near as the arm
  * reaches), the elbow bending out toward `pole`, the fist pointing along `forward` and down.
  */
-function solveArm(upper: THREE.Bone, fore: THREE.Bone, hand: THREE.Bone, target: THREE.Vector3, pole: THREE.Vector3, forward: THREE.Vector3) {
+function solveArm(upper: THREE.Bone, fore: THREE.Bone, hand: THREE.Bone, target: THREE.Vector3, pole: THREE.Vector3, forward: THREE.Vector3, handDirection?: THREE.Vector3) {
   const shoulder = upper.getWorldPosition(new THREE.Vector3())
   const a = shoulder.distanceTo(fore.getWorldPosition(scratch.d)), b = scratch.d.distanceTo(hand.getWorldPosition(scratch.v))
   const toward = target.clone().sub(shoulder)
@@ -1433,18 +1610,39 @@ function solveArm(upper: THREE.Bone, fore: THREE.Bone, hand: THREE.Bone, target:
   aimBone(upper, elbow.clone().sub(shoulder))
   const wrist = shoulder.addScaledVector(toward, distance)
   aimBone(fore, wrist.sub(fore.getWorldPosition(scratch.d)))
-  aimBone(hand, forward.clone().setY(-0.7))
+  aimBone(hand, handDirection ?? forward.clone().setY(-0.7))
+}
+
+/** Thigh and shin placed so the foot lands on `target` (or as near as the leg reaches), the knee bending toward `pole`. */
+function solveLeg(thigh: THREE.Bone, shin: THREE.Bone, target: THREE.Vector3, pole: THREE.Vector3, scale: number) {
+  const hip = thigh.getWorldPosition(new THREE.Vector3())
+  const a = hip.distanceTo(shin.getWorldPosition(scratch.d)), b = SHIN_LENGTH * scale
+  const toward = target.clone().sub(hip)
+  const distance = THREE.MathUtils.clamp(toward.length(), Math.abs(a - b) + 1e-3, (a + b) * 0.995)
+  toward.normalize()
+  const cos = (a * a + distance * distance - b * b) / (2 * a * distance), sin = Math.sqrt(Math.max(0, 1 - cos * cos))
+  const out = pole.clone().addScaledVector(toward, -pole.dot(toward)).normalize()
+  const knee = hip.clone().addScaledVector(toward, a * cos).addScaledVector(out, a * sin)
+  aimBone(thigh, knee.clone().sub(hip))
+  const ankle = hip.addScaledVector(toward, distance)
+  aimBone(shin, ankle.sub(shin.getWorldPosition(scratch.d)))
 }
 
 /** Both arms toward the facing direction, each lifted by its own amount (0 level, positive up). */
 function poseArms(zombie: Zombie, left: number, right: number) {
   const bones = zombie.actor.rig.bones
-  const forward = new THREE.Vector3(Math.sin(zombie.yaw), 0, Math.cos(zombie.yaw))
-  for (const [side, drop] of [['L', left], ['R', right]] as const) {
-    aimBone(bones[`upper_arm.${side}`], forward.clone().setY(drop).normalize())
-    aimBone(bones[`forearm.${side}`], forward.clone().setY(drop - 0.1).normalize())
+  // The chest's world matrix once, each shoulder under it, then each bone under the one just posed: no
+  // bone's chain is walked twice.
+  bones.chest.updateWorldMatrix(true, false)
+  const forward = armForward.set(Math.sin(zombie.yaw), 0, Math.cos(zombie.yaw))
+  for (let i = 0; i < 2; i++) {
+    const side = i ? 'R' : 'L', drop = i ? right : left
+    bones[`shoulder.${side}`].updateMatrixWorld(true)
+    aimBone(bones[`upper_arm.${side}`], armDirection.copy(forward).setY(drop).normalize(), true)
+    aimBone(bones[`forearm.${side}`], armDirection.copy(forward).setY(drop - 0.1).normalize(), true)
   }
 }
+const armForward = new THREE.Vector3(), armDirection = new THREE.Vector3()
 
 /**
  * Two small red eyes on the front of the head. The heads are solid black, so the eyes are the one

@@ -1,9 +1,12 @@
 import * as THREE from 'three'
 import { EnvironmentCamera, views, type ViewName } from './camera'
 import { palette, resizeInk } from './render/ink'
+import { skipStillMatrices } from './render/matrices'
 import { createCompound } from './world/compound'
 import { EnvironmentInteractions } from './interactions'
 import { FirstPersonController } from './player/controller'
+import { GamepadInput } from './player/gamepad'
+import { padBindings } from './player/pad-bindings'
 import { VRWalkthrough } from './vr/walkthrough'
 import { createMissionWorld, prepareCompound } from './game/world'
 import { MissionRuntime } from './game/runtime'
@@ -27,6 +30,8 @@ renderer.shadowMap.enabled = false
 
 const scene = new THREE.Scene()
 scene.name = 'Black ballpoint compound'
+// Most of the scene stands still: only the matrices of what moved are recomputed each frame.
+skipStillMatrices(scene)
 scene.background = new THREE.Color(palette.paper)
 const compound = createCompound()
 const missionWorld = new URLSearchParams(location.search).get('explore') === '1' ? null : createMissionWorld(compound)
@@ -56,6 +61,9 @@ const mission = !missionWorld ? null : zombies
   // A co-op invite carries the host's world seed, so both players' stations stand in the same places.
   ? new ZombiesRuntime(scene, camera, player, missionWorld, invalidate, Number(new URLSearchParams(location.search).get('seed')) || undefined)
   : new MissionRuntime(scene, camera, player, missionWorld, invalidate)
+// Xbox and PlayStation controllers, laid out as Call of Duty's (src/player/gamepad.ts).
+const gamepad = new GamepadInput(padBindings(canvas, player, mission, zombies))
+gamepad.start()
 const frameTimes: number[] = []
 let startupReady = !mission
 // Initialization positions the mission camera and settles the menu (including
@@ -202,6 +210,7 @@ import.meta.hot?.dispose(() => {
   window.removeEventListener('resize', resize)
   document.removeEventListener('visibilitychange', visibilityChanged)
   vr.dispose()
+  gamepad.stop()
   mission?.dispose()
   player.dispose()
   camera.dispose()

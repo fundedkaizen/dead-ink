@@ -59,7 +59,7 @@ const status = window.__questCheck = { done: false, results }
   m.editor.health = 1
   m.grenadeBlast(m.editor.position.clone())
   check(await until(() => m.questStep === 'done', 1500), 'killing the Editor finishes the quest')
-  check(m.perks.size === 5, 'and every perk is yours', `${m.perks.size}`)
+  check(m.perks.size === 6, 'and every perk is yours', `${m.perks.size}`)
   check(await until(() => !quest(), 1000), 'the quest line goes away', quest())
   m.invincible = false
   return { step: m.questStep }

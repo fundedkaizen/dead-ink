@@ -26,6 +26,7 @@ const JINGLES: Record<string, { notes: readonly number[]; step: number }> = {
   doubleLine: { notes: [392, 392, 523.3, 392, 392, 587.3, 523.3, 440, 392, 392, 659.3, 587.3, 523.3, 440, 493.9, 523.3], step: 0.15 },
   secondDraft: { notes: [440, 554.4, 659.3, 880, 659.3, 554.4, 440, 329.6, 440, 554.4, 659.3, 739.99, 659.3, 554.4, 493.9, 440], step: 0.17 },
   spareNib: { notes: [329.6, 415.3, 493.9, 415.3, 329.6, 246.9, 329.6, 493.9, 554.4, 493.9, 415.3, 329.6, 369.99, 415.3, 493.9, 659.3], step: 0.16 },
+  longStroke: { notes: [293.7, 370, 440, 587.3, 440, 370, 440, 587.3, 659.3, 587.3, 493.9, 440, 493.9, 587.3, 740, 587.3], step: 0.13 },
 }
 type Voice = { pitch: number; glide: number; length: number; rasp: number; drive: number; vowel: readonly [number, number]; level: number }
 

@@ -46,6 +46,18 @@ test('Stored values are clamped and junk falls back to defaults', () => {
   assert.deepEqual(getSettings(), DEFAULT_SETTINGS)
 })
 
+test('Controller sensitivity, invert Y and blood are stored and checked like the rest', () => {
+  assert.equal(DEFAULT_SETTINGS.controllerSensitivity, 1); assert.equal(DEFAULT_SETTINGS.invertY, false); assert.equal(DEFAULT_SETTINGS.blood, 'red')
+  const clamped = sanitizeSettings({ controllerSensitivity: 9, invertY: 'yes', blood: 'green' })
+  assert.equal(clamped.controllerSensitivity, 3); assert.equal(clamped.invertY, false); assert.equal(clamped.blood, 'red')
+  store.clear(); resetSettingsCache()
+  setSettings({ controllerSensitivity: 1.75, invertY: true, blood: 'ink' })
+  resetSettingsCache()
+  const saved = getSettings()
+  assert.equal(saved.controllerSensitivity, 1.75); assert.equal(saved.invertY, true); assert.equal(saved.blood, 'ink')
+  assert.equal(sanitizeSettings({ blood: 'off' }).blood, 'off')
+})
+
 test('Without storage the settings still work in memory', () => {
   storageWorks = false; resetSettingsCache()
   try {

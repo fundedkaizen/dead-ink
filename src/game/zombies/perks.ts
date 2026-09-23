@@ -10,7 +10,7 @@ import { metal } from '../../lab/weapons/models/common'
  * go down. Each perk has its own colour (its machine's light, its bottle, its HUD badge), because each
  * perk is a meaning of its own.
  */
-export type PerkKind = 'thickInk' | 'quickDip' | 'doubleLine' | 'secondDraft' | 'spareNib'
+export type PerkKind = 'thickInk' | 'quickDip' | 'doubleLine' | 'secondDraft' | 'spareNib' | 'longStroke'
 
 export const PERKS: Record<PerkKind, { name: string; cod: string; cost: number; color: number; css: string; blurb: string }> = {
   thickInk: { name: 'Thick Ink', cod: 'Juggernog', cost: PRICES.perks.thickInk, color: 0xc8322b, css: '#c8322b', blurb: 'Take five hits instead of two.' },
@@ -18,6 +18,7 @@ export const PERKS: Record<PerkKind, { name: string; cod: string; cost: number; 
   doubleLine: { name: 'Double Line', cod: 'Double Tap', cost: PRICES.perks.doubleLine, color: 0xe08a1e, css: '#e08a1e', blurb: 'Fire faster; every bullet counts twice.' },
   secondDraft: { name: 'Second Draft', cod: 'Quick Revive', cost: PRICES.perks.secondDraftSolo, color: 0x2f6fd0, css: '#2f6fd0', blurb: 'Get back up once when you would die.' },
   spareNib: { name: 'Spare Nib', cod: 'Mule Kick', cost: PRICES.perks.spareNib, color: 0x1f9a93, css: '#1f9a93', blurb: 'Carry a third gun.' },
+  longStroke: { name: 'Long Stroke', cod: 'Stamin-Up', cost: PRICES.perks.longStroke, color: 0xd9a51e, css: '#d9a51e', blurb: 'Sprint without ever running out of breath.' },
 }
 /** Call of Duty's perk limit. */
 export const PERK_LIMIT = 4
@@ -31,7 +32,7 @@ export const PERK_EFFECT = { reloadScale: 0.5, fireScale: 0.75, damage: 2, reviv
  */
 export const MACHINE_PLACES: readonly [PerkKind | 'pack', [number, number, number]][] = [
   ['secondDraft', [-30, 0, -25]], ['quickDip', [-40, 0, 40]], ['thickInk', [20, 0, 20]],
-  ['doubleLine', [40, 0, 40]], ['spareNib', [125, 0, -10]], ['pack', [117, 0, -5]],
+  ['doubleLine', [40, 0, 40]], ['spareNib', [125, 0, -10]], ['longStroke', [30, 0, 44]], ['pack', [117, 0, -5]],
 ]
 /** Pack-a-Punch: price, how long the machine works on a gun, and how long it waits for you to take it. */
 export const PACK = { cost: PRICES.packAPunch, costs: [PRICES.packAPunch, 10000, 20000], work: 3.2, wait: 15 } as const
@@ -76,6 +77,14 @@ export function perkIcon(kind: PerkKind) {
       c.beginPath(); c.moveTo(52, 22); c.lineTo(74, 70); c.lineTo(52, 108); c.lineTo(30, 70); c.closePath(); c.fill()
       c.fillStyle = PERKS[kind].css; c.beginPath(); c.arc(52, 66, 6, 0, Math.PI * 2); c.fill()
       c.fillStyle = '#fbfaf5'; c.fillRect(80, 58, 30, 10); c.fillRect(90, 48, 10, 30)
+      break
+    case 'longStroke':
+      // One long pen stroke sweeping on and on, with speed lines behind it.
+      c.lineWidth = 11
+      c.beginPath(); c.moveTo(28, 86); c.bezierCurveTo(52, 30, 78, 104, 104, 42); c.stroke()
+      c.beginPath(); c.moveTo(104, 42); c.lineTo(84, 44); c.lineTo(100, 60); c.closePath(); c.fill()
+      c.lineWidth = 5
+      for (const y of [98, 108]) { c.beginPath(); c.moveTo(22, y); c.lineTo(46, y); c.stroke() }
       break
   }
   icons.set(kind, canvas)

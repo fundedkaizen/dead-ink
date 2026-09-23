@@ -1,7 +1,7 @@
 import './menu.css'
 import { missionObjective, type MissionState } from './mission'
 import { DEAD_INK_ART, HOSTAGE_ART } from './mode-art'
-import { QUALITY, SETTING_LIMITS, getSettings, prefersReducedMotion, setSettings, type Quality, type Settings } from './settings'
+import { BLOOD_LABELS, QUALITY, SETTING_LIMITS, getSettings, prefersReducedMotion, setSettings, type Blood, type Quality, type Settings } from './settings'
 
 /** The built-in pages, plus any a mode adds through `MenuCopy.pages`. */
 type MenuPage = 'home' | 'mission' | 'controls' | 'settings' | 'vr' | 'restart' | 'gameover' | (string & {})
@@ -80,11 +80,12 @@ const toggle = (id: string, label: string, checked = false) => `<div class="sett
     <label for="${id}">${label}</label><input id="${id}" type="checkbox" ${checked ? 'checked' : ''} /></div>`
 
 /** Slider settings: which input edits which key, and how its value reads. */
-type SliderSetting = { id: string; key: 'fov' | 'sensitivity' | 'adsSensitivity' | 'masterVolume' | 'musicVolume' | 'effectsVolume'; format: (value: number) => string }
+type SliderSetting = { id: string; key: 'fov' | 'sensitivity' | 'adsSensitivity' | 'controllerSensitivity' | 'masterVolume' | 'musicVolume' | 'effectsVolume'; format: (value: number) => string }
 const SLIDERS: SliderSetting[] = [
   { id: 'settings-fov', key: 'fov', format: v => `${Math.round(v)}°` },
   { id: 'settings-sensitivity', key: 'sensitivity', format: v => `${v.toFixed(2)}×` },
   { id: 'settings-ads', key: 'adsSensitivity', format: v => `${v.toFixed(2)}×` },
+  { id: 'settings-controller', key: 'controllerSensitivity', format: v => `${v.toFixed(2)}×` },
   { id: 'mission-volume', key: 'masterVolume', format: v => `${Math.round(v)}%` },
   { id: 'settings-music', key: 'musicVolume', format: v => `${Math.round(v)}%` },
   { id: 'settings-effects', key: 'effectsVolume', format: v => `${Math.round(v)}%` },
@@ -196,6 +197,8 @@ export class MissionMenu {
             ${slider('settings-fov', 'Field of view', SETTING_LIMITS.fov.min, SETTING_LIMITS.fov.max, SETTING_LIMITS.fov.step)}
             ${slider('settings-sensitivity', 'Mouse sensitivity', SETTING_LIMITS.sensitivity.min, SETTING_LIMITS.sensitivity.max, SETTING_LIMITS.sensitivity.step)}
             ${slider('settings-ads', 'Aiming sensitivity', SETTING_LIMITS.adsSensitivity.min, SETTING_LIMITS.adsSensitivity.max, SETTING_LIMITS.adsSensitivity.step)}
+            ${slider('settings-controller', 'Controller sensitivity', SETTING_LIMITS.controllerSensitivity.min, SETTING_LIMITS.controllerSensitivity.max, SETTING_LIMITS.controllerSensitivity.step)}
+            ${toggle('settings-invert-y', 'Invert Y (controller)', getSettings().invertY)}
           </fieldset>
           <fieldset class="settings-group"><legend>Graphics</legend>
             <div class="settings-row">
@@ -204,6 +207,12 @@ export class MissionMenu {
                 ${(Object.keys(QUALITY) as Quality[]).map(q => `<button type="button" role="radio" data-quality="${q}">${QUALITY[q].label}</button>`).join('')}
               </div>
               <output id="settings-quality-value"></output>
+            </div>
+            <div class="settings-row">
+              <span id="settings-blood-label">Blood</span>
+              <div class="settings-segments" role="radiogroup" aria-labelledby="settings-blood-label">
+                ${(Object.keys(BLOOD_LABELS) as Blood[]).map(b => `<button type="button" role="radio" data-blood="${b}">${BLOOD_LABELS[b]}</button>`).join('')}
+              </div>
             </div>
             ${toggle('mission-motion', 'Reduced motion', reducedMotion)}
           </fieldset>
@@ -310,6 +319,16 @@ export class MissionMenu {
       setSettings({ quality: button.dataset.quality as Quality }); renderQuality()
     }, options))
     renderQuality()
+    const renderBlood = () => {
+      const blood = getSettings().blood
+      this.card.querySelectorAll<HTMLElement>('[data-blood]').forEach(button => button.setAttribute('aria-checked', String(button.dataset.blood === blood)))
+    }
+    this.card.querySelectorAll<HTMLElement>('[data-blood]').forEach(button => button.addEventListener('click', () => {
+      setSettings({ blood: button.dataset.blood as Blood }); renderBlood()
+    }, options))
+    renderBlood()
+    const invertY = this.element<HTMLInputElement>('#settings-invert-y')
+    invertY.addEventListener('change', () => setSettings({ invertY: invertY.checked }), options)
     const mute = this.element<HTMLInputElement>('#mission-mute'), motion = this.element<HTMLInputElement>('#mission-motion')
     mute.addEventListener('change', () => setSettings({ muted: mute.checked }), options)
     motion.addEventListener('change', () => setSettings({ reducedMotion: motion.checked }), options)

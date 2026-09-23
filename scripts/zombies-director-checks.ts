@@ -242,6 +242,63 @@ const run = (seconds: number, targets: ZombieTarget[], fps = 60) => {
   director.clear()
 }
 
+// ---- 5d2. The climb reads like Call of Duty's: a hand, the other hand, the head, a knee, then up -----
+{
+  assert(RISE.seconds >= 1.6 && RISE.seconds <= 2.2, `the climb takes about two seconds (${RISE.seconds} s)`)
+  const z = director.spawn(v(-34, 0, -29), 150, 'walk', 0, true)!
+  const ground = z.position.y, bones = z.actor.rig.bones
+  const height = (name: keyof typeof bones) => bones[name].getWorldPosition(v()).y - ground
+  // The top of the head: the skull is a 0.2 m ball 0.21 m up the head bone.
+  const headTop = () => bones.head.localToWorld(v(0, 0.21, 0)).y + 0.2 - ground
+  const at = (u: number) => { while (1 - z.rise / RISE.seconds < u - 1e-6) director.update(1 / 60, []) }
+  const drops = director.gore.counts.drops
+  at(RISE.beats.firstHand + 0.08)
+  assert(height('hand.R') > 0.05, `a hand bursts up first (${height('hand.R').toFixed(2)} m)`)
+  assert(height('hand.L') < 0 && headTop() < 0.03, `the other hand and the head are still under (${height('hand.L').toFixed(2)}, ${headTop().toFixed(2)} m)`)
+  assert(director.gore.counts.drops > drops, 'earth sprays up where the hand breaks through')
+  at(RISE.beats.secondHand + 0.07)
+  assert(height('hand.R') > 0.05 && height('hand.L') > 0.05, 'then the other hand')
+  assert(headTop() < 0.05, `before the head (${headTop().toFixed(2)} m)`)
+  at(RISE.beats.plant + 0.08)
+  for (const side of ['L', 'R'] as const) assert(Math.abs(height(`hand.${side}`)) < 0.12, `${side} hand clawed down onto the ground (${height(`hand.${side}`).toFixed(2)} m)`)
+  at((RISE.beats.plant + RISE.beats.knee) / 2 + 0.08)
+  assert(height('head') > 0.1 && height('hand.R') < 0.15, `the head and shoulders heave up while the hands pull (${height('head').toFixed(2)} m)`)
+  at(RISE.beats.knee + 0.14)
+  assert(Math.abs(height('shin.R')) < 0.15 && height('hips') > 0.25, `a knee plants on the ground (${height('shin.R').toFixed(2)} m, hips ${height('hips').toFixed(2)} m)`)
+  assert(height('shin.L') > 0.25, `the other knee is up, its foot planted (${height('shin.L').toFixed(2)} m)`)
+  while (z.rise > 0) director.update(1 / 60, [])
+  assert(z.rise === 0 && height('head') > 1.1, `and it stands (${height('head').toFixed(2)} m)`)
+  director.clear()
+}
+
+// ---- 5d3. The crowd: nobody stands idle behind the front row --------------------------------------------
+// With 24 round a player, the back rows walk round the others to a gap or claw over them; none just stands.
+{
+  const player: ZombieTarget = { id: 'p1', feet: v(30, 0.5, -20), alive: true }
+  player.feet.y = world.floor(player.feet, 1, 1.5, 0.28)
+  graph.flow([player.feet])
+  const random = seeded(77)
+  for (let i = 0; i < 24; i++) {
+    const spot = pickSpawn(graph, world, { near: 14, far: 42, eyes: [] }, random)
+    if (spot) director.spawn(spot, 1e6, (['walk', 'run', 'sprint'] as const)[i % 3], 0, true)
+  }
+  const still = new Map<string, number>()
+  let worst = 0, worstId = ''
+  for (let f = 0; f < 60 * 22; f++) {
+    director.update(1 / 60, [player])
+    for (const z of director.zombies) {
+      if (z.state !== 'chase') continue
+      const flat = Math.hypot(z.position.x - player.feet.x, z.position.z - player.feet.z)
+      const busy = z.rise > 0 || !!z.climb || z.moving || z.swing > 0 || z.recover > 0 || flat < ATTACK.range + 0.6
+      const s = busy ? 0 : (still.get(z.id) ?? 0) + 1 / 60
+      still.set(z.id, s)
+      if (s > worst) { worst = s; worstId = `${z.id} at ${flat.toFixed(1)} m` }
+    }
+  }
+  assert(worst < 1.5, `no zombie stands idle in the crowd (longest ${worst.toFixed(1)} s, ${worstId})`)
+  director.clear()
+}
+
 // ---- 5e. Ladders, towers and ledges: nowhere you can stand is safe --------------------------------
 // The observation tower and the water tower are reached by ladder (and zip line); the long warehouse
 // and the southwest stores stand on 0.6 m slabs a player hops up and a zombie must vault.

@@ -22,7 +22,7 @@ const status = window.__perkCheck = { done: false, results }
   m.setPower(true, false)
   m.completeBuild('pack')
   check(m.power && m.packBuilt && m.pack.root.visible, 'power on and the Pack-a-Punch built')
-  check(m.perkMachines.length === 5 && !!m.pack, 'five perk machines and a Pack-a-Punch were placed', `${m.perkMachines.length}`)
+  check(m.perkMachines.length === 6 && !!m.pack, 'six perk machines and a Pack-a-Punch were placed', `${m.perkMachines.length}`)
   const machine = kind => m.perkMachines.find(x => x.kind === kind)
   const buy = async kind => {
     const at = machine(kind)

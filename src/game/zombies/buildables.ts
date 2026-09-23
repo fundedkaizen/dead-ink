@@ -117,8 +117,8 @@ export class PartPickup {
     this.ring = new THREE.Mesh(new THREE.RingGeometry(0.42, 0.47, 40), new THREE.MeshBasicMaterial({ color: 0x111111, transparent: true, toneMapped: false, depthWrite: false }))
     this.ring.rotation.x = -Math.PI / 2
     this.ring.position.y = 0.02
-    // A tall column of light over it, seen from across the yard, as the box's is.
-    const beam = createRarityBeam(0xffd27a, 7)
+    // A faint grey glint over it, head height: there if you look, not a beacon (gold is the box's).
+    const beam = createRarityBeam(0x8f9aa6, 1.8)
     this.root.add(this.model, this.ring, beam)
     this.point = at.clone().setY(at.y + 0.3)
   }
