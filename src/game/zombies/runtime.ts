@@ -36,6 +36,7 @@ import { INK_RAY, InkRayBolts } from './wonder'
 import { REVIVE, SecondDraftRevive } from './revive'
 import { DECOY, DollBuy, animateDoll, inkDoll } from './decoy'
 import { THROW_RELEASE } from '../weapons'
+import { BENCH_PLACE, BUILDS, BuildSite, PARTS, POWER_PLACE, PartPickup, PowerSwitch, SHIELD, fromBehind, type BuildId, type PartId } from './buildables'
 import { ARMORY_PAGE, awardGame, deadInkHome, installCosmetics } from './cosmetics'
 import { addDressing } from './dressing'
 import { Explosion, MushroomCloud, createGrenadeModel } from './vfx'
@@ -208,6 +209,19 @@ export class ZombiesRuntime {
   private dollCooldown = 0
   private dollClap = 0
   private dollBuy: DollBuy | null = null
+  /**
+   * Buildables and the power: parts lying about, what you carry, the build sites (Pack-a-Punch, shield
+   * bench), the power switch, and the shield on your back.
+   */
+  power = false
+  packBuilt = false
+  private powerSwitch: PowerSwitch | null = null
+  private sites = new Map<BuildId, BuildSite>()
+  private parts: PartPickup[] = []
+  private carried = new Set<PartId>()
+  private shieldOnBench = false
+  private shieldBackRound = 0
+  private shield: { health: number } | null = null
   /** Throws waiting for the hand to let go, so the grenade leaves the screen as it leaves the hand. */
   private pendingThrows: { timer: number; launch: () => void }[] = []
   private uninstallCosmetics: () => void
@@ -352,7 +366,8 @@ export class ZombiesRuntime {
       // Junk, graffiti and hidden details, kept off every station, the doll wall and the skulls.
       const keepClear = [...this.wallBuys.map(b => b.spot.wall), ...this.boxSpots.map(s => s.wall),
         ...this.perkMachines.map(m => m.spot.wall), ...(this.pack ? [this.pack.spot.wall] : []),
-        ...(this.dollBuy ? [this.dollBuy.spot.wall] : []), ...this.skulls.map(s => s.object.position)]
+        ...(this.dollBuy ? [this.dollBuy.spot.wall] : []), ...this.skulls.map(s => s.object.position),
+        ...(this.powerSwitch ? [this.powerSwitch.spot.wall] : []), ...[...this.sites.values()].map(site => site.spot.wall)]
       try { this.undress = addDressing(this.scene, this.player.world, seeded(0xDEAD1), keepClear) }
       catch (error) { console.warn('Dead Ink: dressing failed', error) }
       this.startGame()
@@ -406,9 +421,18 @@ export class ZombiesRuntime {
       this.wallBuys.push(buy)
       this.scene.add(buy.root)
     }
+    // The power switch in the warehouse, the shield bench by the start, the Pack-a-Punch's build site.
+    graph.flow([new THREE.Vector3(...POWER_PLACE)])
+    const [powerSpot] = findWallSpots(graph, this.player.world, this.random, { count: 1, near: 0, far: 30, spacing: 7, avoid: taken })
+    if (powerSpot) { taken.push(powerSpot.stand); this.powerSwitch = new PowerSwitch(powerSpot); this.scene.add(this.powerSwitch.root) }
+    else console.warn('Dead Ink: no wall for the power switch')
+    graph.flow([new THREE.Vector3(...BENCH_PLACE)])
+    const [benchSpot] = findWallSpots(graph, this.player.world, this.random, { count: 1, near: 0, far: 30, spacing: 7, avoid: taken })
+    if (benchSpot) { taken.push(benchSpot.stand); const bench = new BuildSite('shield', benchSpot, true); this.sites.set('shield', bench); this.scene.add(bench.root) }
+    else console.warn('Dead Ink: no wall for the shield bench')
+    if (this.pack) { const site = new BuildSite('pack', this.pack.spot, false); this.sites.set('pack', site); this.scene.add(site.root) }
     if (this.box) this.boxSpots = [this.box.spot]
     for (const machine of this.perkMachines) this.makeSolid(machine.root, [1.05, 2.05, 0.7], [0, 1.025, 0])
-    if (this.pack) this.makeSolid(this.pack.root, [2.05, 1.1, 1.1], [0, 0.55, 0])
     for (const [x, y, z] of BOX_PLACES) {
       graph.flow([new THREE.Vector3(x, y, z)])
       const [spot] = findWallSpots(graph, this.player.world, this.random, { count: 1, near: 0, far: 35, spacing: 7, avoid: taken })
@@ -428,6 +452,7 @@ export class ZombiesRuntime {
     this.box?.close()
     this.powerups.clear(); this.timers = {}; this.earned = 0; this.heldWeapons = null
     this.perks.clear(); this.pendingPerk = null; this.reviveGrace = 0; this.applyPerks(); this.zombieHud.perks([])
+    this.resetBuildables()
     this.revive.reset(); this.player.movementLocked = false
     this.setStorm(false)
     this.brute = null; this.bruteTimer = -1
@@ -569,18 +594,39 @@ export class ZombiesRuntime {
     }
     for (const machine of this.perkMachines) {
       const perk = PERKS[machine.kind]
-      const label = this.perks.has(machine.kind) ? `${perk.name} · yours`
+      const label = !this.power ? `${perk.name} · no power` : this.perks.has(machine.kind) ? `${perk.name} · yours`
         : this.perks.size >= PERK_LIMIT ? `${perk.name} · you can hold ${PERK_LIMIT} perks`
         : `Drink ${perk.name} · ${perk.cost}${this.state.points >= perk.cost ? '' : ` · need ${perk.cost - this.state.points} more`} · ${perk.blurb}`
       targets.push({ object: machine.root, point: machine.point, kind: 'mission', descending: false, label, use: () => this.buyPerk(machine) })
     }
     const pack = this.pack, held = this.weapons.current
-    if (pack && pack.state !== 'working') {
-      const label = pack.state === 'ready' && pack.held ? `Take the ${PACKED_NAMES[pack.held.name]}`
+    if (pack && this.packBuilt && pack.state !== 'working') {
+      const label = !this.power && pack.state === 'idle' ? 'Pack-a-Punch · no power' : pack.state === 'ready' && pack.held ? `Take the ${PACKED_NAMES[pack.held.name]}`
         : !held || held.special ? 'Pack-a-Punch · hold a gun to upgrade it'
         : packCost(held) === null ? 'Pack-a-Punch · fully upgraded'
         : `Pack-a-Punch · ${held.packed ? 'upgrade again' : 'upgrade'} your ${this.weapons.label} · ${packCost(held)}${this.state.points >= packCost(held)! ? '' : ` · need ${packCost(held)! - this.state.points} more`}`
       targets.push({ object: pack.root, point: pack.point, kind: 'mission', descending: false, label, use: () => this.usePack(pack) })
+    }
+    for (const part of this.parts) {
+      if (part.point.distanceTo(eye) > 3) continue
+      targets.push({ object: part.root, point: part.point, kind: 'mission', descending: false, label: `Pick up the ${PARTS[part.id].label}`, use: () => this.pickPart(part) })
+    }
+    const power = this.powerSwitch
+    if (power && power.state !== 'on') {
+      const label = power.state === 'ready' ? 'Turn on the power'
+        : this.carried.has('lever') ? 'Put the lever back on the power switch' : 'The power switch has lost its lever'
+      targets.push({ object: power.root, point: power.point, kind: 'mission', descending: false, label, use: () => this.usePower(power) })
+    }
+    for (const site of this.sites.values()) {
+      if (site.build === 'pack' && this.packBuilt) continue
+      const name = BUILDS[site.build].label, have = site.missing().filter(id => this.carried.has(id))
+      let label: string
+      if (site.complete) {
+        if (site.build !== 'shield' || this.shield || !this.shieldOnBench) continue
+        label = 'Take the ink shield'
+      } else if (have.length) label = `Build the ${name} · add the ${have.map(id => PARTS[id].label).join(', ')}`
+      else label = `${name[0].toUpperCase()}${name.slice(1)} · missing the ${site.missing().map(id => PARTS[id].label).join(', ')}`
+      targets.push({ object: site.root, point: site.point, kind: 'mission', descending: false, label, use: () => this.useSite(site) })
     }
     for (const skull of this.skulls) {
       if (skull.found || skull.object.position.distanceTo(eye) > 2.6) continue
@@ -606,6 +652,118 @@ export class ZombiesRuntime {
     this.state.points -= cost
     this.zombieHud.spend(cost)
     return true
+  }
+
+  /** A new game: the power is off, the parts are scattered again, nothing is built. */
+  private resetBuildables() {
+    this.setPower(false, false)
+    this.powerSwitch?.reset()
+    for (const site of this.sites.values()) site.reset()
+    this.packBuilt = false
+    if (this.pack) { this.pack.root.visible = false; this.removeSolid(this.pack.root) }
+    this.shield = null; this.shieldOnBench = false; this.shieldBackRound = 0
+    this.carried.clear()
+    for (const part of this.parts) part.dispose()
+    this.parts = []
+    const graph = this.graph
+    if (graph) for (const id of Object.keys(PARTS) as PartId[]) {
+      const places = PARTS[id].places
+      const [x, y, z] = places[Math.floor(this.random() * places.length) % places.length]
+      const node = graph.nearest(new THREE.Vector3(x, y, z), 4)
+      if (node < 0) { console.warn(`Dead Ink: nowhere to put the ${PARTS[id].label}`); continue }
+      const part = new PartPickup(id, graph.point(node))
+      this.parts.push(part)
+      this.scene.add(part.root)
+    }
+    this.zombieHud.parts([])
+    this.zombieHud.shield(null)
+  }
+
+  /** The power across the compound: perk machines light up (stuttering on), the Pack-a-Punch runs. */
+  setPower(on: boolean, flicker = true) {
+    this.power = on
+    for (const machine of this.perkMachines) machine.setPowered(on, flicker)
+  }
+
+  private pickPart(part: PartPickup) {
+    if (!this.isActive() || part.point.distanceTo(this.camera.perspective.position) > 3) return false
+    this.carried.add(part.id)
+    this.parts.splice(this.parts.indexOf(part), 1)
+    part.dispose()
+    this.hud.notify(`You found the ${PARTS[part.id].label}.`, 2.5)
+    this.emit({ kind: 'pickup', position: this.player.body.position.clone(), radius: 3 })
+    this.zombieHud.parts([...this.carried].map(id => PARTS[id].label))
+    this.invalidate()
+    return true
+  }
+
+  private usePower(power: PowerSwitch) {
+    if (!this.isActive() || !this.canReach(power.point, power.root)) return false
+    if (power.state === 'broken') {
+      if (!this.carried.has('lever')) { this.hud.notify('The lever is missing. It must be somewhere about the compound.', 3, true); return false }
+      this.carried.delete('lever')
+      power.repair()
+      this.emit({ kind: 'pack-work', position: power.point.clone(), radius: 12 })
+      this.zombieHud.parts([...this.carried].map(id => PARTS[id].label))
+      this.hud.notify('The lever is back on. Pull it.', 2.5)
+      return true
+    }
+    if (!power.turnOn()) return false
+    this.setPower(true)
+    this.zombieHud.announce('Power on', 3, 'powerup')
+    this.emit({ kind: 'boss-slam', position: power.point.clone(), radius: 200 })
+    this.invalidate()
+    return true
+  }
+
+  /** At a build site: put in every part you carry for it; the last one finishes the build. */
+  private useSite(site: BuildSite) {
+    if (!this.isActive() || !this.canReach(site.point, site.root)) return false
+    if (site.complete) {
+      if (site.build !== 'shield' || this.shield || !this.shieldOnBench) return false
+      this.shield = { health: SHIELD.health }
+      this.shieldOnBench = false
+      this.hud.notify('The shield is on your back: it takes hits from behind.', 3)
+      this.emit({ kind: 'pickup', position: this.player.body.position.clone(), radius: 3 })
+      this.zombieHud.shield(1)
+      return true
+    }
+    let added = 0
+    for (const id of [...this.carried]) if (PARTS[id].build === site.build && site.place(id)) { this.carried.delete(id); added++ }
+    if (!added) { this.hud.notify(`Still missing the ${site.missing().map(id => PARTS[id].label).join(', ')}.`, 2.5, true); return false }
+    this.emit({ kind: 'pack-work', position: site.point.clone(), radius: 14 })
+    this.zombieHud.parts([...this.carried].map(id => PARTS[id].label))
+    if (site.complete) this.completeBuild(site.build)
+    this.invalidate()
+    return true
+  }
+
+  /** A build finished (also the checks' way to skip the hunt). */
+  completeBuild(build: BuildId) {
+    const site = this.sites.get(build)
+    if (site) for (const id of BUILDS[build].parts) site.place(id)
+    if (build === 'pack' && this.pack && !this.packBuilt) {
+      this.packBuilt = true
+      site?.hideParts()
+      this.pack.root.visible = true
+      this.makeSolid(this.pack.root, [2.05, 1.1, 1.1], [0, 0.55, 0])
+      this.shockwaves.emit(this.pack.root.position.clone(), 3)
+      this.zombieHud.announce('Pack-a-Punch built', 3, 'powerup')
+      this.emit({ kind: 'pack-ready', position: this.pack.point.clone(), radius: 40 })
+    }
+    if (build === 'shield') {
+      this.shieldOnBench = !this.shield
+      this.zombieHud.announce('Ink shield built', 3, 'powerup')
+      this.emit({ kind: 'pack-ready', position: (site?.point ?? this.player.body.position).clone(), radius: 20 })
+    }
+    if (build === 'power' && this.powerSwitch) { this.powerSwitch.repair(); this.powerSwitch.turnOn(); this.setPower(true) }
+  }
+
+  private removeSolid(owner: THREE.Object3D) {
+    const old = this.solids.get(owner)
+    if (!old) return
+    this.player.world.removeObject(old)
+    this.solids.delete(owner)
   }
 
   private useDollWall(buy: DollBuy) {
@@ -680,6 +838,7 @@ export class ZombiesRuntime {
   private buyPerk(machine: PerkMachine) {
     const perk = PERKS[machine.kind]
     if (!this.isActive() || !this.canReach(machine.point, machine.root) || this.pendingPerk || this.timers.deathMachine) return false
+    if (!this.power) { this.hud.notify('No power. Find the power switch.', 2.5, true); return false }
     if (this.perks.has(machine.kind) || this.perks.size >= PERK_LIMIT || !this.spend(perk.cost)) return false
     // Drink it: the gun goes down, the bottle comes up, the perk works once it is empty.
     this.weapons.cancel(); this.aiming = false
@@ -737,7 +896,8 @@ export class ZombiesRuntime {
 
   /** Put the gun in hand into the Pack-a-Punch; or take the upgraded one back out. */
   private usePack(pack: PackAPunch) {
-    if (!this.isActive() || !this.canReach(pack.point, pack.root)) return false
+    if (!this.isActive() || !this.packBuilt || !this.canReach(pack.point, pack.root)) return false
+    if (!this.power && pack.state === 'idle') { this.hud.notify('No power. Find the power switch.', 2.5, true); return false }
     if (pack.state === 'ready') {
       const item = pack.take()
       if (!item) return false
@@ -1100,6 +1260,24 @@ export class ZombiesRuntime {
 
   damage(amount: number, cause: 'zombie' | 'fall', source?: THREE.Vector3) {
     if (this.invincible || this.reviveGrace > 0 || !this.isActive() || !(amount > 0)) return
+    // The shield on your back takes what comes from behind, until it breaks.
+    if (this.shield && source && cause === 'zombie') {
+      const yaw = new THREE.Euler().setFromQuaternion(this.camera.perspective.quaternion, 'YXZ').y
+      if (fromBehind(this.player.body.position, yaw, source)) {
+        this.shield.health -= amount
+        this.audio.play({ kind: 'bullet-hit', intensity: 0.8 })
+        this.sparks.emit(source.clone().lerp(this.player.body.position.clone().setY(source.y), 0.7), new THREE.Vector3(0, 1, 0), 6)
+        if (this.shield.health <= 0) {
+          this.shield = null
+          this.shieldBackRound = this.rounds.round + 2
+          this.zombieHud.announce('Your shield broke', 2.4)
+          this.emit({ kind: 'ink-burst', position: this.player.body.position.clone(), radius: 10 })
+        }
+        this.zombieHud.shield(this.shield ? this.shield.health / SHIELD.health : null)
+        this.invalidate()
+        return
+      }
+    }
     this.state.health = Math.max(0, this.state.health - amount)
     this.lastHurt = this.state.elapsed
     const dead = this.state.health === 0
@@ -1265,6 +1443,10 @@ export class ZombiesRuntime {
         } else this.zombieHud.announce(`Round ${events.roundStarted}`)
         if (isBossRound(events.roundStarted)) this.bruteTimer = BOSS.delay
         if (events.roundStarted > 1) this.grenadeCount = Math.min(GRENADE.max, this.grenadeCount + GRENADE.perRound)
+        if (this.shieldBackRound && events.roundStarted >= this.shieldBackRound) {
+          this.shieldBackRound = 0; this.shieldOnBench = true
+          this.hud.notify('A new ink shield is waiting on the bench.', 3)
+        }
       }
       if (this.bruteTimer > 0 && (this.bruteTimer -= dt) <= 0) this.spawnBrute()
       let failed = 0
@@ -1275,6 +1457,11 @@ export class ZombiesRuntime {
         if (this.storm) this.stormReward()
       }
       this.director.update(dt, target())
+      // The last zombie of a round always comes at a sprint, as in every Call of Duty map.
+      if (this.rounds.phase === 'active' && this.rounds.toSpawn === 0 && this.director.aliveCount === 1) {
+        const last = this.director.zombies.find(z => z.state === 'chase' && !z.boss)
+        if (last && last.gait !== 'sprint') last.gait = 'sprint'
+      }
       this.blockByZombies()
       this.relocateStranded(dt)
       // Health comes back after a few seconds without being hit, as in Call of Duty.
@@ -1292,6 +1479,9 @@ export class ZombiesRuntime {
         }
       }
       if (this.pendingPerk && (this.pendingPerk.timer -= dt) <= 0) { this.grantPerk(this.pendingPerk.kind); this.pendingPerk = null }
+      for (const part of this.parts) part.update(dt)
+      for (const site of this.sites.values()) site.update(dt)
+      this.powerSwitch?.update(dt)
       for (const machine of this.perkMachines) {
         machine.update(dt)
         // Walk up to a machine and it plays its jingle (not again for a while).
@@ -1394,6 +1584,9 @@ export class ZombiesRuntime {
     this.uninstallCosmetics(); this.bulletTrails.dispose(); this.weapons.dispose(); this.blood.dispose(); this.impacts.dispose(); this.riseMarks.dispose(); this.sparks.dispose(); this.shockwaves.dispose(); this.explosions.dispose(); this.nukeCloud.dispose(); this.undress?.(); this.grenades.dispose(); this.dolls.dispose(); this.dollBuy?.dispose(); this.bolts.dispose(); this.powerups.dispose()
     for (const skull of this.skulls) skull.object.removeFromParent()
     delete document.body.dataset.deadInkStorm
+    for (const part of this.parts) part.dispose()
+    for (const site of this.sites.values()) site.dispose()
+    this.powerSwitch?.dispose()
     this.audio.dispose(); this.music.dispose(); this.hud.dispose()
     this.player.movementLocked = false; this.player.onPlayingChange = () => {}; this.player.lookSensitivity = () => 1
     this.player.actions.extraTargets = () => []; this.player.actions.onAction = () => {}

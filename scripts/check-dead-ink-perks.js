@@ -17,6 +17,11 @@ const status = window.__perkCheck = { done: false, results }
   p.fallback = true
   document.querySelector('#walk-start').click()
   m.rounds.timer = 9999; m.rounds.phase = 'break'
+  // Without power the machines are dark and refuse you; the Pack-a-Punch is not built yet.
+  check(!m.power && !m.packBuilt, 'a new game starts with the power off and no Pack-a-Punch')
+  m.setPower(true, false)
+  m.completeBuild('pack')
+  check(m.power && m.packBuilt && m.pack.root.visible, 'power on and the Pack-a-Punch built')
   check(m.perkMachines.length === 5 && !!m.pack, 'five perk machines and a Pack-a-Punch were placed', `${m.perkMachines.length}`)
   const machine = kind => m.perkMachines.find(x => x.kind === kind)
   const buy = async kind => {

@@ -38,6 +38,15 @@ body[data-reduced-motion="true"] .dead-ink-powerup.ending { animation: none; opa
 /* Perks, bottom left above the health heart. */
 .dead-ink-perks { position: absolute; left: 24px; bottom: 96px; display: flex; gap: 6px; }
 .dead-ink-perks img { width: 38px; height: 38px; display: block; }
+/* Parts you carry for a build: small paper tags; the shield on your back with what it has left. */
+.dead-ink-parts { position: absolute; left: 24px; bottom: 142px; display: flex; flex-wrap: wrap; gap: 4px; max-width: 320px; }
+.dead-ink-parts span { padding: 3px 7px; font: 700 12px/1 var(--notes, "Chalkboard SE", "Comic Sans MS", cursive); color: var(--ink, #111); background: #fbfaf5;
+  border: 1.5px solid var(--ink, #111); border-radius: 3px 4px 2px 4px; text-transform: uppercase; letter-spacing: 0.04em; }
+.dead-ink-shield { position: absolute; left: 88px; bottom: 30px; display: flex; align-items: center; gap: 6px; }
+.dead-ink-shield[hidden] { display: none; }
+.dead-ink-shield svg { width: 24px; height: 28px; fill: #fbfaf5; stroke: var(--ink, #111); stroke-width: 2; }
+.dead-ink-shield i { width: 70px; height: 7px; border: 1.5px solid var(--ink, #111); background: #fbfaf5; display: block; }
+.dead-ink-shield b { display: block; height: 100%; background: var(--ink, #111); }
 
 /* Grenades carried, beside the points. */
 .dead-ink-grenades { display: flex; gap: 3px; margin-top: 4px; }

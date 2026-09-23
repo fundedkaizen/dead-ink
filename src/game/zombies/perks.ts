@@ -100,6 +100,9 @@ export class PerkMachine {
   readonly point: THREE.Vector3
   private light: THREE.Mesh
   private time = Math.random() * 10
+  /** Dark until the power is on; `flicker` counts down while it stutters into life. */
+  powered = true
+  private flicker = 0
 
   constructor(readonly kind: PerkKind, readonly spot: WallSpot) {
     const perk = PERKS[kind]
@@ -130,7 +133,16 @@ export class PerkMachine {
   update(dt: number) {
     this.time += dt
     const material = this.light.material as THREE.MeshBasicMaterial
+    if (!this.powered) { material.color.setHex(0x3a3a3a); return }
+    this.flicker = Math.max(0, this.flicker - dt)
+    // Coming on: a few stutters, like a tube light catching.
+    if (this.flicker > 0 && Math.sin(this.time * 47 + this.flicker * 13) > 0.1) { material.color.setHex(0x3a3a3a); return }
     material.color.setHex(PERKS[this.kind].color).multiplyScalar(0.86 + 0.14 * Math.sin(this.time * 2.2))
+  }
+
+  setPowered(on: boolean, flicker = true) {
+    if (on && !this.powered && flicker) this.flicker = 0.9 + Math.random() * 0.5
+    this.powered = on
   }
 
   dispose() {

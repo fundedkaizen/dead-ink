@@ -33,6 +33,10 @@ export class ZombieHud {
   private powerupCells = new Map<PowerupKind, { cell: HTMLElement; time: HTMLElement }>()
   private perksEl = document.createElement('div')
   private grenadesEl = document.createElement('div')
+  private partsEl = document.createElement('div')
+  private shieldEl = document.createElement('div')
+  private shownParts = ''
+  private shownShield = -2
   private shownGrenades = -1
   private bossEl = document.createElement('div')
   private bossFill = document.createElement('div')
@@ -64,6 +68,13 @@ export class ZombieHud {
     this.grenadesEl.className = 'dead-ink-grenades'
     this.grenadesEl.setAttribute('role', 'status')
     this.pointsEl.append(this.grenadesEl)
+    this.partsEl.className = 'dead-ink-parts'
+    this.partsEl.setAttribute('role', 'status')
+    this.shieldEl.className = 'dead-ink-shield'
+    this.shieldEl.setAttribute('role', 'meter')
+    this.shieldEl.innerHTML = '<svg viewBox="0 0 24 28" aria-hidden="true"><path d="M12 1 L22 5 V13 C22 20 17 25 12 27 C7 25 2 20 2 13 V5 Z"/></svg><i><b></b></i>'
+    this.shieldEl.hidden = true
+    this.root.append(this.partsEl, this.shieldEl)
     this.root.append(this.roundEl, this.pointsEl, this.banner, this.powerupsEl, this.perksEl, this.bossEl)
     parent.append(this.root)
   }
@@ -124,6 +135,26 @@ export class ZombieHud {
     this.grenadesEl.innerHTML = frag.repeat(Math.max(0, count)) + doll.repeat(Math.max(0, dolls))
     const dollText = dolls ? `, ${dolls} ink doll${dolls === 1 ? '' : 's'}` : ''
     this.grenadesEl.setAttribute('aria-label', `${count} grenade${count === 1 ? '' : 's'}${dollText}`)
+  }
+
+  /** The buildable parts you are carrying, as small ink tags by the perks. */
+  parts(labels: string[]) {
+    const key = labels.join('|')
+    if (key === this.shownParts) return
+    this.shownParts = key
+    this.partsEl.innerHTML = labels.map(label => `<span>${label.replace(/[<>&"]/g, '')}</span>`).join('')
+    this.partsEl.setAttribute('aria-label', labels.length ? `Carrying ${labels.join(', ')}` : 'No parts')
+  }
+
+  /** The shield on your back and how much it has left; null hides it. */
+  shield(fraction: number | null) {
+    const shown = fraction === null ? -1 : Math.round(fraction * 100)
+    if (shown === this.shownShield) return
+    this.shownShield = shown
+    this.shieldEl.hidden = fraction === null
+    if (fraction === null) return
+    ;(this.shieldEl.querySelector('b') as HTMLElement).style.width = `${Math.max(0, Math.min(100, shown))}%`
+    this.shieldEl.setAttribute('aria-label', `Shield ${shown}%`)
   }
 
   /** The Brute's health across the top of the screen while it lives; null hides it. */
