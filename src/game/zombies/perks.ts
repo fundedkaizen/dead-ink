@@ -397,12 +397,15 @@ export class PerkBottle {
     glint.renderOrder = 4
     // An ink outline around the whole bottle, like everything else in the world.
     const outline = new THREE.Mesh(new THREE.LatheGeometry(contour(0.0022), 36), new THREE.MeshBasicMaterial({ color: 0x111111, side: THREE.BackSide, toneMapped: false }))
+    // The far wall of the glass, solid and pale green, just inside the outline: seen through the front
+    // glass it hides the black outline (which made the whole bottle read grey), leaving an ink rim.
+    const back = new THREE.Mesh(new THREE.LatheGeometry(contour(0.0004), 36), new THREE.MeshBasicMaterial({ color: 0xdcefe3, side: THREE.BackSide, toneMapped: false }))
     // A paper label round the waist, with the perk's name.
     this.label = new THREE.Mesh(new THREE.CylinderGeometry(0.0283, 0.0283, 0.026, 30, 1, true),
       new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, depthWrite: false, toneMapped: false, side: THREE.DoubleSide }))
     this.label.position.y = 0.083
     this.label.renderOrder = 5
-    this.root.add(outline, this.liquid, glass, glint, this.label)
+    this.root.add(outline, back, this.liquid, glass, glint, this.label)
     this.root.visible = false
     camera.add(this.root)
   }

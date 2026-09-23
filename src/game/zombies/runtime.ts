@@ -33,6 +33,7 @@ import { ZombieHud } from './hud'
 import { MuzzleSparks, RiseMarks, Shockwaves } from './effects'
 import { GRENADE, Grenades } from './grenades'
 import { INK_RAY, InkRayBolts } from './wonder'
+import { REVIVE, SecondDraftRevive } from './revive'
 import { POWERUP_INFO, PowerupDrops, PowerupDropper } from './powerups'
 import { SEALED, ZoneGates, type ZoneGate } from './zones'
 import { MACHINE_PLACES, PACK, PERKS, PERK_EFFECT, PERK_LIMIT, PackAPunch, PackedLook, PerkBottle, PerkMachine, type PerkKind } from './perks'
@@ -176,6 +177,7 @@ export class ZombiesRuntime {
   private jingleAt = new Map<PerkMachine, number>()
   /** Seconds of grace after Second Draft gets you back up. */
   private reviveGrace = 0
+  private revive = new SecondDraftRevive()
   private random: Random
   private spawn = new THREE.Vector3(...SPAWN_POINT)
   private abort = new AbortController()
@@ -362,6 +364,7 @@ export class ZombiesRuntime {
     this.box?.close()
     this.powerups.clear(); this.timers = {}; this.earned = 0; this.heldWeapons = null
     this.perks.clear(); this.pendingPerk = null; this.reviveGrace = 0; this.applyPerks(); this.zombieHud.perks([])
+    this.revive.reset(); this.player.movementLocked = false
     this.brute = null; this.bruteTimer = -1
     for (const skull of this.skulls) { skull.found = false; skull.object.userData.found = false }
     this.music.stopStings()
@@ -598,10 +601,16 @@ export class ZombiesRuntime {
   private selfRevive() {
     this.losePerks()
     this.state.health = PLAYER_HEALTH.base
-    this.reviveGrace = PERK_EFFECT.reviveGrace
+    // Untouchable while down and for a moment after getting up.
+    this.reviveGrace = REVIVE.seconds + PERK_EFFECT.reviveGrace
     this.director?.shove(this.player.body.position, PERK_EFFECT.reviveShove, 1.5)
+    this.revive.start()
+    this.weapons.cancel(); this.cancelInput()
+    this.player.movementLocked = true
+    this.player.body.velocity.set(0, 0, 0)
+    this.audio.play({ kind: 'player-fall' })
+    if (!this.hud.reducedMotion) this.zombieHud.revive()
     this.zombieHud.announce('Second Draft!', 2.4, PERKS.secondDraft.css)
-    this.emit({ kind: 'powerup-grab', position: this.player.body.position.clone(), radius: 5 })
   }
 
   /** Put the gun in hand into the Pack-a-Punch; or take the upgraded one back out. */
@@ -896,7 +905,7 @@ export class ZombiesRuntime {
 
   /** Throw a frag the way you are looking, a little up, carrying your own speed with it. */
   throwGrenade() {
-    if (!this.isActive() || this.grenadeCount <= 0 || this.grenadeCooldown > 0) return false
+    if (!this.isActive() || this.revive.down || this.grenadeCount <= 0 || this.grenadeCooldown > 0) return false
     this.grenadeCount--
     this.grenadeCooldown = GRENADE.cooldown
     this.weapons.cancel()
@@ -949,7 +958,7 @@ export class ZombiesRuntime {
   }
 
   knife() {
-    if (!this.isActive() || !this.director || this.knifeCooldown > 0) return false
+    if (!this.isActive() || !this.director || this.knifeCooldown > 0 || this.revive.down) return false
     this.knifeCooldown = KNIFE.cooldown
     this.weapons.cancel()
     const eye = this.camera.perspective.getWorldPosition(new THREE.Vector3())
@@ -1113,6 +1122,16 @@ export class ZombiesRuntime {
       if (this.state.phase === 'active' && this.state.elapsed - this.lastHurt > PLAYER_HEALTH.regenDelay)
         this.state.health = Math.min(this.maxHealth(), this.state.health + PLAYER_HEALTH.regenPerSecond * dt)
       this.reviveGrace = Math.max(0, this.reviveGrace - dt)
+      if (this.revive.active) {
+        const wasDown = this.revive.down
+        this.revive.update(dt)
+        // Back on your feet: shove the nearest ones again and let you move.
+        if (wasDown && !this.revive.down) {
+          this.player.movementLocked = false
+          this.director.shove(body.position, PERK_EFFECT.reviveShove, 1.5)
+          this.emit({ kind: 'powerup-grab', position: body.position.clone(), radius: 5 })
+        }
+      }
       if (this.pendingPerk && (this.pendingPerk.timer -= dt) <= 0) { this.grantPerk(this.pendingPerk.kind); this.pendingPerk = null }
       for (const machine of this.perkMachines) {
         machine.update(dt)
@@ -1160,6 +1179,7 @@ export class ZombiesRuntime {
     if (reactionActive) {
       const zoom = this.aiming && this.weapons.current?.name === 'sniper' && !this.weapons.reloading ? this.weapons.scopeMagnification : 1
       this.playerHits.applyCamera(this.camera.perspective, this.player.world, 1 / zoom)
+      this.revive.applyCamera(this.camera.perspective, this.hud.reducedMotion)
     }
     deathVisible = this.death.active && this.player.enabled && !this.player.immersive
     if (deathVisible) {
@@ -1168,7 +1188,7 @@ export class ZombiesRuntime {
       this.hud.setDeath(this.death)
     } else {
       if (this.death.active) { this.death.reset(); this.weapons.resetDeath(); this.hud.clearDeath() }
-      this.weapons.update(dt, { active: reactionActive && this.interactionTime === 0, climbing: this.player.actions.traversing,
+      this.weapons.update(dt, { active: reactionActive && this.interactionTime === 0 && !this.revive.down, climbing: this.player.actions.traversing,
         moving: this.player.body.velocity.length(), aiming: this.aiming, reducedMotion: this.hud.reducedMotion, feet: this.player.body.position, hitPose })
     }
     this.bottle.update(dt)
@@ -1193,7 +1213,7 @@ export class ZombiesRuntime {
     return active || this.death.running
   }
 
-  finishFrame() { this.playerHits.removeCamera() }
+  finishFrame() { this.revive.removeCamera(); this.playerHits.removeCamera() }
 
   dispose() {
     this.playerHits.clear(); this.disposed = true; this.abort.abort()

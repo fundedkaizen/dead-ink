@@ -56,6 +56,16 @@ body[data-reduced-motion="true"] .dead-ink-powerup.ending { animation: none; opa
 body[data-dead-ink-nuke="true"] #world { animation: dead-ink-nuke 0.7s ease-out; }
 @keyframes dead-ink-nuke { 0% { filter: invert(1) contrast(1.4); } 35% { filter: invert(1); } 100% { filter: none; } }
 body[data-reduced-motion="true"][data-dead-ink-nuke="true"] #world { animation: none; }
+/* Second Draft: down in grey, swimming; up again as the colour floods back, blue for the perk. */
+body[data-dead-ink-revive="true"] #world { animation: dead-ink-revive 2.4s linear; }
+@keyframes dead-ink-revive {
+  0% { filter: none; }
+  10% { filter: grayscale(1) blur(3px) brightness(0.55) contrast(1.2); }
+  45% { filter: grayscale(1) blur(2px) brightness(0.7); }
+  60% { filter: grayscale(0.9) blur(1.5px) brightness(0.8); }
+  72% { filter: sepia(0.7) hue-rotate(170deg) saturate(2.4) brightness(1.2); }
+  100% { filter: none; }
+}
 
 @media (max-width: 640px) {
   .dead-ink-powerup img { width: 44px; height: 44px; }

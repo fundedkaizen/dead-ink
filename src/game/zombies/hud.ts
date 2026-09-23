@@ -40,6 +40,7 @@ export class ZombieHud {
   private shownPerks = ''
   private floaters: Floater[] = []
   private flashTimer = 0
+  private reviveTimer = 0
   private shownRound = -1
   private shownPoints = -1
   private bannerTime = 0
@@ -139,6 +140,12 @@ export class ZombieHud {
     this.flashTimer = 0.7
   }
 
+  /** Second Draft: the world drains to grey while you are down, then floods back tinted blue. */
+  revive() {
+    document.body.dataset.deadInkRevive = 'true'
+    this.reviveTimer = 2.4
+  }
+
   /** A "+60" that pops beside the points and floats away. */
   gain(amount: number) {
     if (!(amount > 0)) return
@@ -178,6 +185,10 @@ export class ZombieHud {
       this.flashTimer -= dt
       if (this.flashTimer <= 0) delete document.body.dataset.deadInkNuke
     }
+    if (this.reviveTimer > 0) {
+      this.reviveTimer -= dt
+      if (this.reviveTimer <= 0) delete document.body.dataset.deadInkRevive
+    }
     for (const floater of this.floaters) {
       floater.age += dt
       floater.element.style.transform = `translateY(${-floater.age * 40}px)`
@@ -198,6 +209,8 @@ export class ZombieHud {
     this.shownGrenades = -1
     this.flashTimer = 0
     delete document.body.dataset.deadInkNuke
+    this.reviveTimer = 0
+    delete document.body.dataset.deadInkRevive
     this.shownRound = -1
     this.shownPoints = -1
   }

@@ -63,6 +63,10 @@ const status = window.__perkCheck = { done: false, results }
   check(m.weapons.slots.length === 2, 'including Spare Nib\'s third slot')
   m.damage(10000, 'zombie', p.body.position.clone().add(new V(1, 1.3, 0)))
   check(m.state.phase === 'active', 'a moment of grace right after getting up')
+  check(p.movementLocked && document.body.dataset.deadInkRevive === 'true', 'you go down first: held on the floor, the world drained of colour')
+  check(m.revive.down, 'the Second Draft fall is playing')
+  check(await until(() => !p.movementLocked, 3000), 'then you get back up and can move')
+  check(await until(() => document.body.dataset.deadInkRevive === undefined, 1500), 'and the colour comes back')
 
   // Pack-a-Punch.
   m.invincible = true
