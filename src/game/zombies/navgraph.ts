@@ -53,6 +53,11 @@ export const CLIMB_COST = { up: 2.5, down: 1.3 } as const
  * stacks, sheds, low roofs). Taller buildings keep to their ladders.
  */
 export const WALL_CLIMB = { low: 1.4, high: 3.4 } as const
+/**
+ * Furniture a player might stand on to keep out of reach: desks and tables, 0.55 to 1.4 m up. Zombies
+ * vault onto them (a short wall climb), so standing on a desk is no longer safe.
+ */
+export const FURNITURE = { low: 0.55, high: 1.4 } as const
 
 export type NavData = {
   version: number; cell: number; minX: number; minZ: number; nx: number; nz: number
@@ -579,6 +584,15 @@ export class NavGraph {
         if (Number.isNaN(ground)) continue
       }
       const cx = bounds.minX + (i + 0.5) * cell, cz = bounds.minZ + (k + 0.5) * cell
+      // Indoors the ceiling would answer a probe from above first, so furniture is looked for from just
+      // over its own height.
+      // A desk is narrower than a grid cell, so look across the cell for a place solidly on its top.
+      furniture: for (const ox of [0, -0.4, 0.4, -0.2, 0.2, -0.6, 0.6]) for (const oz of [0, -0.4, 0.4, -0.2, 0.2, -0.6, 0.6]) {
+        const x = cx + ox, z = cz + oz
+        const low = world.floor(probe.set(x, ground + FURNITURE.high + 0.05, z), 0, FURNITURE.high - FURNITURE.low + 0.05)
+        if (!Number.isFinite(low) || low - ground < FURNITURE.low || findRaised(index, low) >= 0) continue
+        if (bodyFits(x, low + 0.024, z) && footing(x, low, z)) { addRaised(index, new THREE.Vector3(x, low, z)); break furniture }
+      }
       const top = world.floor(probe.set(cx, ground + WALL_CLIMB.high + 0.1, cz), 0, WALL_CLIMB.high - WALL_CLIMB.low + 0.1, BODY_RADIUS * 0.95)
       if (!Number.isFinite(top) || top - ground < WALL_CLIMB.low || findRaised(index, top) >= 0) continue
       if (bodyFits(cx, top + 0.024, cz) && footing(cx, top, cz)) addRaised(index, new THREE.Vector3(cx, top, cz))
@@ -648,7 +662,7 @@ export class NavGraph {
           const index = graph.index(i + DIRECTIONS[d][0] * reach, k + DIRECTIONS[d][1] * reach)
           if (index < 0 || !graph.walkable(index)) continue
           const rise = spot.y - heights[index]
-          if (rise < WALL_CLIMB.low || rise > WALL_CLIMB.high) continue
+          if (rise < FURNITURE.low || rise > WALL_CLIMB.high) continue
           const via = wallClimb(place(index, below), aboveGround.set(spot.x, spot.y, spot.z))
           if (!via) continue
           graph.addLink({ a: index, b: graph.cells + r, kind: 'climb', via })
