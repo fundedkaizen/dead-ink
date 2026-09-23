@@ -1128,7 +1128,9 @@ export class FirstPersonWeapons {
     this.cooldown = rules.interval * this.fireScale
     if (item.magazine === 0) {
       this.held = false
-      this.context.emit({ kind: 'empty', text: item.reserve ? 'Empty — press R to reload' : 'No ammunition' })
+      // As in Call of Duty: the trigger on an empty magazine clicks and starts the reload by itself.
+      if (item.reserve > 0) { this.context.emit({ kind: 'empty' }); this.reload(); return }
+      this.context.emit({ kind: 'empty', text: 'No ammunition' })
       return
     }
     this.root.updateWorldMatrix(true, true)
