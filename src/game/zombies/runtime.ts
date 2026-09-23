@@ -49,6 +49,7 @@ import { InkTrap, TRAP, TRAP_GATES } from './traps'
 import { INKWELL_PLACES, Inkwell, QUEST, SoulStreams, questHint, type QuestStep } from './quest'
 import { BLOT, GAS, rollBlot } from './gas'
 import { POWER_ICON, WorldMarker } from './markers'
+import { playMythicSting } from './mythic'
 import { CoopLink, PartnerAvatar, PartnerTag, toVector, vec, type CoopMessage, type CoopStatus, type PlayerState } from './coop'
 import type { Shot as ShotType } from '../types'
 import type { Rarity } from '../loot'
@@ -2208,7 +2209,10 @@ export class ZombiesRuntime {
       this.knifeCooldown = Math.max(0, this.knifeCooldown - dt)
       const boxEvent = this.box?.update(dt, Object.keys(BOX_WEIGHTS) as WeaponName[])
       if (boxEvent === 'expired') this.hud.notify('The box closed.', 2)
-      if (boxEvent === 'landed' && this.box) this.emit({ kind: 'box-offer', position: this.box.point.clone(), radius: 25 })
+      if (boxEvent === 'landed' && this.box) {
+        this.emit({ kind: 'box-offer', position: this.box.point.clone(), radius: 25 })
+        if (this.box.offer?.rarity === 'mythic') playMythicSting()
+      }
       if (boxEvent === 'moved' && !this.isGuest) this.moveBox()
       if (boxEvent === 'expired' && this.coop.role === 'host') this.coop.send({ t: 'box', a: 'close' })
       this.blood.update(dt); this.impacts.update(dt); this.riseMarks.update(dt); this.sparks.update(dt); this.shockwaves.update(dt)

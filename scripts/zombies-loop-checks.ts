@@ -4,13 +4,18 @@ import * as THREE from 'three'
 import { MAX_ALIVE, POWERUPS, ROUND_BREAK, isBossRound, isStormRound, zombiesInRound } from '../src/game/zombies/rules'
 import { DROPPED_KINDS, PowerupDropper } from '../src/game/zombies/powerups'
 import { FIRST_ROUND_DELAY, newGame, returnSpawns, stepRounds } from '../src/game/zombies/rounds'
-import { BOX_WEIGHTS, RESERVE_MAGAZINES, WALL_WEAPONS, ZOMBIE_SLOTS, freshWeapon, pointsForHit, rollBox, startingPistol, wallOffer } from '../src/game/zombies/economy'
+import { BOX_SPIN, BOX_WEIGHTS, MYTHIC_CHANCE, RAY_GUN_CHANCE, RESERVE_MAGAZINES, WALL_WEAPONS, ZOMBIE_SLOTS, freshWeapon, pointsForHit, rollBox, startingPistol, wallOffer } from '../src/game/zombies/economy'
 import { SHEET, findWallSpots } from '../src/game/zombies/placement'
 import { NavGraph, type NavData } from '../src/game/zombies/navgraph'
 import { seeded } from '../src/game/shared/random'
 import { FirstPersonWeapons } from '../src/game/weapons'
 import { WEAPON_RULES } from '../src/game/balance'
-import { RARITIES, weaponRules } from '../src/game/loot'
+import { DROP_WEIGHTS, RARITIES, RARITY_INFO, weaponRules } from '../src/game/loot'
+import { MysteryBox } from '../src/game/zombies/stations'
+import { MYTHIC_REVEAL, MYTHIC_STING, applyDragonSkin, removeDragonSkin } from '../src/game/zombies/mythic'
+import { metal } from '../src/lab/weapons/models/common'
+import { buildInkRay } from '../src/lab/weapons/models/wonder'
+import { createMissionGun } from '../src/game/weapon-models'
 import { CollisionWorld } from '../src/player/collision'
 import type { WeaponFrame, WeaponName } from '../src/game/types'
 import { buildNavScene } from './nav-scene'
@@ -136,6 +141,100 @@ assert.equal(freshWeapon('z', 'smg').reserve, WEAPON_RULES.smg.capacity * RESERV
   const pool = (['smg', 'shotgun', 'sniper', 'magnum', 'lmg'] as WeaponName[]), total = pool.reduce((s, n) => s + BOX_WEIGHTS[n], 0)
   for (const n of pool) assert(Math.abs(names[n] / ordinary - BOX_WEIGHTS[n] / total) < 0.015, `${n} share`)
   for (const r of Object.keys(rarities)) assert(RARITIES.includes(r as never))
+}
+
+// ---- 3b. Mythic: about one box roll in a thousand, never a second one, never the Ink Ray -----------
+{
+  const random = seeded(4242)
+  const held = [startingPistol(), null]
+  const draws = 400_000
+  let mythics = 0, rays = 0
+  const tiers: Record<string, number> = {}
+  for (let i = 0; i < draws; i++) {
+    const roll = rollBox(random, held)
+    if (roll.special) { rays++; assert.equal(roll.rarity, 'legendary', 'the Ink Ray is always gold, never Mythic'); continue }
+    if (roll.rarity === 'mythic') mythics++
+    else tiers[roll.rarity] = (tiers[roll.rarity] ?? 0) + 1
+  }
+  const share = mythics / draws, expected = (1 - RAY_GUN_CHANCE) * MYTHIC_CHANCE
+  assert(share > expected * 0.75 && share < expected * 1.25, `Mythic is about ${(expected * 100).toFixed(3)}% of box rolls (${(share * 100).toFixed(3)}%, ${mythics} of ${draws})`)
+  assert(Math.abs(rays / draws - RAY_GUN_CHANCE) < 0.003, 'the Mythic roll comes after the Ink Ray and leaves its odds alone')
+  // Grey to gold among the rest are exactly the chest odds.
+  const rest = draws - rays - mythics, chest = DROP_WEIGHTS.chest, total = RARITIES.reduce((sum, r) => sum + chest[r], 0)
+  for (const r of RARITIES) if (r !== 'mythic') assert(Math.abs((tiers[r] ?? 0) / rest - chest[r] / total) < 0.004, `${r} keeps its chest share`)
+  assert(!tiers.common, 'still never grey')
+  // Never twice: carrying a Mythic, the box never offers another.
+  const carrying = [startingPistol(), freshWeapon('m', 'ak', 'mythic')]
+  const again = seeded(77)
+  for (let i = 0; i < 50_000; i++) assert.notEqual(rollBox(again, carrying).rarity, 'mythic', 'never a second Mythic')
+  // A forced Mythic roll: random() under the chance right after the Ink Ray draw.
+  const forced = [0.5, 0.0001, 0.3, 0.3, 0.3]
+  const roll = rollBox(() => forced.shift() ?? 0.3, held)
+  assert.equal(roll.rarity, 'mythic'); assert(!roll.special)
+  // Its stats: more than gold, at most half as much again as gold's bonus; Pack-a-Punch still works on it.
+  const gold = weaponRules({ name: 'ak', rarity: 'legendary' }), mythic = weaponRules({ name: 'ak', rarity: 'mythic' })
+  assert(mythic.damage > gold.damage && mythic.reload < gold.reload, 'Mythic beats gold')
+  assert(RARITY_INFO.mythic.damage - 1 <= (RARITY_INFO.legendary.damage - 1) * 1.5 + 1e-9, "fair: at most 1.5x gold's damage bonus")
+  assert.equal(mythic.label, 'Mythic AK rifle')
+  const packed = weaponRules({ name: 'ak', rarity: 'mythic', packed: true, packLevel: 1 })
+  assert(Math.abs(packed.damage - WEAPON_RULES.ak.damage * RARITY_INFO.mythic.damage * 2) < 1e-9, 'a packed Mythic hits twice as hard as a Mythic')
+  // Its colour is its own.
+  const others = RARITIES.filter(r => r !== 'mythic').map(r => RARITY_INFO[r].color)
+  assert(!others.includes(RARITY_INFO.mythic.color) && RARITY_INFO.mythic.color !== 0xd4332a && RARITY_INFO.mythic.color !== 0x46e05a, 'Mythic has a colour nothing else uses')
+}
+
+// ---- 3c. The box's Mythic reveal, and the dragon ------------------------------------------------------
+{
+  const spot = { stand: new THREE.Vector3(0, 0, 2), wall: new THREE.Vector3(0, 0, 0), normal: new THREE.Vector3(0, 0, 1) }
+  const box = new MysteryBox(spot as never)
+  const land = (rarity: 'epic' | 'mythic') => {
+    box.spin({ name: 'ak', rarity })
+    let t = 0, event: string | null = null
+    while (!event && t < 20) { event = box.update(1 / 60, ['ak', 'smg', 'shotgun']); t += 1 / 60 }
+    return { event, t }
+  }
+  const wearsDragon = (object: THREE.Object3D) => {
+    let found = false
+    object.traverse(o => { if (o instanceof THREE.Mesh && (o.material as THREE.Material).userData?.mythicDragon) found = true })
+    return found
+  }
+  const plain = land('epic')
+  assert.equal(plain.event, 'landed'); assert(Math.abs(plain.t - BOX_SPIN) < 0.05, `an ordinary spin lands at ${BOX_SPIN}s (${plain.t.toFixed(2)})`)
+  assert(!wearsDragon(box.root.getObjectByName('Mystery box gun · ak')!), 'an epic gun wears no dragon')
+  assert(!box.root.getObjectByName('Mythic beam'), 'and has no Mythic beam')
+  box.close()
+  const mythic = land('mythic')
+  assert.equal(mythic.event, 'landed')
+  assert(Math.abs(mythic.t - (BOX_SPIN + MYTHIC_REVEAL.slow)) < 0.05, `a Mythic spin runs longer (${mythic.t.toFixed(2)}s)`)
+  assert(wearsDragon(box.root.getObjectByName('Mystery box gun · ak')!), 'the Mythic on offer wears the dragon')
+  assert(box.root.getObjectByName('Mythic beam'), 'a Mythic lands under its own tall beam')
+  for (let i = 0; i < 120; i++) box.update(1 / 60, [])
+  assert.equal(box.state, 'offering', 'and is offered like any gun')
+  assert.equal(box.take()?.rarity, 'mythic', 'taking it gives the Mythic')
+  assert(!box.root.getObjectByName('Mythic beam'), 'the beam goes with it')
+  box.dispose()
+  // The skin: paints a plain gun's paper, comes off again, and an upgraded Mythic gets its own variant.
+  const ak = createMissionGun('ak')
+  assert(applyDragonSkin(ak), 'the dragon paints a plain gun')
+  const skins = new Set<THREE.Material>()
+  ak.traverse(o => { if (o instanceof THREE.Mesh && (o.material as THREE.Material).userData?.mythicDragon) skins.add(o.material as THREE.Material) })
+  assert.equal(skins.size, 1, 'one dragon material per gun')
+  removeDragonSkin(ak)
+  assert(!wearsDragon(ak), 'and comes off')
+  const packedAk = createMissionGun('ak')
+  applyDragonSkin(packedAk, true)
+  const packedSkins = new Set<THREE.Material>()
+  packedAk.traverse(o => { if (o instanceof THREE.Mesh && (o.material as THREE.Material).userData?.mythicDragon) packedSkins.add(o.material as THREE.Material) })
+  assert(packedSkins.size === 1 && ![...packedSkins].some(m => skins.has(m)), 'an upgraded Mythic shimmers in the Pack-a-Punch colours instead')
+  assert(MYTHIC_STING >= 3 && MYTHIC_STING <= 4, 'the sting runs 3 to 4 seconds')
+  // The Ink Ray keeps the pistol's handling contract: pistol class, a muzzle out front, a cell that drops on reload.
+  const ray = buildInkRay()
+  assert.equal(ray.userData.cls, 'pistol'); assert.equal(ray.userData.twoHanded, false)
+  assert(ray.userData.muzzle.z > 0.2, 'its muzzle is out at the end of the bell')
+  assert(ray.userData.parts.magazine && ray.userData.parts.chamber, 'its cell reloads like a magazine; its chamber glows')
+  let glow = 0
+  ray.traverse(o => { if (o instanceof THREE.Mesh && o.material !== metal && (o.material as THREE.MeshBasicMaterial).color?.getHex() === 0x46e05a) glow++ })
+  assert(glow >= 3, 'green glass in the portholes, the gauge and the emitter')
 }
 
 // ---- 4. Giving and refilling weapons -------------------------------------------------------------

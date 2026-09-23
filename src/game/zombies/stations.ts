@@ -7,6 +7,7 @@ import type { WeaponName } from '../types'
 import { BOX_OFFER, BOX_SPIN } from './economy'
 import type { WallSpot } from './placement'
 import { LightMotes } from './effects'
+import { MYTHIC, MYTHIC_REVEAL, applyDragonSkin } from './mythic'
 
 /**
  * The things you spend points on, drawn in the same ink as the buildings. Placeholder art until Astra's
@@ -57,6 +58,8 @@ const BOX_LIGHT = 0xe8c46a
 /**
  * The Mystery Box: pay, it spins through guns, then offers one for a few seconds. Now and then it lands
  * on a teddy bear instead: it lifts away and turns up somewhere else on the map, as in Call of Duty.
+ * A Mythic roll makes a moment of it: the reel runs longer and crawls to its stop while the box flickers
+ * magenta, then a burst and a tall beam of the tier's colour, and the gun pops up turning, dragon and all.
  */
 export class MysteryBox {
   readonly root = new THREE.Group()
@@ -82,6 +85,10 @@ export class MysteryBox {
   private beam: THREE.Group | null = null
   private cycle = 0
   private cycleLength = 0.07
+  /** Seconds this spin runs: longer for a Mythic. */
+  private spinLength = BOX_SPIN
+  /** The Mythic's tall beams, while one is on offer. */
+  private mythicBeam: THREE.Group | null = null
   private baseY: number
 
   constructor(spot: WallSpot) {
@@ -147,6 +154,7 @@ export class MysteryBox {
     this.state = 'spinning'
     this.timer = 0
     this.cycle = 0
+    this.spinLength = this.mythic ? BOX_SPIN + MYTHIC_REVEAL.slow : BOX_SPIN
     this.uses++
   }
 
@@ -156,6 +164,9 @@ export class MysteryBox {
     this.close()
     return offer
   }
+
+  /** The spin will land, or has landed, on a Mythic. */
+  get mythic() { return !this.teddyNext && this.offer?.rarity === 'mythic' }
 
   close() {
     this.state = 'idle'
@@ -173,16 +184,38 @@ export class MysteryBox {
     this.marker.visible = this.state === 'idle' && this.body.visible
     // Brighter the wider the lid is open.
     const open = Math.min(1, -this.lid.rotation.x / 1.25)
-    ;(this.glow.material as THREE.MeshBasicMaterial).opacity = open * (0.75 + 0.2 * Math.sin(this.timer * 18))
-    ;(this.spill.material as THREE.MeshBasicMaterial).opacity = 0.55 + 0.45 * open
+    const glow = this.glow.material as THREE.MeshBasicMaterial, spill = this.spill.material as THREE.MeshBasicMaterial
+    glow.opacity = open * (0.75 + 0.2 * Math.sin(this.timer * 18))
+    spill.opacity = 0.55 + 0.45 * open
+    // A Mythic: the box flickers its colour as the reel crawls to a stop, then flashes white to magenta.
+    const mythic = this.mythic && (this.state === 'spinning' || this.state === 'offering')
+    const tease = mythic && this.state === 'spinning' ? Math.max(0, (this.timer - (this.spinLength - MYTHIC_REVEAL.tease)) / MYTHIC_REVEAL.tease) : 0
+    const burst = mythic && this.state === 'offering' ? Math.max(0, 1 - this.timer / MYTHIC_REVEAL.burst) : 0
+    glow.color.set(0xffd36b)
+    spill.color.set(0xffffff)
+    if (tease > 0 && Math.sin(this.timer * (26 + tease * 30)) > 0.2 - tease * 0.6) { glow.color.set(MYTHIC.color); spill.color.set(0xff7ac8) }
+    if (burst > 0) {
+      glow.color.set(MYTHIC.color).lerp(new THREE.Color(0xffffff), burst ** 3)
+      glow.opacity = Math.min(1, open * (0.8 + burst))
+      spill.color.set(0xff7ac8)
+    } else if (mythic && this.state === 'offering') { glow.color.set(MYTHIC.color); spill.color.set(0xff9ad4) }
     const top = this.baseY - 0.15
+    const mythicMote = () => Math.random() < 0.5 ? MYTHIC.crimson : MYTHIC.violet
     if (this.state === 'idle') this.motes.update(dt, 5, p => p.set((Math.random() - 0.5) * 1.3, top + 0.1, (Math.random() - 0.5) * 0.55), 0xe8b64a, 0.35)
-    else if (this.state === 'spinning') this.motes.update(dt, 110, p => p.set((Math.random() - 0.5) * 1.2, top, (Math.random() - 0.5) * 0.45), 0xffc94a, 1.9)
+    else if (this.state === 'spinning') this.motes.update(dt, 110 + tease * 120, p => p.set((Math.random() - 0.5) * 1.2, top, (Math.random() - 0.5) * 0.45), tease > 0 && Math.random() < tease ? mythicMote() : 0xffc94a, 1.9 + tease)
     else if (this.state === 'leaving') this.motes.update(dt, 70, p => p.set((Math.random() - 0.5) * 1.3, Math.random() * 0.4, (Math.random() - 0.5) * 0.5), 0xe8b64a, 1.2)
-    else {
-      const color = this.offer && this.offer.rarity !== 'common' ? RARITY_INFO[this.offer.rarity].color : 0xe8b64a
+    else if (burst > 0) {
+      // The burst: a fountain of the tier's colours off the box.
+      this.motes.update(dt, 900 * burst, p => p.set((Math.random() - 0.5) * 1.2, top + Math.random() * 0.3, (Math.random() - 0.5) * 0.5), mythicMote(), 2.2 + 2.5 * burst)
+    } else {
+      const color = this.mythic ? mythicMote() : this.offer && this.offer.rarity !== 'common' ? RARITY_INFO[this.offer.rarity].color : 0xe8b64a
       const at = this.floating?.position ?? new THREE.Vector3(0, top + 0.6, 0)
-      this.motes.update(dt, 45, p => p.randomDirection().multiplyScalar(0.25 + Math.random() * 0.3).add(at), color, 0.45)
+      this.motes.update(dt, this.mythic ? 70 : 45, p => p.randomDirection().multiplyScalar(0.25 + Math.random() * 0.3).add(at), color, 0.45)
+    }
+    if (this.mythicBeam) {
+      // The tall beam swells out of the burst and settles into a slow pulse.
+      const pulse = 1 + 1.1 * burst ** 2 + 0.08 * Math.sin(this.timer * 5)
+      this.mythicBeam.scale.set(pulse, 1, pulse)
     }
     if (this.state === 'idle') return null
     this.timer += dt
@@ -193,9 +226,11 @@ export class MysteryBox {
         const pool = spinNames.length ? spinNames : [this.offer?.name ?? 'pistol']
         const next = pool[Math.floor(Math.random() * pool.length)]
         this.setFloating(next)
-        this.cycleLength = this.cycle = 0.07 + 0.25 * (this.timer / BOX_SPIN) ** 2
+        // A Mythic's reel crawls through its last few guns, each held longer than the one before.
+        const progress = this.timer / this.spinLength
+        this.cycleLength = this.cycle = 0.07 + 0.25 * progress ** 2 + (this.mythic ? 0.55 * progress ** 6 : 0)
       }
-      if (this.timer >= BOX_SPIN) {
+      if (this.timer >= this.spinLength) {
         this.timer = 0
         if (this.teddyNext) {
           this.state = 'leaving'
@@ -229,11 +264,21 @@ export class MysteryBox {
     if (this.floating) {
       // Side-on, like the reel of a slot machine: each gun slides up through the opening, slower and
       // slower, until the last one stops in the middle and sinks back in as the offer runs out.
-      const rise = this.state === 'spinning' ? Math.min(1, this.timer / BOX_SPIN) : 1 - Math.min(1, this.timer / BOX_OFFER) * 0.6
+      const rise = this.state === 'spinning' ? Math.min(1, this.timer / this.spinLength) : 1 - Math.min(1, this.timer / BOX_OFFER) * 0.6
       const reel = this.state === 'spinning' ? 1 - this.cycle / this.cycleLength - 0.5 : 0
       this.floating.position.set(0, this.baseY + 0.45 * rise + reel * 0.34, 0)
       this.floating.rotation.set(0, Math.PI / 2, 0)
       this.floating.scale.setScalar(this.state === 'spinning' ? 1 - Math.abs(reel) * 0.5 : 1 + Math.sin(this.timer * 3) * 0.02)
+      // The Ink Ray is pistol-sized; on offer it is shown larger, the box's prize.
+      if (this.state === 'offering' && this.offer?.special === 'rayGun') this.floating.scale.multiplyScalar(1.6)
+      if (this.mythic && this.state === 'offering') {
+        // It pops up big, turns one and a half times, and settles with its dragon's side (the gun's right,
+        // which also faces you in first person) toward you, a little higher and larger.
+        const turn = Math.min(1, this.timer / 1.5), ease = 1 - (1 - turn) ** 3
+        this.floating.rotation.y = Math.PI / 2 + Math.PI * 3 * ease
+        this.floating.position.y += 0.12 * ease
+        this.floating.scale.multiplyScalar(1.25 + 0.5 * Math.exp(-this.timer * 7) * Math.cos(this.timer * 18))
+      }
     }
     return null
   }
@@ -244,6 +289,8 @@ export class MysteryBox {
       // The beam's material is shared across all loot of a colour; only its shapes are this box's.
       this.beam?.traverse(o => { if (o instanceof THREE.Mesh) o.geometry.dispose() })
       this.beam?.removeFromParent(); this.beam = null
+      this.mythicBeam?.traverse(o => { if (o instanceof THREE.Mesh) o.geometry.dispose() })
+      this.mythicBeam?.removeFromParent(); this.mythicBeam = null
       this.floatingName = name
       if (name) {
         this.floating = createMissionGun(name, special)
@@ -254,6 +301,19 @@ export class MysteryBox {
           this.beam = createRarityBeam(RARITY_INFO[rarity].color, 3)
           this.beam.position.y = 0.1
           this.body.add(this.beam)
+        }
+        if (rarity === 'mythic') {
+          applyDragonSkin(this.floating)
+          // Two columns into the sky, crimson inside violet, just behind the gun so they frame it rather
+          // than wash over it.
+          this.mythicBeam = new THREE.Group()
+          this.mythicBeam.name = 'Mythic beam'
+          const inner = createRarityBeam(MYTHIC.crimson, MYTHIC_REVEAL.beam), outer = createRarityBeam(MYTHIC.violet, MYTHIC_REVEAL.beam * 0.8)
+          inner.scale.set(1.2, 1, 1.2)
+          outer.scale.set(1.8, 1, 1.8)
+          this.mythicBeam.add(inner, outer)
+          this.mythicBeam.position.set(0, 0.1, -0.2)
+          this.body.add(this.mythicBeam)
         }
       }
     }

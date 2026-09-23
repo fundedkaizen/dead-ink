@@ -8,11 +8,14 @@ import type { CollisionWorld } from '../../player/collision'
 export const INK_RAY = { speed: 45, life: 3, radius: 3, selfRadius: 3, selfDamage: 40, boxWeight: 0.05 } as const
 const GREEN = 0x46e05a
 
-type Bolt = { mesh: THREE.Mesh; trail: THREE.Mesh; velocity: THREE.Vector3; age: number }
+type Bolt = { mesh: THREE.Mesh; trail: THREE.Mesh; ring: THREE.Mesh; velocity: THREE.Vector3; age: number }
 
 export class InkRayBolts {
   private bolts: Bolt[] = []
-  private geometry = new THREE.SphereGeometry(0.07, 10, 8)
+  // A stretched green slug inside a pulsing ring of light, like Call of Duty's Ray Gun shot.
+  private geometry = new THREE.SphereGeometry(0.07, 10, 8).scale(1, 1, 2.2)
+  private ringGeometry = new THREE.TorusGeometry(0.11, 0.022, 8, 24)
+  private ringMaterial = new THREE.MeshBasicMaterial({ color: 0xb8ffb0, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false })
   private trailGeometry = new THREE.CylinderGeometry(0.035, 0.005, 1, 8).rotateX(Math.PI / 2).translate(0, 0, -0.5)
   private material = new THREE.MeshBasicMaterial({ color: GREEN, toneMapped: false })
   private trailMaterial = new THREE.MeshBasicMaterial({ color: GREEN, transparent: true, opacity: 0.55, depthWrite: false, toneMapped: false })
@@ -24,8 +27,10 @@ export class InkRayBolts {
   fire(origin: THREE.Vector3, direction: THREE.Vector3) {
     const mesh = new THREE.Mesh(this.geometry, this.material)
     const trail = new THREE.Mesh(this.trailGeometry, this.trailMaterial)
-    for (const m of [mesh, trail]) { m.userData.noCollision = true; m.position.copy(origin); this.scene.add(m) }
-    this.bolts.push({ mesh, trail, velocity: direction.clone().normalize().multiplyScalar(INK_RAY.speed), age: 0 })
+    const ring = new THREE.Mesh(this.ringGeometry, this.ringMaterial)
+    for (const m of [mesh, trail, ring]) { m.userData.noCollision = true; m.position.copy(origin); this.scene.add(m) }
+    mesh.lookAt(origin.clone().add(direction))
+    this.bolts.push({ mesh, trail, ring, velocity: direction.clone().normalize().multiplyScalar(INK_RAY.speed), age: 0 })
   }
 
   /** Returns where bolts burst this frame. */
@@ -47,15 +52,20 @@ export class InkRayBolts {
       bolt.trail.position.copy(from)
       bolt.trail.lookAt(from.clone().add(direction))
       bolt.trail.scale.set(1, 1, Math.min(1.4, bolt.age * INK_RAY.speed))
+      bolt.mesh.lookAt(from.clone().add(direction))
+      bolt.ring.position.copy(from)
+      bolt.ring.lookAt(from.clone().add(direction))
+      const pulse = 1 + 0.25 * Math.sin(bolt.age * 40)
+      bolt.ring.scale.set(pulse, pulse, 1)
     }
     return bursts
   }
 
   private remove(bolt: Bolt) {
-    bolt.mesh.removeFromParent(); bolt.trail.removeFromParent()
+    bolt.mesh.removeFromParent(); bolt.trail.removeFromParent(); bolt.ring.removeFromParent()
     this.bolts.splice(this.bolts.indexOf(bolt), 1)
   }
 
   clear() { for (const bolt of [...this.bolts]) this.remove(bolt) }
-  dispose() { this.clear(); this.geometry.dispose(); this.trailGeometry.dispose(); this.material.dispose(); this.trailMaterial.dispose() }
+  dispose() { this.clear(); this.geometry.dispose(); this.trailGeometry.dispose(); this.ringGeometry.dispose(); this.material.dispose(); this.trailMaterial.dispose(); this.ringMaterial.dispose() }
 }

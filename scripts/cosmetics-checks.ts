@@ -9,6 +9,10 @@ import { CASE, STRIP_WIN_INDEX, awardGame, casePool, inkForGame, loadProfile, op
 import { CHALLENGE_WEAPONS, WEAPON_TIERS, challengeCamoUnlocked, countKill, diamondUnlocked, freshChallenges, masteredCount, sanitizeChallenges, settle, type KillRecord } from '../src/game/zombies/cosmetics/challenges'
 import { beginGame, lastReport, recordGameEnd, recordKill, recordRound } from '../src/game/zombies/cosmetics/progression'
 import type { WeaponFrame, WeaponItem } from '../src/game/types'
+import { readFileSync } from 'node:fs'
+import { RARITIES } from '../src/game/loot'
+import { getSettings, resetSettingsCache, setSettings, volumeFor } from '../src/game/settings'
+import { REEL_WINS, playReelTick, playReelWin, synthOutput } from '../src/game/ui-slot-sound'
 
 let failures = 0
 function test(name: string, run: () => void) {
@@ -389,6 +393,60 @@ test('A game reports rounds, kills, accuracy, best weapon, Ink line by line and 
   beginGame()
   const second = recordGameEnd({ round: 4, kills: 0, headshots: 0 })
   assert(!second.newRecord && second.previousBest === 10 && second.accuracy === null && second.bestWeapon === null)
+})
+
+test('The case reel ticks and wins in sound, at the saved effects volume, silent when muted', () => {
+  // A stand-in Web Audio: counts the nodes a sound makes and remembers the output level.
+  let nodes = 0
+  const outs: number[] = []
+  const param = () => ({ value: 0, setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {} })
+  const node = () => { nodes++; return { connect: (next: unknown) => next, disconnect() {}, start() {}, stop() {}, frequency: param(), detune: param(), Q: param(), gain: param(), type: '', buffer: null } }
+  class FakeContext {
+    state = 'running'; currentTime = 0; sampleRate = 8000; destination = {}
+    resume() { return Promise.resolve() }
+    createGain() { const gain = node(); return gain }
+    createOscillator() { return node() }
+    createBiquadFilter() { return node() }
+    createBufferSource() { return node() }
+    createBuffer(_channels: number, length: number) { return { sampleRate: 8000, getChannelData: () => new Float32Array(length) } }
+  }
+  const realWindow = (globalThis as { window?: unknown }).window
+  ;(globalThis as { window?: unknown }).window = { AudioContext: FakeContext }
+  try {
+    store.clear(); resetSettingsCache()
+    setSettings({ masterVolume: 50, effectsVolume: 80, muted: false })
+    const settings = getSettings()
+    const out = synthOutput('effects', 0.5)!
+    outs.push(out.out.gain.value)
+    assert(Math.abs(outs[0] - volumeFor(settings, 'effects') * 0.5) < 1e-9, 'sound plays at master x effects')
+    nodes = 0; playReelTick(1)
+    assert(nodes > 0, 'a tile passing the marker clicks')
+    const sizes = RARITIES.map(rarity => { nodes = 0; playReelWin(rarity); return nodes })
+    for (let i = 1; i < sizes.length; i++) assert(sizes[i] >= sizes[i - 1], `a rarer win is fuller (${RARITIES[i]}: ${sizes[i]} voices)`)
+    for (let i = 1; i < RARITIES.length; i++) {
+      const a = REEL_WINS[RARITIES[i - 1]], b = REEL_WINS[RARITIES[i]]
+      assert(b.notes.length >= a.notes.length && b.hold > a.hold && b.bright > a.bright, `${RARITIES[i]} wins bigger and brighter than ${RARITIES[i - 1]}`)
+    }
+    assert(sizes[RARITIES.indexOf('legendary')] > sizes[0] * 3, 'gold is a fanfare next to grey')
+    setSettings({ muted: true })
+    nodes = 0; playReelTick(0.5); playReelWin('legendary')
+    assert.equal(nodes, 0, 'muted plays nothing')
+    setSettings({ muted: false, effectsVolume: 0 })
+    nodes = 0; playReelTick(0.5); playReelWin('epic')
+    assert.equal(nodes, 0, 'effects at zero plays nothing')
+  } finally {
+    ;(globalThis as { window?: unknown }).window = realWindow
+    store.delete('stickman-settings'); resetSettingsCache()
+  }
+  // The Armory drives it: ticks while the strip moves, the win when it stops, all from the Open click.
+  const armory = readFileSync('src/game/zombies/cosmetics/armory.ts', 'utf8')
+  assert(/synthContext\(\)/.test(armory) && /playReelTick\(/.test(armory) && /playReelWin\(item\.rarity\)/.test(armory), 'the Armory reel is wired to its sounds')
+})
+
+test('Mythic never turns up in a case', () => {
+  assert(!CATALOGUE.some(item => item.rarity === 'mythic'), 'no cosmetic is Mythic')
+  const random = seeded(11)
+  for (let i = 0; i < 5000; i++) assert.notEqual(rollCaseItem(random).rarity, 'mythic')
 })
 
 if (failures) { console.error(`${failures} cosmetics check(s) failed`); process.exit(1) }

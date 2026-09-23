@@ -2,7 +2,8 @@ import { WEAPON_RULES } from './balance'
 import type { WeaponName } from './types'
 
 /**
- * Loot rarity, Fortnite-style: grey, green, blue, purple, gold.
+ * Loot rarity, Fortnite-style: grey, green, blue, purple, gold. Above gold, Dead Ink's Mythic: magenta,
+ * a colour nothing else uses, and only ever from the Mystery Box (about one roll in a thousand).
  *
  * Rarity is a MODEST boost, never a win button. A skilled player with a grey gun should still beat
  * an average player with a gold one, otherwise the game turns into a lottery. So rarity only moves
@@ -11,7 +12,7 @@ import type { WeaponName } from './types'
  * An item with no rarity is exactly today's weapon. The original mission never assigns one, so its
  * behaviour and its checks are unchanged by this module.
  */
-export const RARITIES = ['common', 'uncommon', 'rare', 'epic', 'legendary'] as const
+export const RARITIES = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'] as const
 export type Rarity = typeof RARITIES[number]
 
 export const RARITY_INFO: Record<Rarity, { label: string; color: number; css: string; damage: number; reload: number; beam: boolean }> = {
@@ -20,18 +21,20 @@ export const RARITY_INFO: Record<Rarity, { label: string; color: number; css: st
   rare: { label: 'Rare', color: 0x2f7fe0, css: '#2f7fe0', damage: 1.10, reload: 0.90, beam: true },
   epic: { label: 'Epic', color: 0x9b4fd6, css: '#9b4fd6', damage: 1.15, reload: 0.85, beam: true },
   legendary: { label: 'Legendary', color: 0xe8a317, css: '#e8a317', damage: 1.20, reload: 0.80, beam: true },
+  // Half as much again as gold's bonus, and no more: +30% damage, 25% quicker reload.
+  mythic: { label: 'Mythic', color: 0xe0268f, css: '#e0268f', damage: 1.30, reload: 0.75, beam: true },
 }
 
 /**
  * Where loot comes from decides its odds. Floor loot is mostly grey and green; chests shift the odds
  * up; supply drops are the only reliable source of gold, which is what makes them worth fighting over.
- * Weights are relative, not percentages.
+ * Weights are relative, not percentages. Mythic never drops from the ground, a chest or a supply drop.
  */
 export type LootSource = 'floor' | 'chest' | 'supply'
 export const DROP_WEIGHTS: Record<LootSource, Record<Rarity, number>> = {
-  floor: { common: 40, uncommon: 30, rare: 20, epic: 8, legendary: 2 },
-  chest: { common: 0, uncommon: 35, rare: 38, epic: 20, legendary: 7 },
-  supply: { common: 0, uncommon: 0, rare: 0, epic: 60, legendary: 40 },
+  floor: { common: 40, uncommon: 30, rare: 20, epic: 8, legendary: 2, mythic: 0 },
+  chest: { common: 0, uncommon: 35, rare: 38, epic: 20, legendary: 7, mythic: 0 },
+  supply: { common: 0, uncommon: 0, rare: 0, epic: 60, legendary: 40, mythic: 0 },
 }
 
 /** `random` returns [0, 1). Pass a seeded generator in checks so results are reproducible. */

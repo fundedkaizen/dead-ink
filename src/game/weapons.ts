@@ -8,6 +8,7 @@ import { RARITY_INFO, weaponRules } from './loot'
 import { createRarityBeam } from '../render/ink'
 import type { EquippedCosmetics, KnifeId } from './zombies/cosmetics/catalogue'
 import { CHARM_ANCHORS, CHARM_LENGTH, KNIFE_BUILDERS, applyCamo, buildCharm, buildWatch, removeCamo } from './zombies/cosmetics/models'
+import { applyDragonSkin, removeDragonSkin } from './zombies/mythic'
 export { WEAPON_RULES } from './balance'
 
 const up = new THREE.Vector3(0, 1, 0)
@@ -320,10 +321,14 @@ export class FirstPersonWeapons {
     this.charm?.pivot.removeFromParent()
     this.charm = null
     removeCamo(model)
+    removeDragonSkin(model)
+    // A Mythic wears its dragon over any camo; upgraded, the dragon shimmers in Pack-a-Punch colours.
+    const mythic = item.rarity === 'mythic' && !item.special
+    if (mythic) applyDragonSkin(model, upgraded(item))
     const cosmetics = this.cosmetics
     if (!cosmetics) return
     const camo = cosmetics.camos[item.name]
-    if (camo && !upgraded(item) && !item.special) applyCamo(model, camo)
+    if (camo && !mythic && !upgraded(item) && !item.special) applyCamo(model, camo)
     if (cosmetics.charm) {
       const pivot = new THREE.Group()
       pivot.name = 'Gun charm pivot'

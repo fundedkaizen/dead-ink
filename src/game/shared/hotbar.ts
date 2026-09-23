@@ -3,8 +3,10 @@ import type { WeaponItem } from '../types'
 
 /**
  * Fortnite style hotbar: your four slots along the bottom of the screen, each weapon edged in its
- * rarity colour, the selected one raised. Rebuilt only when something on it actually changed.
+ * rarity colour, the selected one raised. Rebuilt only when something on it actually changed. A Mythic
+ * gun says so, its name in the tier's crimson-to-violet.
  */
+const MYTHIC_TEXT = 'linear-gradient(90deg, #ff2d55, #e0268f 45%, #8b3dff)'
 const SHORT: Record<WeaponItem['name'], string> = { pistol: 'Pistol', ak: 'AK', smg: 'SMG', shotgun: 'Shotgun', sniper: 'Sniper', magnum: 'Magnum', lmg: 'LMG' }
 
 export class Hotbar {
@@ -37,9 +39,15 @@ export class Hotbar {
       cell.classList.toggle('selected', i === selected)
       cell.classList.toggle('empty', !item)
       cell.style.setProperty('--rarity', item?.rarity ? RARITY_INFO[item.rarity].css : 'var(--ink-rule)')
-      // The Death Machine power-up never runs dry.
-      cell.querySelector('.hud-slot-name')!.textContent = item ? item.special ? 'Death Machine' : item.packed ? PACKED_NAMES[item.name] : SHORT[item.name] : ''
-      cell.querySelector('.hud-slot-ammo')!.textContent = item ? item.special ? '∞' : `${item.magazine}/${item.reserve}` : ''
+      // The Death Machine power-up never runs dry; the Ink Ray counts its charges like any gun.
+      const name = cell.querySelector<HTMLElement>('.hud-slot-name')!
+      const mythic = item?.rarity === 'mythic' && !item.special
+      name.textContent = item ? item.special === 'deathMachine' ? 'Death Machine' : item.special === 'rayGun' ? 'Ink Ray'
+        : `${mythic ? 'Mythic ' : ''}${item.packed ? PACKED_NAMES[item.name] : SHORT[item.name]}` : ''
+      name.style.backgroundImage = mythic ? MYTHIC_TEXT : ''
+      name.style.backgroundClip = name.style.webkitBackgroundClip = mythic ? 'text' : ''
+      name.style.color = mythic ? 'transparent' : ''
+      cell.querySelector('.hud-slot-ammo')!.textContent = item ? item.special === 'deathMachine' ? '∞' : `${item.magazine}/${item.reserve}` : ''
       cell.title = item ? weaponRules(item).label : 'Empty'
     })
   }

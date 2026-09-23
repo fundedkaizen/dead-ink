@@ -60,19 +60,27 @@ export function wallOffer(name: WeaponName, price: number, slots: readonly (Weap
 export const BOX_WEIGHTS: Record<WeaponName, number> = { ak: 24, smg: 22, shotgun: 22, sniper: 18, pistol: 14, magnum: 12, lmg: 10 }
 /** The chance a box roll is the Ink Ray, Dead Ink's wonder weapon (Call of Duty's Ray Gun is a rare draw too). */
 export const RAY_GUN_CHANCE = 0.05
+/**
+ * The chance an ordinary box roll is Mythic, the tier above gold: about one in a thousand. Drawn on its
+ * own after the Ink Ray, so the grey-to-gold odds among the other rolls are exactly the chest odds.
+ */
+export const MYTHIC_CHANCE = 0.001
 /** Seconds the box spins before showing its gun, and how long you have to take it. */
 export const BOX_SPIN = 3.2, BOX_OFFER = 12
 
 /**
  * One box roll: never a gun you are already carrying (as in Call of Duty), and a rarity with chest
- * odds, so the box never gives grey. Falls back to any gun if you somehow hold every one.
+ * odds, so the box never gives grey; now and then Mythic, never while you already carry one. Falls back
+ * to any gun if you somehow hold every one.
  */
 export function rollBox(random: Random, held: readonly (WeaponItem | null)[]): { name: WeaponName; rarity: Rarity; special?: 'rayGun' } {
   // The wonder weapon: rare, always gold, never twice.
   if (!held.some(item => item?.special === 'rayGun') && random() < RAY_GUN_CHANCE) return { name: 'pistol', rarity: 'legendary', special: 'rayGun' }
+  const mythic = !held.some(item => item?.rarity === 'mythic') && random() < MYTHIC_CHANCE
   const weights = { ...BOX_WEIGHTS }
   for (const item of held) if (item) weights[item.name] = 0
   const pool = Object.values(weights).some(w => w > 0) ? weights : BOX_WEIGHTS
-  return { name: weighted(random, pool), rarity: rollRarity('chest', random) }
+  const name = weighted(random, pool)
+  return { name, rarity: mythic ? 'mythic' : rollRarity('chest', random) }
 }
 

@@ -3,6 +3,7 @@ import './armory.css'
 import { RARITIES, RARITY_INFO } from '../../loot'
 import type { MenuExtraPage } from '../../menu'
 import type { WeaponName } from '../../types'
+import { playReelTick, playReelWin, synthContext } from '../../ui-slot-sound'
 import { tallySvg } from '../hud'
 import { CATALOGUE, cosmeticKey, type CamoId, type ChallengeCamoId, type CosmeticItem, type CosmeticKind, type EquippedCosmetics } from './catalogue'
 import { ACCOUNT_CHALLENGES, CHALLENGE_WEAPONS, WEAPON_LABELS, WEAPON_TIERS, accountProgress, masteredCount, tierProgress, weaponMastered, type ChallengeState } from './challenges'
@@ -199,7 +200,12 @@ class Armory {
     const jitter = (Math.random() - 0.5) * TILE * 0.6
     const distance = winIndex * TILE + TILE / 2 - width / 2 + jitter
     const duration = reducedMotion() ? 350 : 5200
+    // The Open click is the user gesture that lets the page make sound.
+    synthContext()
+    let ticking = true
     const finish = () => {
+      ticking = false
+      playReelWin(item.rarity)
       this.strip.style.transform = `translateX(${-distance}px)`
       this.strip.children[winIndex]?.classList.add('winner')
       this.reel.classList.add('won')
@@ -216,8 +222,28 @@ class Armory {
     }
     const animation = this.strip.animate?.([{ transform: 'translateX(0px)' }, { transform: `translateX(${-distance}px)` }],
       { duration, easing: 'cubic-bezier(0.06, 0.72, 0.14, 1)', fill: 'forwards' })
-    if (animation) animation.onfinish = finish
-    else finish()
+    if (animation) {
+      animation.onfinish = finish
+      this.tickReel(width, () => ticking)
+    } else finish()
+  }
+
+  /**
+   * A slot machine's click for every tile that slides under the marker, read off the strip as it
+   * moves, so the ticks slow with the reel. At most one every 28 ms while the strip is a blur.
+   */
+  private tickReel(width: number, running: () => boolean) {
+    let last = -1, lastX = 0, lastTime = performance.now(), lastTick = 0
+    const frame = (now: number) => {
+      if (!running()) return
+      const x = -new DOMMatrixReadOnly(getComputedStyle(this.strip).transform).m41
+      const tile = Math.floor((x + width / 2) / TILE)
+      const speed = Math.abs(x - lastX) / Math.max(1, now - lastTime)
+      if (last >= 0 && tile !== last && now - lastTick >= 28) { playReelTick(Math.min(1, speed / 2.5)); lastTick = now }
+      last = tile; lastX = x; lastTime = now
+      requestAnimationFrame(frame)
+    }
+    requestAnimationFrame(frame)
   }
 }
 

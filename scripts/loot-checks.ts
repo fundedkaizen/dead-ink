@@ -35,7 +35,9 @@ for (const name of NAMES) {
     lastDamage = r.damage; lastReload = r.reload
     for (const key of ['capacity', 'interval', 'range', 'kick', 'settle', 'automatic'] as const)
       assert.equal(r[key], base[key], `${name} ${rarity}: ${key} must not change with rarity`)
-    assert(r.damage <= base.damage * 1.25 + 1e-9, `${name} ${rarity}: rarity is a modest boost, never over +25% damage`)
+    // Mythic (Dead Ink's box only) may go half as far again as gold's bonus, and no further.
+    const cap = rarity === 'mythic' ? 1 + (RARITY_INFO.legendary.damage - 1) * 1.5 : 1.25
+    assert(r.damage <= base.damage * cap + 1e-9, `${name} ${rarity}: rarity is a modest boost, never over +${Math.round((cap - 1) * 100)}% damage`)
   }
 }
 assert.equal(weaponRules({ name: 'ak', rarity: 'legendary' }).label, 'Legendary AK rifle')
@@ -66,7 +68,10 @@ assert.equal(DROP_WEIGHTS.chest.common, 0, 'chests never contain grey loot')
 assert(share('supply', 'legendary') > share('chest', 'legendary') && share('chest', 'legendary') > share('floor', 'legendary'),
   'gold gets likelier from floor, to chest, to supply drop')
 assert(share('floor', 'legendary') <= 0.05, 'floor gold stays genuinely rare')
-assert(RARITIES.every(r => share('floor', 'legendary') <= share('floor', r)), 'on the floor, legendary is the rarest tier')
+assert(RARITIES.every(r => share('floor', r) === 0 || share('floor', 'legendary') <= share('floor', r)), 'on the floor, legendary is the rarest tier')
+for (const source of Object.keys(DROP_WEIGHTS) as LootSource[]) assert.equal(DROP_WEIGHTS[source].mythic, 0, `${source}: Mythic only ever comes from the Mystery Box`)
+assert(RARITY_INFO.mythic.damage > RARITY_INFO.legendary.damage && RARITY_INFO.mythic.reload < RARITY_INFO.legendary.reload, 'Mythic beats gold')
+assert.equal(weaponRules({ name: 'ak', rarity: 'mythic' }).label, 'Mythic AK rifle')
 
 // Floating-point edge: a random() a hair under 1 must still return a tier the source can drop.
 for (const source of Object.keys(DROP_WEIGHTS) as LootSource[]) {

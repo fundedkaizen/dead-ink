@@ -156,7 +156,7 @@ function commitEquip(profile: Profile, equipped: EquippedCosmetics) {
  * is legendary, which keeps a gold item worth showing off.
  */
 export const CASE = { name: 'Ink Case', price: 250, duplicateRefund: 75 } as const
-export const CASE_WEIGHTS: Record<Rarity, number> = { common: 50, uncommon: 28, rare: 14, epic: 6.4, legendary: 1.6 }
+export const CASE_WEIGHTS: Record<Rarity, number> = { common: 50, uncommon: 28, rare: 14, epic: 6.4, legendary: 1.6, mythic: 0 }
 export const casePool = () => CATALOGUE.filter(entry => !STARTING_ITEMS.includes(entry.id) && !entry.challenge)
 
 /** `random` returns [0, 1); pass a seeded one in checks. */
