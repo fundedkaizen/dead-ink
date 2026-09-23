@@ -35,6 +35,8 @@ export class ZombieHud {
   private grenadesEl = document.createElement('div')
   private partsEl = document.createElement('div')
   private questEl = document.createElement('div')
+  private scoresEl = document.createElement('div')
+  private shownScores = ''
   private shownQuest = ''
   private shownBossLabel = 'THE BRUTE'
   private shieldEl = document.createElement('div')
@@ -79,7 +81,10 @@ export class ZombieHud {
     this.shieldEl.hidden = true
     this.questEl.className = 'dead-ink-quest'
     this.questEl.setAttribute('role', 'status')
-    this.root.append(this.partsEl, this.shieldEl, this.questEl)
+    this.scoresEl.className = 'dead-ink-scores'
+    this.scoresEl.setAttribute('role', 'status')
+    this.scoresEl.hidden = true
+    this.root.append(this.partsEl, this.shieldEl, this.questEl, this.scoresEl)
     this.root.append(this.roundEl, this.pointsEl, this.banner, this.powerupsEl, this.perksEl, this.bossEl)
     parent.append(this.root)
   }
@@ -149,6 +154,17 @@ export class ZombieHud {
     this.shownParts = key
     this.partsEl.innerHTML = labels.map(label => `<span>${label.replace(/[<>&"]/g, '')}</span>`).join('')
     this.partsEl.setAttribute('aria-label', labels.length ? `Carrying ${labels.join(', ')}` : 'No parts')
+  }
+
+  /** Co-op: every player's points stacked by your own, Call of Duty style; null hides it (solo). */
+  scoreboard(rows: { name: string; points: number; me: boolean; down: boolean }[] | null) {
+    const key = rows ? rows.map(r => `${r.name}:${r.points}:${r.me}:${r.down}`).join('|') : ''
+    if (key === this.shownScores) return
+    this.shownScores = key
+    this.scoresEl.hidden = !rows
+    if (!rows) return
+    const clean = (text: string) => text.replace(/[<>&"]/g, '')
+    this.scoresEl.innerHTML = rows.map(r => `<div class="${r.me ? 'me' : ''}${r.down ? ' down' : ''}"><span>${r.me ? '▸ ' : ''}${clean(r.name)}</span><strong>${r.points}</strong></div>`).join('')
   }
 
   /** The main quest's next step, a quiet line under the round; null hides it. */

@@ -27,7 +27,7 @@ export const PARTS: Record<PartId, { label: string; build: BuildId; places: read
   // Up the observation tower, out in the southwest yard, or down in the south barracks.
   lever: { label: 'power lever', build: 'power', places: [[-50.4, 6.8, 16.5], [-44, 0, 36], [30, 0, 44]] },
   gear: { label: 'press gear', build: 'pack', places: [[60, 0, -21], [54, 0, -30], [68, 0, -14]] },
-  plate: { label: 'printing plate', build: 'pack', places: [[-57, 0.7, 64], [10.9, 12.6, -30], [20, 0, 20]] },
+  plate: { label: 'printing plate', build: 'pack', places: [[-57, 0.7, 64], [10.95, 12.6, -31.2], [20, 0, 20]] },
   tank: { label: 'ink tank', build: 'pack', places: [[120, 0, 0], [132, 0, -10], [112, 0, 10]] },
   panel: { label: 'shield panel', build: 'shield', places: [[-38, 0, -44], [-18, 0, -18], [-46, 0, -28]] },
   strap: { label: 'shield strap', build: 'shield', places: [[-40, 0, 40], [-57, 0.7, 64], [-30, 0, 30]] },

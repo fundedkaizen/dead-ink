@@ -15,11 +15,21 @@ export class SecondDraftRevive {
   /** Still on the floor: no moving, no shooting. */
   get down() { return this.time >= 0 && this.time < REVIVE.rise }
 
-  start() { this.time = 0 }
+  /** Held on the floor (co-op: downed, waiting for a teammate) until release(). */
+  private held = false
+
+  start() { this.time = 0; this.held = false }
+
+  /** Go down and stay down: the fall plays, then the view waits on the floor. */
+  holdDown() { if (this.time < 0 || this.time >= REVIVE.rise) this.time = 0; this.held = true }
+  /** Get back up from holdDown(). */
+  release() { if (this.held) { this.held = false; this.time = Math.max(this.time, REVIVE.rise - 0.01) } }
+  get holding() { return this.held }
 
   update(dt: number) {
     if (this.time < 0) return
     this.time += dt
+    if (this.held) this.time = Math.min(this.time, REVIVE.rise - 0.02)
     if (this.time >= REVIVE.seconds) this.time = -1
   }
 
@@ -59,5 +69,5 @@ export class SecondDraftRevive {
     this.applied = null
   }
 
-  reset() { this.removeCamera(); this.time = -1 }
+  reset() { this.removeCamera(); this.time = -1; this.held = false }
 }

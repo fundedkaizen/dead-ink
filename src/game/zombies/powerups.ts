@@ -180,6 +180,27 @@ export class PowerupDrops {
     return taken
   }
 
+  /** Co-op: what the other player standing at `feet` walks into (the host checks both players). */
+  collect(feet: THREE.Vector3) {
+    const taken: { kind: PowerupKind; position: THREE.Vector3 }[] = []
+    for (const drop of [...this.drops]) {
+      if (Math.hypot(feet.x - drop.base.x, feet.z - drop.base.z) >= PICKUP_RADIUS || Math.abs(feet.y - drop.base.y) >= 2) continue
+      taken.push({ kind: drop.kind, position: drop.base.clone() })
+      this.remove(drop)
+    }
+    return taken
+  }
+
+  /** Co-op, the guest's copy: the host says this one was taken. */
+  removeNear(kind: PowerupKind, position: THREE.Vector3) {
+    let best: Drop | null = null, bestDistance = 3
+    for (const drop of this.drops) {
+      const distance = drop.base.distanceTo(position)
+      if (drop.kind === kind && distance < bestDistance) { best = drop; bestDistance = distance }
+    }
+    if (best) this.remove(best)
+  }
+
   private remove(drop: Drop) {
     drop.root.removeFromParent()
     drop.sprite.material.dispose()
