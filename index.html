@@ -4,8 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#ffffff" />
-    <link rel="icon" href="data:," />
+    <link rel="icon" type="image/svg+xml" href="/favicon-dead-ink.svg" />
+    <script>/* The mode's own icon before the game loads: Dead Ink or the hostage mission. */ if (new URLSearchParams(location.search).get('mode') !== 'zombies') document.querySelector('link[rel="icon"]').href = '/favicon-hostage.svg'</script>
     <title>Operation Safe Return — Stickman</title>
+    <script>if (new URLSearchParams(location.search).get('mode') === 'zombies') document.title = 'Dead Ink'</script>
     <!-- Every enemy and the hostage need the model; fetch it alongside the scripts instead of after they run. -->
     <link rel="preload" href="/models/stickman.glb" as="fetch" crossorigin />
     <style>

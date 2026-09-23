@@ -48,7 +48,7 @@ export class MissionHUD {
   constructor(world: MissionWorld, callbacks: { retry: () => void; restart: () => void; volume: (value: number) => void; mute: (value: boolean) => void }, copy: MenuCopy = MISSION_COPY) {
     document.body.dataset.mission = 'true'
     document.body.dataset.reducedMotion = String(this.reducedMotion)
-    document.title = `${copy.title} — Stickman`
+    document.title = copy.mode === 'zombies' ? copy.title : `${copy.title} — Stickman`
     const $ = <T extends HTMLElement = HTMLElement>(selector: string) => document.querySelector<T>(selector)!
     this.start = $<HTMLButtonElement>('#walk-start')
     this.start.textContent = 'Loading the compound…'; this.start.disabled = true
