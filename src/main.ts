@@ -35,6 +35,7 @@ scene.add(compound)
 if (missionWorld) scene.add(missionWorld.root)
 
 let frame = 0
+const reportedFrameErrors = new Set<string>()
 let lastTime = performance.now()
 let rendering = false
 let contextLost = false
@@ -86,13 +87,25 @@ function render(now: number, xrFrame?: XRFrame) {
   // Door travel uses real elapsed time even when low FPS caps the physics step.
   const doorsMoving = interactions.update(elapsed)
   let moving = false
-  if (vr.active && xrFrame) vr.update(dt, xrFrame)
-  else moving = player.update(dt) || camera.update(dt)
+  try {
+    if (vr.active && xrFrame) vr.update(dt, xrFrame)
+    else moving = player.update(dt) || camera.update(dt)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (!reportedFrameErrors.has(message)) { reportedFrameErrors.add(message); console.error('Frame failed', error) }
+    moving = true
+  }
   let missionMoving = false
   try {
     // Cinematic travel follows real frame time; physics keeps its safe step cap.
     missionMoving = mission?.update(dt, elapsed) ?? false
     renderer.render(scene, vr.active ? vr.rig.camera : camera.active)
+  } catch (error) {
+    // One bad frame must never freeze the game: the loop only reschedules itself at the end of a frame,
+    // and after a death nothing else asks for one. Report it (once per message) and keep drawing.
+    const message = error instanceof Error ? error.message : String(error)
+    if (!reportedFrameErrors.has(message)) { reportedFrameErrors.add(message); console.error('Frame failed', error) }
+    missionMoving = true
   }
   finally { mission?.finishFrame() }
   if (startupReady) {

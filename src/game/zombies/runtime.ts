@@ -2072,7 +2072,9 @@ export class ZombiesRuntime {
       this.explosions.update(dt); this.nukeCloud.update(dt)
     }
     this.coopIdle(dt)
-    this.renderRest(dt, active, deathPlaying)
+    // Keep frames coming while playing, while the death plays out, and while a partner is connected
+    // (their stickman and messages keep moving even with our menu open).
+    return this.renderRest(dt, active, deathPlaying) || this.coop.paired
   }
 
   /** The host (or a solo game): rounds, spawns and the zombies' own thinking. */
