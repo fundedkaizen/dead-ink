@@ -88,11 +88,12 @@ export const wallAmmoPrice = (price: number) => Math.ceil(price / 2)
  * Power-ups. VERIFIED (search results citing the Call of Duty wiki): at most 4 per round, an
  * uncollected power-up vanishes after 30 s, Nuke gives every player 400 points, Carpenter 200.
  * UNVERIFIED: Insta-Kill, Double Points and the Death Machine last 30 s; a guaranteed drop whenever team
- * points pass a threshold that starts at 2000 and grows x1.14 per drop, plus a 3% chance on any kill.
+ * points pass a threshold that starts at 2000 and grows x1.14 per drop, plus a 2% chance on any kill
+ * (3% felt like too many in play).
  */
 export const POWERUPS = {
   maxPerRound: 4, lifetime: 30, nukePoints: 400, carpenterPoints: 200,
-  timed: 30, firstThreshold: 2000, thresholdGrowth: 1.14, randomChance: 0.03,
+  timed: 30, firstThreshold: 2000, thresholdGrowth: 1.14, randomChance: 0.02,
 } as const
 export type PowerupKind = 'maxAmmo' | 'instaKill' | 'doublePoints' | 'nuke' | 'carpenter' | 'deathMachine'
 

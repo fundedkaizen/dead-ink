@@ -69,6 +69,8 @@ export class MissionAudio {
   protected listenerPosition = new THREE.Vector3()
   volume = 0.55
   muted = false
+  /** The quiet generated music under the ambience; a mode with its own tracks turns it off. */
+  protected generatedMusic = true
 
   async unlock() {
     if (this.disposed) return
@@ -150,7 +152,7 @@ export class MissionAudio {
     gain.gain.value = 0.035
     source.connect(filter).connect(gain).connect(this.master)
     this.track(source, [filter, gain]); source.start(); this.ambience = source
-    if (this.musicBuffer) {
+    if (this.musicBuffer && this.generatedMusic) {
       const music = this.context.createBufferSource(), musicGain = this.context.createGain()
       music.buffer = this.musicBuffer; music.loop = true; musicGain.gain.value = 0.028
       music.connect(musicGain).connect(this.master)

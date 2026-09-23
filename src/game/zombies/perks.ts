@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import { Draft, wallText } from '../../render/ink'
 import { PRICES } from './rules'
 import type { WallSpot } from './placement'
-import { LightMotes } from './effects'
+import { LightMotes, MuzzleSparks } from './effects'
 import { metal } from '../../lab/weapons/models/common'
 
 /**
@@ -146,8 +146,10 @@ export class PerkMachine {
 }
 
 /**
- * Pack-a-Punch: a bulky press. Put a gun in, it works on it (shaking, light pouring out), then offers
- * the upgraded gun back for a few seconds.
+ * Pack-a-Punch: the one machine on the map that should look like it matters. A riveted cabinet with a
+ * glowing emblem, a roller tray, two steel pillars with hydraulic rams, a stamping press on a crossbeam,
+ * a gear, a sign with shifting colours and a row of lights over it. Put a gun in: the press hammers it,
+ * sparks fly, steam vents, light pours out; then it offers the gun back for a few seconds.
  */
 export class PackAPunch {
   readonly root = new THREE.Group()
@@ -157,39 +159,99 @@ export class PackAPunch {
   /** The gun inside, as it will come out. */
   held: import('../types').WeaponItem | null = null
   private press = new THREE.Group()
-  private motes = new LightMotes(220, 0.07)
+  private gear = new THREE.Group()
+  private motes = new LightMotes(260, 0.08)
+  private steam = new LightMotes(90, 0.3)
+  private sparks: MuzzleSparks
+  private lights: THREE.Mesh[] = []
+  private tinted: THREE.MeshBasicMaterial[] = []
+  private spill: THREE.Mesh
   private hue = 0
+  private lastPound = -1
+  static readonly REST = 2.42
 
   constructor(readonly spot: WallSpot) {
     this.root.name = 'Pack-a-Punch'
     this.root.userData.noCollision = true
-    const width = 1.5, depth = 0.9, height = 1.75
-    this.root.position.copy(spot.wall.clone().addScaledVector(spot.normal, depth / 2 + 0.04).setY(spot.stand.y))
+    const width = 2.0, depth = 1.1
+    this.root.position.copy(spot.wall.clone().addScaledVector(spot.normal, depth / 2 + 0.05).setY(spot.stand.y))
     this.root.rotation.y = facing(spot.normal)
-    const body = new Draft('Pack-a-Punch body')
-    body.box(width, 0.95, depth, 0, 0.475, 0, 'paper', 'edge')
-    body.box(width * 0.9, 0.08, depth * 0.9, 0, 0.99, 0, 'paper', 'detail')
-    for (const x of [-width / 2 + 0.12, width / 2 - 0.12]) body.box(0.12, height - 0.95, 0.12, x, 0.95 + (height - 0.95) / 2, -depth / 2 + 0.12, 'paper', 'detail')
-    body.box(width, 0.14, 0.3, 0, height, -depth / 2 + 0.15, 'paper', 'edge')
-    body.finish()
-    this.root.add(body)
-    // The press head that comes down on the gun.
-    const head = new Draft('Pack-a-Punch press')
-    head.box(width * 0.7, 0.18, depth * 0.55, 0, 0, 0, 'paper', 'edge')
+    const front = depth / 2
+    const frame = new Draft('Pack-a-Punch frame')
+    // The cabinet on its plinth, a panel with rivets, hazard stripes along the foot.
+    frame.box(width + 0.1, 0.1, depth + 0.1, 0, 0.05, 0, 'concrete', 'detail')
+    frame.box(width, 0.95, depth, 0, 0.575, 0, 'paper', 'edge')
+    frame.line([[-0.88, 0.2, front + 0.004], [0.88, 0.2, front + 0.004], [0.88, 0.95, front + 0.004], [-0.88, 0.95, front + 0.004]], 'detail', true)
+    for (let x = -0.84; x <= 0.85; x += 0.28) for (const y of [0.24, 0.91]) frame.box(0.035, 0.035, 0.02, x, y, front + 0.01, 'concrete', 'detail')
+    for (let x = -0.98; x < 0.98; x += 0.13) frame.line([[x, 0.11, front + 0.004], [x + 0.1, 0.19, front + 0.004]], 'detail')
+    for (const side of [-1, 1]) for (let y = 0.35; y <= 0.85; y += 0.1) frame.box(0.02, 0.035, depth * 0.6, side * (width / 2 + 0.01), y, 0, 'concrete', 'detail')
+    // The tray and its rollers, where the gun goes in.
+    frame.box(1.3, 0.07, 0.5, 0, 1.085, 0.2, 'concrete', 'edge')
+    for (let z = 0.02; z <= 0.4; z += 0.095) frame.solid(new THREE.CylinderGeometry(0.035, 0.035, 1.2, 16), [0, 1.14, z], 'paper', 'detail', [0, 0, Math.PI / 2])
+    // Steel pillars, braces and hydraulic rams, the crossbeam and the sign board.
+    for (const side of [-1, 1]) {
+      frame.box(0.24, 2.05, 0.3, side * 0.92, 2.06, -0.32, 'paper', 'edge')
+      frame.beam([side * 0.92, 1.1, -0.15], [side * 0.62, 2.9, -0.34], 0.07, 'concrete', 'detail')
+      frame.solid(new THREE.CylinderGeometry(0.075, 0.075, 1.1, 20), [side * 0.66, 1.75, -0.42], 'paper', 'detail')
+      frame.solid(new THREE.CylinderGeometry(0.035, 0.035, 0.9, 12), [side * 0.66, 2.55, -0.42], 'concrete', 'detail')
+      frame.beam([side * 0.98, 0.6, -front + 0.05], [side * 0.98, 3.1, -front + 0.05], 0.09, 'paper', 'detail')
+    }
+    frame.box(2.3, 0.32, 0.55, 0, 3.1, -0.3, 'paper', 'edge')
+    for (let x = -1.05; x <= 1.06; x += 0.3) frame.box(0.04, 0.04, 0.02, x, 3.1, -0.02, 'concrete', 'detail')
+    frame.box(2.5, 0.66, 0.1, 0, 3.66, -0.36, 'paper', 'edge')
+    frame.finish()
+    this.root.add(frame)
+    // The press head, which moves.
+    const head = new Draft('Pack-a-Punch press head')
+    head.box(1.35, 0.4, 0.72, 0, 0, 0, 'paper', 'edge')
+    head.box(1.2, 0.08, 0.6, 0, -0.24, 0, 'concrete', 'detail')
+    for (const x of [-0.45, 0.45]) head.solid(new THREE.CylinderGeometry(0.05, 0.05, 1.0, 14), [x, 0.68, -0.05], 'concrete', 'detail')
+    head.line([[-0.62, 0.12, 0.365], [0.62, 0.12, 0.365]], 'detail')
+    head.line([[-0.62, -0.08, 0.365], [0.62, -0.08, 0.365]], 'detail')
     head.finish()
     this.press.add(head)
-    this.press.position.set(0, 1.45, 0.05)
+    this.press.position.set(0, PackAPunch.REST, 0.12)
     this.root.add(this.press)
-    this.root.add(wallText('PACK-A-PUNCH', [0, 0.7, depth / 2 + 0.02], 0.2))
-    this.root.add(wallText(String(PACK.cost), [0, 0.42, depth / 2 + 0.02], 0.22))
-    this.root.add(this.motes)
-    this.point = spot.wall.clone().addScaledVector(spot.normal, depth + 0.1).setY(spot.stand.y + 1.2)
+    // A gear on the side of the press, turning while it works.
+    const gear = new Draft('Pack-a-Punch gear')
+    gear.solid(new THREE.TorusGeometry(0.22, 0.045, 10, 28), [0, 0, 0], 'paper', 'detail', [0, Math.PI / 2, 0])
+    for (let i = 0; i < 8; i++) {
+      const a = i * Math.PI / 4
+      gear.box(0.06, 0.1, 0.07, 0, Math.sin(a) * 0.27, Math.cos(a) * 0.27, 'concrete', 'detail', [a, 0, 0])
+    }
+    gear.box(0.05, 0.38, 0.05, 0, 0, 0, 'concrete', 'detail')
+    gear.box(0.05, 0.05, 0.38, 0, 0, 0, 'concrete', 'detail')
+    gear.finish()
+    this.gear.add(gear)
+    this.gear.position.set(0.72, 0, 0)
+    this.press.add(this.gear)
+    // Colour: the sign, the emblem, the lights and the light on the ground all shift together.
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(2.3, 0.5), this.tint(new THREE.MeshBasicMaterial({ map: signTexture(), transparent: true, depthWrite: false, toneMapped: false })))
+    sign.position.set(0, 3.66, -0.3)
+    const emblem = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.62), this.tint(new THREE.MeshBasicMaterial({ map: emblemTexture(), transparent: true, depthWrite: false, toneMapped: false })))
+    emblem.position.set(0, 0.57, front + 0.012)
+    this.root.add(sign, emblem)
+    for (let i = 0; i < 7; i++) {
+      const light = new THREE.Mesh(new THREE.SphereGeometry(0.055, 12, 8), new THREE.MeshBasicMaterial({ toneMapped: false }))
+      light.position.set(-0.9 + i * 0.3, 3.1, -0.01)
+      this.lights.push(light)
+      this.root.add(light)
+    }
+    this.spill = new THREE.Mesh(new THREE.PlaneGeometry(4.4, 3.2), this.tint(new THREE.MeshBasicMaterial({ map: glowTexture(), transparent: true, depthWrite: false, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })))
+    this.spill.rotation.x = -Math.PI / 2
+    this.spill.position.set(0, 0.012, 0.6)
+    this.root.add(this.spill, this.motes, this.steam)
+    this.sparks = new MuzzleSparks(this.root as unknown as THREE.Scene)
+    this.point = spot.wall.clone().addScaledVector(spot.normal, depth + 0.15).setY(spot.stand.y + 1.2)
   }
+
+  private tint(material: THREE.MeshBasicMaterial) { this.tinted.push(material); return material }
 
   insert(item: import('../types').WeaponItem) {
     this.held = item
     this.state = 'working'
     this.timer = 0
+    this.lastPound = -1
   }
 
   take() {
@@ -203,59 +265,157 @@ export class PackAPunch {
   /** Returns 'done' when the gun is ready, 'expired' when it was never taken. */
   update(dt: number): 'done' | 'expired' | null {
     this.timer += dt
-    this.hue = (this.hue + dt * 0.35) % 1
-    const colour = new THREE.Color().setHSL(this.hue, 0.8, 0.55)
+    const working = this.state === 'working'
+    this.hue = (this.hue + dt * (working ? 0.9 : 0.12)) % 1
+    const colour = new THREE.Color().setHSL(this.hue, 0.85, 0.58)
+    for (const material of this.tinted) material.color.copy(colour)
+    this.lights.forEach((light, i) => {
+      const flicker = working ? (Math.sin(this.timer * 20 + i * 1.7) > 0 ? 1 : 0.4) : 1
+      ;(light.material as THREE.MeshBasicMaterial).color.setHSL((this.hue + i / 7) % 1, 0.9, 0.55 * flicker)
+    })
+    ;(this.spill.material as THREE.MeshBasicMaterial).opacity = working ? 0.95 : 0.6
     let result: 'done' | 'expired' | null = null
-    if (this.state === 'working') {
-      // The press slams down and shakes; light pours out of the sides.
-      const t = Math.min(1, this.timer / 0.4)
-      this.press.position.y = 1.45 - 0.4 * t + (t >= 1 ? Math.sin(this.timer * 55) * 0.01 : 0)
-      this.motes.update(dt, 140, p => p.set((Math.random() - 0.5) * 1.4, 1.0, (Math.random() - 0.5) * 0.8), colour, 1.6)
+    if (working) {
+      // The press hammers the gun six times, in step with the sound: sparks off every blow, steam out
+      // of the vents, the gear turning, light pouring off the tray.
+      const blow = Math.floor((this.timer - 0.3) / 0.45)
+      const phase = ((this.timer - 0.3) % 0.45) / 0.45
+      const down = this.timer > 0.3 && blow < 6 ? Math.max(0, 1 - phase * 3) : 0
+      this.press.position.y = PackAPunch.REST - 0.95 * down - Math.min(1, this.timer / 0.3) * 0.2
+      if (blow >= 0 && blow < 6 && blow !== this.lastPound && this.timer > 0.3) {
+        this.lastPound = blow
+        for (const x of [-0.4, 0, 0.4]) this.sparks.emit(new THREE.Vector3(x, 1.2, 0.3), new THREE.Vector3(x * 2, 0.6, 1), 5)
+      }
+      this.gear.rotation.x -= dt * 6
+      this.motes.update(dt, 180, p => p.set((Math.random() - 0.5) * 1.3, 1.15, 0.2 + (Math.random() - 0.5) * 0.4), colour, 1.8)
+      this.steam.update(dt, 22, p => p.set((Math.random() < 0.5 ? -1 : 1) * 1.02, 0.4 + Math.random() * 0.45, (Math.random() - 0.5) * 0.5), 0xd8d8d8, 0.9)
       if (this.timer >= PACK.work) { this.state = 'ready'; this.timer = 0; result = 'done' }
-    } else if (this.state === 'ready') {
-      this.press.position.y += (1.45 - this.press.position.y) * Math.min(1, dt * 6)
-      this.motes.update(dt, 40, p => p.randomDirection().multiplyScalar(0.3).add(new THREE.Vector3(0, 1.25, 0.1)), colour, 0.5)
-      if (this.timer >= PACK.wait) { this.state = 'idle'; result = 'expired' }
     } else {
-      this.press.position.y += (1.45 - this.press.position.y) * Math.min(1, dt * 6)
-      this.motes.update(dt, 6, p => p.set((Math.random() - 0.5) * 1.2, 1.05, (Math.random() - 0.5) * 0.7), colour, 0.35)
+      this.press.position.y += (PackAPunch.REST - this.press.position.y) * Math.min(1, dt * 5)
+      this.gear.rotation.x -= dt * (this.state === 'ready' ? 1.5 : 0.3)
+      if (this.state === 'ready') {
+        this.motes.update(dt, 60, p => p.randomDirection().multiplyScalar(0.35).add(new THREE.Vector3(0, 1.4, 0.2)), colour, 0.5)
+        if (this.timer >= PACK.wait) { this.state = 'idle'; result = 'expired' }
+      } else this.motes.update(dt, 10, p => p.set((Math.random() - 0.5) * 1.3, 1.15, 0.2 + (Math.random() - 0.5) * 0.4), colour, 0.35)
+      this.steam.update(dt, 0, p => p.set(0, 0, 0), 0xd8d8d8, 0.9)
     }
+    this.sparks.update(dt)
     return result
   }
 
   dispose() {
-    this.motes.dispose()
+    this.motes.dispose(); this.steam.dispose(); this.sparks.dispose()
+    for (const material of this.tinted) { material.map?.dispose(); material.dispose() }
+    for (const light of this.lights) { light.geometry.dispose(); (light.material as THREE.Material).dispose() }
     this.root.removeFromParent()
   }
 }
 
+/** "PACK-A-PUNCH" in white, heavy, outlined in ink; the material tints it. */
+function signTexture() {
+  const canvas = document.createElement('canvas')
+  canvas.width = 1024; canvas.height = 224
+  const c = canvas.getContext('2d')!
+  // As large as fits the board with room for the glow.
+  let size = 150
+  do { c.font = `bold ${size}px "Chalkboard SE", "Comic Sans MS", cursive`; size -= 6 } while (c.measureText('PACK-A-PUNCH').width > 940 && size > 40)
+  c.textAlign = 'center'; c.textBaseline = 'middle'
+  c.shadowColor = 'rgba(255,255,255,0.9)'; c.shadowBlur = 22
+  c.fillStyle = '#ffffff'; c.fillText('PACK-A-PUNCH', 512, 118)
+  c.shadowBlur = 0; c.lineWidth = 6; c.strokeStyle = '#111'; c.strokeText('PACK-A-PUNCH', 512, 118)
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+  return texture
+}
+
+/** A fist-and-lightning emblem in a ring, white, for tinting. */
+function emblemTexture() {
+  const canvas = document.createElement('canvas')
+  canvas.width = canvas.height = 256
+  const c = canvas.getContext('2d')!
+  c.shadowColor = 'rgba(255,255,255,0.9)'; c.shadowBlur = 16
+  c.lineWidth = 16; c.strokeStyle = '#fff'
+  c.beginPath(); c.arc(128, 128, 104, 0, Math.PI * 2); c.stroke()
+  c.fillStyle = '#fff'
+  c.beginPath(); c.moveTo(146, 34); c.lineTo(84, 138); c.lineTo(122, 138); c.lineTo(104, 222); c.lineTo(174, 112); c.lineTo(136, 112); c.closePath(); c.fill()
+  c.shadowBlur = 0; c.lineWidth = 5; c.strokeStyle = '#111'; c.stroke()
+  c.beginPath(); c.arc(128, 128, 114, 0, Math.PI * 2); c.stroke()
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+  return texture
+}
+
+/** A soft white oval for the light the machine throws on the ground. */
+function glowTexture() {
+  const canvas = document.createElement('canvas')
+  canvas.width = 128; canvas.height = 96
+  const c = canvas.getContext('2d')!
+  const g = c.createRadialGradient(64, 48, 4, 64, 48, 62)
+  g.addColorStop(0, 'rgba(255,255,255,0.6)'); g.addColorStop(0.5, 'rgba(255,255,255,0.25)'); g.addColorStop(1, 'rgba(255,255,255,0)')
+  c.fillStyle = g; c.fillRect(0, 0, 128, 96)
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+  return texture
+}
+
 // ---------------------------------------------------------------- drinking
 
-/** The first-person bottle: raised, tipped back, gone. Drawn in the perk's colour. */
+/**
+ * The contour of an old glass soda bottle, bottom to lip: a heel, a bulge, a waist, a second bulge,
+ * the shoulder and a long neck. Radius and height in metres.
+ */
+const CONTOUR: readonly [number, number][] = [
+  [0, 0], [0.027, 0], [0.03, 0.006], [0.031, 0.02], [0.0335, 0.045], [0.031, 0.068], [0.027, 0.083], [0.029, 0.098],
+  [0.0325, 0.114], [0.031, 0.13], [0.025, 0.145], [0.017, 0.16], [0.0125, 0.175], [0.0112, 0.19], [0.0128, 0.194], [0.0128, 0.2], [0.0095, 0.2],
+]
+const contour = (grow: number, top = 1) => CONTOUR.filter(([, y]) => y <= 0.2 * top + 1e-6).map(([r, y]) => new THREE.Vector2(Math.max(0, r + (r > 0 ? grow : 0)), y))
+
+/** The first-person bottle, an old glass contour bottle with the perk inside: raised, drunk, gone. */
 export class PerkBottle {
   readonly root = new THREE.Group()
-  private material = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false })
+  private liquid: THREE.Mesh
+  private liquidMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.94, depthWrite: false, toneMapped: false })
+  private labelTexture: THREE.CanvasTexture | null = null
+  private label: THREE.Mesh
   private time = -1
-  static readonly SECONDS = 1.5
+  static readonly SECONDS = 1.6
 
   constructor(camera: THREE.Camera) {
     this.root.name = 'Perk bottle'
     this.root.userData.noCollision = true
-    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.038, 0.16, 18), this.material)
-    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.03, 0.07, 14), this.material)
-    neck.position.y = 0.115
-    const label = new THREE.Mesh(new THREE.CylinderGeometry(0.0385, 0.0385, 0.06, 18), new THREE.MeshBasicMaterial({ color: 0xfbfaf5, toneMapped: false }))
-    label.position.y = -0.01
-    const outline = new THREE.Mesh(new THREE.CylinderGeometry(0.041, 0.044, 0.17, 18), new THREE.MeshBasicMaterial({ color: 0x111111, side: THREE.BackSide, toneMapped: false }))
-    this.root.add(body, neck, label, outline)
+    const glass = new THREE.Mesh(new THREE.LatheGeometry(contour(0), 36),
+      new THREE.MeshBasicMaterial({ color: 0xcfe7d8, transparent: true, opacity: 0.38, side: THREE.DoubleSide, depthWrite: false, toneMapped: false }))
+    glass.renderOrder = 3
+    // The drink, inside the glass, up to the shoulder; it drains from the top as you drink.
+    const inner = CONTOUR.filter(([, y]) => y > 0.003 && y <= 0.15).map(([r, y]) => new THREE.Vector2(r * 0.84, y - 0.003))
+    this.liquid = new THREE.Mesh(new THREE.LatheGeometry([new THREE.Vector2(0, 0), ...inner, new THREE.Vector2(0, inner[inner.length - 1].y)], 30), this.liquidMaterial)
+    this.liquid.position.y = 0.003
+    this.liquid.renderOrder = 2
+    // A white glint running down one side of the glass.
+    const glint = new THREE.Mesh(new THREE.LatheGeometry(contour(0.0006).slice(2, -3), 4, 0.5, 0.22),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.7, depthWrite: false, toneMapped: false }))
+    glint.renderOrder = 4
+    // An ink outline around the whole bottle, like everything else in the world.
+    const outline = new THREE.Mesh(new THREE.LatheGeometry(contour(0.0022), 36), new THREE.MeshBasicMaterial({ color: 0x111111, side: THREE.BackSide, toneMapped: false }))
+    // A paper label round the waist, with the perk's name.
+    this.label = new THREE.Mesh(new THREE.CylinderGeometry(0.0283, 0.0283, 0.026, 30, 1, true),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, depthWrite: false, toneMapped: false, side: THREE.DoubleSide }))
+    this.label.position.y = 0.083
+    this.label.renderOrder = 5
+    this.root.add(outline, this.liquid, glass, glint, this.label)
     this.root.visible = false
     camera.add(this.root)
   }
 
   get drinking() { return this.time >= 0 }
 
-  drink(color: number) {
-    this.material.color.setHex(color)
+  drink(kind: PerkKind) {
+    const perk = PERKS[kind]
+    this.liquidMaterial.color.setHex(perk.color)
+    this.labelTexture?.dispose()
+    this.labelTexture = labelTexture(perk.name, perk.css)
+    const material = this.label.material as THREE.MeshBasicMaterial
+    material.map = this.labelTexture; material.needsUpdate = true
     this.time = 0
     this.root.visible = true
   }
@@ -265,13 +425,33 @@ export class PerkBottle {
     this.time += dt
     const t = this.time / PerkBottle.SECONDS
     if (t >= 1) { this.time = -1; this.root.visible = false; return }
-    // Up from below, tipped back to the mouth, then away.
-    const up = THREE.MathUtils.smoothstep(t, 0, 0.3), away = THREE.MathUtils.smoothstep(t, 0.8, 1)
-    this.root.position.set(0.1 - 0.06 * up, -0.34 + 0.24 * up - 0.3 * away, -0.42 + 0.12 * up)
-    this.root.rotation.set(-0.3 + 1.7 * THREE.MathUtils.smoothstep(t, 0.3, 0.55), 0, 0.2)
+    // Up from below the view, tipped back to the mouth, drained, then away.
+    const up = THREE.MathUtils.smoothstep(t, 0, 0.28), tip = THREE.MathUtils.smoothstep(t, 0.28, 0.5), away = THREE.MathUtils.smoothstep(t, 0.82, 1)
+    this.root.position.set(0.11 - 0.08 * tip, -0.36 + 0.24 * up + 0.07 * tip - 0.34 * away, -0.4 + 0.16 * tip)
+    this.root.rotation.set(-0.15 + 2.05 * tip - 1.2 * away, 0, 0.25 - 0.2 * tip)
+    this.liquid.scale.y = 1 - 0.85 * THREE.MathUtils.smoothstep(t, 0.42, 0.8)
   }
 
-  dispose() { this.root.removeFromParent(); this.root.traverse(o => { if (o instanceof THREE.Mesh) { o.geometry.dispose(); (o.material as THREE.Material).dispose() } }) }
+  dispose() {
+    this.root.removeFromParent()
+    this.labelTexture?.dispose()
+    this.root.traverse(o => { if (o instanceof THREE.Mesh) { o.geometry.dispose(); (o.material as THREE.Material).dispose() } })
+  }
+}
+
+/** The bottle's label: paper, the perk's name twice round in ink, a band of its colour. */
+function labelTexture(name: string, css: string) {
+  const canvas = document.createElement('canvas')
+  canvas.width = 512; canvas.height = 64
+  const c = canvas.getContext('2d')!
+  c.fillStyle = '#fbfaf5'; c.fillRect(0, 0, 512, 64)
+  c.fillStyle = css; c.fillRect(0, 0, 512, 9); c.fillRect(0, 55, 512, 9)
+  c.fillStyle = '#111'; c.font = 'italic bold 34px "Chalkboard SE", "Comic Sans MS", cursive'
+  c.textAlign = 'center'; c.textBaseline = 'middle'
+  for (const x of [128, 384]) c.fillText(name, x, 34)
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+  return texture
 }
 
 // ---------------------------------------------------------------- the upgraded gun

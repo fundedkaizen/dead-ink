@@ -290,6 +290,38 @@ const run = (seconds: number, targets: ZombieTarget[], fps = 60) => {
   console.log(`  climbing: tower ${times[0]} s, water tower ${times[1]} s, warehouse ${times[2]} s, stores ${times[3]} s, back down ${t.toFixed(1)} s`)
 }
 
+// ---- 5g. Indoors, between the furniture -------------------------------------------------------------
+// Tables, benches and chairs leave gaps the coarse graph calls open but a body has to thread; zombies
+// slide around what they bump into rather than stall.
+{
+  const indoors: [string, THREE.Vector3, THREE.Vector3][] = [
+    ['across the mess hall', v(-44, 0.3, -44), v(-24, 0.3, -52)],
+    ['through the gatehouse', v(-9, 0.1, 17.5), v(-3, 0.1, 29.5)],
+  ]
+  const times: string[] = []
+  for (const [label, a, b] of indoors) {
+    const player: ZombieTarget = { id: 'p1', feet: graph.point(graph.nearest(b, 3)), alive: true }
+    // Spawn only where a zombie could walk from, as the game's own spawns do.
+    graph.flow([player.feet])
+    const reachable = (p: THREE.Vector3) => {
+      for (let r = 0; r < 4; r++) for (let i = -r; i <= r; i++) for (let k = -r; k <= r; k++) {
+        const node = graph.nearest(p.clone().add(v(i * graph.cell, 0, k * graph.cell)), 1)
+        if (node >= 0 && Number.isFinite(graph.distance(node))) return graph.point(node)
+      }
+      return p
+    }
+    const crowd = [0, 1, 2].map(i => director.spawn(reachable(a.clone().add(v(i * 0.9, 0, 0))), 5000, i === 2 ? 'sprint' : 'run', 0)!)
+    assert(crowd.every(Boolean), `${label}: the zombies spawn`)
+    let t = 0
+    const arrived = () => crowd.filter(z => Math.hypot(z.position.x - player.feet.x, z.position.z - player.feet.z) <= ATTACK.range + 0.6).length
+    while (t < 25 && arrived() < 3) { run(0.25, [player]); t += 0.25 }
+    assert.equal(arrived(), 3, `${label}: all three reach the player (${arrived()} in ${t} s)`)
+    times.push(`${label} ${t} s`)
+    director.clear()
+  }
+  console.log(`  indoors: ${times.join(', ')}`)
+}
+
 // ---- 5f. The Brute -------------------------------------------------------------------------------
 {
   swipes.length = 0

@@ -95,6 +95,9 @@ export type Zombie = {
   voice: number
   /** How this one carries itself: its hunch, its lolling head, its drooping arm, its limp. */
   carriage: Carriage
+  /** The side it last stepped around an obstacle on (-1, 1, or 0), and for how much longer it keeps to it. */
+  sideBias: number
+  sideTimer: number
   /** Whether it can walk straight at its target, and seconds until that is checked again. */
   direct: boolean
   directTimer: number
@@ -186,7 +189,7 @@ export class ZombieDirector {
         state: 'idle', stuck: 0, unreachable: 0, swing: 0, swingLanded: false,
         recover: 0, stagger: 0, deadFor: 0, stranded: false, footstep: 0, route: [], routeTimer: 0, routeNode: -1, routeFrom: -1, blocked: -1, avoidTimer: 0, edgeFail: 0, probeFail: -1, probeFails: 0, bestDistance: Infinity, noProgress: 0,
         rise: 0, climb: null, voice: 0, carriage: randomCarriage('walk'), flinch: 0, flinchBack: 0, flinchSide: 0,
-        boss: false, slam: 0, slamTimer: 0, direct: false, directTimer: 0,
+        boss: false, slam: 0, slamTimer: 0, direct: false, directTimer: 0, sideBias: 0, sideTimer: 0,
       })
     }
   }
@@ -218,7 +221,7 @@ export class ZombieDirector {
     zombie.voice = 1 + Math.random() * 3
     zombie.carriage = randomCarriage(gait); zombie.flinch = 0
     zombie.boss = boss; zombie.slam = 0; zombie.slamTimer = BOSS.slam.every * 0.6
-    zombie.direct = false; zombie.directTimer = 0
+    zombie.direct = false; zombie.directTimer = 0; zombie.sideBias = 0; zombie.sideTimer = 0
     if (boss) zombie.carriage.lean += 0.15
     this.plans.delete(zombie)
     const { actor } = zombie
@@ -559,11 +562,15 @@ export class ZombieDirector {
     // Movement allows a slightly slimmer body than planning does. Stepping into that margin wedges a
     // zombie somewhere no plan can start from, so only move where planning clearance also holds.
     const candidate = this.navigation.step(zombie.position, waypoint, step)
-    const next = candidate && this.navigation.floor(candidate) ? candidate : null
-    if (!next || !this.clearOfOthers(zombie, next)) {
+    const stepped = candidate && this.navigation.floor(candidate) ? candidate : null
+    // Chairs, table corners, a doorframe, another zombie: slide around it rather than stall against it.
+    const next = stepped && this.clearOfOthers(zombie, stepped) ? stepped : this.sidestep(zombie, waypoint, step)
+    zombie.sideTimer = Math.max(0, zombie.sideTimer - dt)
+    if (zombie.sideTimer <= 0) zombie.sideBias = 0
+    if (!next) {
       zombie.stuck += dt
       // Only the step itself failing counts against the link; a neighbour in the way is not its fault.
-      if (!next && this.context.graph && zombie.routeFrom >= 0 && zombie.routeNode >= 0) {
+      if (!stepped && this.context.graph && zombie.routeFrom >= 0 && zombie.routeNode >= 0) {
         zombie.edgeFail += dt
         if (zombie.edgeFail > 1) {
           this.context.graph.blockEdge(zombie.routeFrom, zombie.routeNode)
@@ -600,6 +607,25 @@ export class ZombieDirector {
     zombie.position.copy(next)
     if (zombie.footstep > 0.9) { zombie.footstep = 0; this.context.emit({ kind: 'enemy-footstep', position: zombie.position.clone(), radius: 6 }) }
     return true
+  }
+
+  /**
+   * A step at an angle to the way it wants to go, for when that way is blocked by something small. It
+   * keeps to the side it last chose, so it works around an obstacle instead of dithering in front of it.
+   */
+  private sidestep(zombie: Zombie, goal: THREE.Vector3, step: number) {
+    const base = Math.atan2(goal.x - zombie.position.x, goal.z - zombie.position.z)
+    const side = zombie.sideBias || (Math.random() < 0.5 ? 1 : -1)
+    const target = scratch.d
+    for (const angle of [0.45, 0.9, 1.35]) for (const turn of [side, -side]) {
+      const a = base + turn * angle
+      target.set(zombie.position.x + Math.sin(a) * 0.6, zombie.position.y, zombie.position.z + Math.cos(a) * 0.6)
+      const candidate = this.navigation.step(zombie.position, target, step * 0.85)
+      if (!candidate || !this.navigation.floor(candidate) || !this.clearOfOthers(zombie, candidate)) continue
+      zombie.sideBias = turn; zombie.sideTimer = 0.6
+      return candidate
+    }
+    return null
   }
 
   /**

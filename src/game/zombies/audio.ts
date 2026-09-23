@@ -13,24 +13,32 @@ const VOICE_LIMIT = 6
 /** Footsteps sit lower than in the mission: a crowd of zombies' steps adds up fast. */
 const FOOTSTEP_VOLUME: Record<string, number> = { footstep: 0.65, 'enemy-footstep': 0.55 }
 const VOWELS = { uh: [640, 1190], aa: [760, 1150], oo: [380, 900], ae: [820, 1550] } as const
-/** Each perk machine's own little tune (original, eight notes). */
+/** The Mystery Box's spin tune: 24 notes of a wind-up music box in A minor, 3.1 s. Original. */
+const BOX_TUNE: readonly number[] = [
+  880, 1046.5, 1318.5, 1760, 1661.2, 1318.5, 1046.5, 987.8,
+  880, 1046.5, 1318.5, 1975.5, 1760, 1318.5, 1046.5, 1174.7,
+  1318.5, 1174.7, 1046.5, 987.8, 880, 830.6, 880, 1760,
+]
+/** Each perk machine's own little tune (original, sixteen notes: a phrase and its answer). */
 const JINGLES: Record<string, { notes: readonly number[]; step: number }> = {
-  thickInk: { notes: [196, 233.1, 261.6, 233.1, 196, 174.6, 196, 146.8], step: 0.28 },
-  quickDip: { notes: [523.3, 659.3, 784, 1046.5, 784, 659.3, 784, 1046.5], step: 0.12 },
-  doubleLine: { notes: [392, 392, 523.3, 392, 392, 587.3, 523.3, 440], step: 0.16 },
-  secondDraft: { notes: [440, 554.4, 659.3, 880, 659.3, 554.4, 440, 329.6], step: 0.2 },
-  spareNib: { notes: [329.6, 415.3, 493.9, 415.3, 329.6, 246.9, 329.6, 493.9], step: 0.18 },
+  thickInk: { notes: [196, 233.1, 261.6, 233.1, 196, 174.6, 196, 146.8, 196, 233.1, 293.7, 261.6, 233.1, 196, 233.1, 196], step: 0.24 },
+  quickDip: { notes: [523.3, 659.3, 784, 1046.5, 784, 659.3, 784, 1046.5, 1174.7, 1046.5, 880, 784, 880, 1046.5, 1318.5, 1046.5], step: 0.11 },
+  doubleLine: { notes: [392, 392, 523.3, 392, 392, 587.3, 523.3, 440, 392, 392, 659.3, 587.3, 523.3, 440, 493.9, 523.3], step: 0.15 },
+  secondDraft: { notes: [440, 554.4, 659.3, 880, 659.3, 554.4, 440, 329.6, 440, 554.4, 659.3, 739.99, 659.3, 554.4, 493.9, 440], step: 0.17 },
+  spareNib: { notes: [329.6, 415.3, 493.9, 415.3, 329.6, 246.9, 329.6, 493.9, 554.4, 493.9, 415.3, 329.6, 369.99, 415.3, 493.9, 659.3], step: 0.16 },
 }
 type Voice = { pitch: number; glide: number; length: number; rasp: number; drive: number; vowel: readonly [number, number]; level: number }
 
 export class DeadInkAudio extends MissionAudio {
+  // Dead Ink has real music tracks (music.ts), so the generated phrase stays off.
+  protected generatedMusic = false
   private voices = new Set<AudioScheduledSourceNode>()
   private curve: Float32Array<ArrayBuffer> | null = null
 
   play(event: SoundEvent) {
     const context = this.context
     const handled = ['zombie-groan', 'zombie-scream', 'zombie-snarl', 'zombie-swipe', 'zombie-rise', 'powerup-drop', 'powerup-grab', 'nuke', 'round-start', 'round-end',
-      'perk-drink', 'perk-jingle', 'pack-work', 'pack-ready', 'boss-roar', 'boss-growl', 'boss-slam']
+      'perk-drink', 'perk-jingle', 'pack-work', 'pack-ready', 'boss-roar', 'boss-growl', 'boss-slam', 'box-leave', 'box-open', 'box-spin', 'box-offer']
     if (!handled.includes(event.kind)) { super.play(FOOTSTEP_VOLUME[event.kind] ? { ...event, volume: FOOTSTEP_VOLUME[event.kind] } : event); return }
     if (!context || !this.master || !this.active || this.muted || this.volume <= 0 || this.disposed || this.dying) return
     if (event.position && event.position.distanceTo(this.listenerPosition) > (event.radius ?? 60)) return
@@ -56,6 +64,12 @@ export class DeadInkAudio extends MissionAudio {
       case 'boss-roar': this.voice(event, { pitch: 40 + r() * 8, glide: 0.62, length: 2.3, rasp: 0.7, drive: 14, vowel: VOWELS.aa, level: 1 }); break
       case 'boss-growl': this.voice(event, { pitch: 36 + r() * 10, glide: 0.8, length: 1.4, rasp: 0.5, drive: 9, vowel: VOWELS.oo, level: 0.8 }); break
       case 'boss-slam': this.boom(event); this.dirt(event); break
+      // The box leaving: a music box winding down, out of tune.
+      case 'box-leave': this.arpeggio(event, [987.8, 932.3, 880, 830.6, 784, 698.5, 622.3], 0.19, 'sine', 0.14, 1.1); break
+      case 'box-open': this.creak(event); break
+      // The spin: a wind-up music box, original tune, the length of the spin.
+      case 'box-spin': this.melody(event, BOX_TUNE, 0.13, 0.08); break
+      case 'box-offer': this.arpeggio(event, [880, 1108.7, 1318.5, 1760], 0.05, 'triangle', 0.2, 0.8); break
     }
   }
 
@@ -75,6 +89,21 @@ export class DeadInkAudio extends MissionAudio {
         tone.start(start); tone.stop(start + step * 2.5)
       }
     })
+  }
+
+  /** The lid: a wooden creak and a breath of air. */
+  private creak(event: SoundEvent) {
+    const context = this.context!, t = context.currentTime
+    const { gain, panner } = this.output(event)
+    const saw = context.createOscillator(), band = context.createBiquadFilter()
+    saw.type = 'sawtooth'
+    saw.frequency.setValueAtTime(70, t); saw.frequency.linearRampToValueAtTime(110, t + 0.35); saw.frequency.linearRampToValueAtTime(85, t + 0.5)
+    band.type = 'bandpass'; band.frequency.value = 900; band.Q.value = 4
+    gain.gain.setValueAtTime(0.0001, t); gain.gain.exponentialRampToValueAtTime(0.18, t + 0.05); gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.55)
+    saw.connect(band).connect(gain)
+    this.track(saw, [band, gain, ...(panner ? [panner] : [])])
+    saw.start(t); saw.stop(t + 0.57)
+    this.whoosh(event)
   }
 
   /** Three gulps from a bottle. */

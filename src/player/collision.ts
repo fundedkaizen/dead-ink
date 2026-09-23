@@ -364,6 +364,40 @@ export class CollisionWorld {
     let closest: SurfaceHit | null = null
     for (const collider of this.colliders) {
       if (!collider.blocksShots || !this.reaches(collider)) continue
+      const { mesh } = collider, { geometry, material } = mesh
+      // Placement casts thousands of short rays against batched buildings. Mesh.raycast
+      // scans every triangle for each ray; reuse the same spatial tree as floor/sight
+      // queries. Keep Three's path for moving, deformed, or partially drawn geometry.
+      const count = (geometry.index ?? geometry.getAttribute('position')).count
+      if (this.large(collider) && !Array.isArray(material) &&
+        !('isSkinnedMesh' in mesh) && !('isInstancedMesh' in mesh) && !geometry.morphAttributes.position?.length &&
+        geometry.drawRange.start === 0 && geometry.drawRange.count >= count) {
+        this.groundRay.copy(this.ray.ray).applyMatrix4(collider.inverse)
+        this.faceCount = 0
+        this.collect(this.tree(collider), this.groundRay)
+        let nearest: THREE.Triangle | null = null
+        let distance: number = closest?.distance ?? range
+        for (let i = 0; i < this.faceCount; i++) {
+          const face = this.faces[i]
+          const hit = material.side === THREE.BackSide ? this.groundRay.intersectTriangle(face.c, face.b, face.a, true, this.rayPoint) :
+            this.groundRay.intersectTriangle(face.a, face.b, face.c, material.side === THREE.FrontSide, this.rayPoint)
+          if (!hit) continue
+          const along = hit.applyMatrix4(mesh.matrixWorld).distanceTo(origin)
+          if (along >= this.ray.near && along < distance) {
+            distance = along; nearest = face; this.nearestPoint.copy(hit)
+          }
+        }
+        if (nearest) {
+          const localNormal = nearest.getNormal(new THREE.Vector3())
+          const normal = localNormal.clone().applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(mesh.matrixWorld))
+          const backFace = normal.dot(direction) > 0
+          if (backFace) { normal.negate(); localNormal.negate() }
+          const point = this.nearestPoint.clone()
+          closest = { distance, point, normal, mesh, backFace,
+            localPoint: point.clone().applyMatrix4(collider.inverse), localNormal }
+        }
+        continue
+      }
       const hit = this.ray.intersectObject(collider.mesh, false)[0]
       if (!hit?.face || hit.distance >= (closest?.distance ?? range)) continue
       const normal = hit.face.normal.clone().applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(collider.mesh.matrixWorld))

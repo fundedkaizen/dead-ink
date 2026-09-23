@@ -8,6 +8,7 @@ import type { ActionTarget } from '../../player/actions'
 import { setDoorOpen } from '../../world/doors'
 import { FirstPersonWeapons } from '../weapons'
 import { DeadInkAudio } from './audio'
+import { DeadInkMusic } from './music'
 import { MissionHUD } from '../hud'
 import { MissionBlood } from '../hit-reactions'
 import { MissionImpacts } from '../impacts'
@@ -22,7 +23,7 @@ import { seeded, weighted, type Random } from '../shared/random'
 import { ZombieDirector, type Zombie, type ZombieGait, type ZombieTarget } from './director'
 import { NavGraph, geometryHash, type NavData } from './navgraph'
 import { pickSpawn } from './spawn'
-import { findWallSpots } from './placement'
+import { findWallSpots, type WallSpot } from './placement'
 import { newGame, returnSpawns, stepRounds, type RoundState } from './rounds'
 import { BOSS, DIFFICULTY, MAX_ALIVE, PLAYER_HEALTH, POWERUPS, PRICES, STARTING_POINTS, ZOMBIE_DAMAGE_SCALE, isBossRound, movementMix, zombieHealth, type Difficulty, type PowerupKind } from './rules'
 import { BOX_WEIGHTS, WALL_WEAPONS, ZOMBIE_SLOTS, freshWeapon, pointsForHit, rollBox, startingPistol, wallOffer, RESERVE_MAGAZINES } from './economy'
@@ -47,6 +48,12 @@ export const KNIFE = { damage: 150, range: 2.1, cooldown: 0.55 } as const
 export const POOL_SIZE = MAX_ALIVE + 8
 type TimedPowerup = 'instaKill' | 'doublePoints' | 'deathMachine'
 
+/**
+ * Where else the Mystery Box can turn up once the teddy bear takes it: a point in each of three other
+ * zones (the nearest good wall to it). After a few spins at one spot, each spin has this chance of the bear.
+ */
+const BOX_PLACES: readonly [number, number, number][] = [[-60, 0, 45], [0, 0, 40], [145, 0, 5]]
+const BOX_TEDDY_AFTER = 3, BOX_TEDDY_CHANCE = 0.2
 /** The chosen difficulty is remembered in this browser; storage can be missing or blocked. */
 const DIFFICULTY_KEY = 'dead-ink-difficulty'
 function savedDifficulty(): Difficulty {
@@ -80,6 +87,7 @@ export class ZombiesRuntime {
   state: ZombieState = { phase: 'active', health: PLAYER_HEALTH.base, elapsed: 0, kills: 0, points: STARTING_POINTS, round: 0, headshots: 0, knifeKills: 0 }
   readonly weapons: FirstPersonWeapons
   readonly audio = new DeadInkAudio()
+  readonly music = new DeadInkMusic(import.meta.env?.BASE_URL ?? '/')
   readonly blood: MissionBlood
   readonly impacts: MissionImpacts
   readonly bulletTrails: BulletTrails
@@ -113,6 +121,8 @@ export class ZombiesRuntime {
   invincible = false
   wallBuys: WallBuy[] = []
   box: MysteryBox | null = null
+  /** Every place the box can stand; it starts at the first. */
+  boxSpots: WallSpot[] = []
   zones: ZoneGates | null = null
   difficulty: Difficulty = savedDifficulty()
   perkMachines: PerkMachine[] = []
@@ -122,6 +132,9 @@ export class ZombiesRuntime {
   private packedLook = new PackedLook()
   /** A perk being drunk: it takes effect when the bottle is empty. */
   private pendingPerk: { kind: PerkKind; timer: number } | null = null
+  /** Machines you are standing near, and when each last played its jingle. */
+  private nearMachines = new Set<PerkMachine>()
+  private jingleAt = new Map<PerkMachine, number>()
   /** Seconds of grace after Second Draft gets you back up. */
   private reviveGrace = 0
   private random: Random
@@ -169,7 +182,8 @@ export class ZombiesRuntime {
     this.hud = new MissionHUD(world, {
       retry: () => { this.restart(); void this.audio.unlock(); this.player.requestControl() },
       restart: () => { this.restart(); void this.audio.unlock(); this.player.requestControl() },
-      volume: value => this.audio.setVolume(value), mute: value => this.audio.setMuted(value) }, DEAD_INK_COPY)
+      volume: value => { this.audio.setVolume(value); this.music.setVolume(value) },
+      mute: value => { this.audio.setMuted(value); this.music.setMuted(value) } }, DEAD_INK_COPY)
     document.querySelector('#world')?.setAttribute('aria-label', 'Dead Ink, round-based zombies. Mouse to look, WASD move, left click fire, right click aim, mouse wheel switch weapon, V knife, F buy or use, R reload, Escape pause.')
     const hudRoot = document.querySelector<HTMLElement>('#mission-hud')!
     this.zombieHud = new ZombieHud(hudRoot)
@@ -178,7 +192,7 @@ export class ZombiesRuntime {
     // One more cell than you start with, for Spare Nib's third gun; the hotbar hides cells you do not have.
     this.hotbar = new Hotbar(hudRoot, ZOMBIE_SLOTS + 1)
     this.addDifficultySetting()
-    player.onPlayingChange = playing => this.hud.setPlaying(playing)
+    player.onPlayingChange = playing => { this.hud.setPlaying(playing); this.music.setMode(playing ? 'play' : 'menu') }
     player.actions.extraTargets = () => this.targets()
     player.actions.onAction = target => {
       this.weapons.cancel(); this.aiming = false; this.interactionTime = Math.max(this.interactionTime, 0.25)
@@ -280,6 +294,14 @@ export class ZombiesRuntime {
       this.perkMachines.push(machine)
       this.scene.add(machine.root)
     }
+    if (this.box) this.boxSpots = [this.box.spot]
+    for (const [x, y, z] of BOX_PLACES) {
+      graph.flow([new THREE.Vector3(x, y, z)])
+      const [spot] = findWallSpots(graph, this.player.world, this.random, { count: 1, near: 0, far: 35, spacing: 7, avoid: taken })
+      if (!spot) continue
+      taken.push(spot.stand)
+      this.boxSpots.push(spot)
+    }
   }
 
   private startGame() {
@@ -288,6 +310,7 @@ export class ZombiesRuntime {
     this.director?.clear()
     this.zones?.closeAll()
     this.director?.navigation.clear()
+    if (this.box && this.boxSpots[0]) this.box.place(this.boxSpots[0])
     this.box?.close()
     this.powerups.clear(); this.timers = {}; this.earned = 0; this.heldWeapons = null
     this.perks.clear(); this.pendingPerk = null; this.reviveGrace = 0; this.applyPerks(); this.zombieHud.perks([])
@@ -324,6 +347,9 @@ export class ZombiesRuntime {
   private bindInput() {
     const options = { signal: this.abort.signal }
     document.querySelector('#walk-start')!.addEventListener('click', () => { void this.audio.unlock() }, options)
+    // Music may only start after the first click or key press on the page.
+    for (const type of ['pointerdown', 'keydown'] as const) window.addEventListener(type, () => this.music.unlock(), options)
+    document.addEventListener('visibilitychange', () => this.music.setHidden(document.hidden), options)
     window.addEventListener('keydown', this.keyDown, options)
     document.querySelector('#world')!.addEventListener('wheel', event => {
       const wheel = event as WheelEvent
@@ -420,7 +446,7 @@ export class ZombiesRuntime {
       targets.push({ object: pack.root, point: pack.point, kind: 'mission', descending: false, label, use: () => this.usePack(pack) })
     }
     const box = this.box
-    if (box && box.state !== 'spinning') {
+    if (box && box.state !== 'spinning' && box.state !== 'leaving') {
       const label = box.state === 'offering' && box.offer ? `Take ${box.offer.rarity === 'common' ? '' : `${box.offer.rarity[0].toUpperCase()}${box.offer.rarity.slice(1)} `}${WEAPON_RULES[box.offer.name].label}`
         : this.state.points >= PRICES.box ? `Mystery Box · ${PRICES.box}` : `Mystery Box · ${PRICES.box} · need ${PRICES.box - this.state.points} more`
       targets.push({ object: box.root, point: box.point, kind: 'mission', descending: false, label, use: () => this.useBox(box) })
@@ -470,7 +496,8 @@ export class ZombiesRuntime {
     if (this.perks.has(machine.kind) || this.perks.size >= PERK_LIMIT || !this.spend(perk.cost)) return false
     // Drink it: the gun goes down, the bottle comes up, the perk works once it is empty.
     this.weapons.cancel(); this.aiming = false
-    this.bottle.drink(perk.color)
+    this.bottle.drink(machine.kind)
+    this.emit({ kind: 'perk-jingle', position: machine.point.clone(), radius: 14, voice: machine.kind })
     this.interactionTime = PerkBottle.SECONDS
     this.pendingPerk = { kind: machine.kind, timer: PerkBottle.SECONDS * 0.8 }
     this.emit({ kind: 'perk-drink', position: this.player.body.position.clone(), radius: 5 })
@@ -541,6 +568,18 @@ export class ZombiesRuntime {
     return true
   }
 
+  /** The teddy bear took the box: your 950 back, and the box turns up at another of its places. */
+  private moveBox() {
+    const box = this.box
+    if (!box) return
+    this.state.points += PRICES.box
+    this.zombieHud.gain(PRICES.box)
+    const others = this.boxSpots.filter(spot => spot !== box.spot)
+    box.place(others[Math.floor(this.random() * others.length)] ?? box.spot)
+    this.hud.notify('The Mystery Box has moved. Follow its light.', 3.5)
+    this.emit({ kind: 'box-leave', position: this.player.body.position.clone(), radius: 5 })
+  }
+
   /** Pay to open a zone: the gate sinks into the ink and zombies can now come from the other side too. */
   private useGate(gate: ZoneGate) {
     if (!this.isActive() || !this.zones || gate.state !== 'closed') return false
@@ -565,8 +604,10 @@ export class ZombiesRuntime {
       return true
     }
     if (box.state !== 'idle' || !this.spend(PRICES.box)) return false
-    box.spin(rollBox(this.random, this.weapons.slots))
-    this.emit({ kind: 'objective', position: box.point.clone(), radius: 10 })
+    const teddy = box.uses >= BOX_TEDDY_AFTER && this.boxSpots.length > 1 && this.random() < BOX_TEDDY_CHANCE
+    box.spin(rollBox(this.random, this.weapons.slots), teddy)
+    this.emit({ kind: 'box-open', position: box.point.clone(), radius: 25 })
+    this.emit({ kind: 'box-spin', position: box.point.clone(), radius: 30 })
     this.invalidate()
     return true
   }
@@ -843,14 +884,22 @@ export class ZombiesRuntime {
       if (this.pendingPerk && (this.pendingPerk.timer -= dt) <= 0) { this.grantPerk(this.pendingPerk.kind); this.pendingPerk = null }
       for (const machine of this.perkMachines) {
         machine.update(dt)
-        // Now and then a machine near you plays its jingle.
-        if (machine.point.distanceTo(body.position) < 9 && Math.random() < dt / 35) this.emit({ kind: 'perk-jingle', position: machine.point.clone(), radius: 14, voice: machine.kind })
+        // Walk up to a machine and it plays its jingle (not again for a while).
+        const near = machine.point.distanceTo(body.position) < 7
+        if (near && !this.nearMachines.has(machine) && this.state.elapsed - (this.jingleAt.get(machine) ?? -100) > 20) {
+          this.emit({ kind: 'perk-jingle', position: machine.point.clone(), radius: 14, voice: machine.kind })
+          this.jingleAt.set(machine, this.state.elapsed)
+        }
+        if (near) this.nearMachines.add(machine); else this.nearMachines.delete(machine)
       }
       const packed = this.pack?.update(dt)
       if (packed === 'done') { this.emit({ kind: 'pack-ready', position: this.pack!.point.clone(), radius: 30 }); this.hud.notify('Your upgraded gun is ready.', 2.5) }
       if (packed === 'expired') this.hud.notify('The Pack-a-Punch kept your gun.', 3, true)
       this.knifeCooldown = Math.max(0, this.knifeCooldown - dt)
-      if (this.box?.update(dt, Object.keys(BOX_WEIGHTS) as WeaponName[])) this.hud.notify('The box closed.', 2)
+      const boxEvent = this.box?.update(dt, Object.keys(BOX_WEIGHTS) as WeaponName[])
+      if (boxEvent === 'expired') this.hud.notify('The box closed.', 2)
+      if (boxEvent === 'landed' && this.box) this.emit({ kind: 'box-offer', position: this.box.point.clone(), radius: 25 })
+      if (boxEvent === 'moved') this.moveBox()
       this.blood.update(dt); this.impacts.update(dt); this.riseMarks.update(dt); this.sparks.update(dt); this.shockwaves.update(dt)
       this.zones?.update(dt)
       this.tickPowerups(dt)
@@ -918,7 +967,7 @@ export class ZombiesRuntime {
     this.director?.dispose()
     this.hits.dispose(); this.indicator.dispose(); this.hotbar.dispose(); this.zombieHud.dispose()
     this.bulletTrails.dispose(); this.weapons.dispose(); this.blood.dispose(); this.impacts.dispose(); this.riseMarks.dispose(); this.sparks.dispose(); this.shockwaves.dispose(); this.powerups.dispose()
-    this.audio.dispose(); this.hud.dispose()
+    this.audio.dispose(); this.music.dispose(); this.hud.dispose()
     this.player.movementLocked = false; this.player.onPlayingChange = () => {}; this.player.lookSensitivity = () => 1
     this.player.actions.extraTargets = () => []; this.player.actions.onAction = () => {}
   }
