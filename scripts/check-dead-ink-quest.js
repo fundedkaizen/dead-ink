@@ -23,7 +23,7 @@ const status = window.__questCheck = { done: false, results }
   const quest = () => document.querySelector('.dead-ink-quest')?.textContent ?? ''
 
   check(m.questStep === 'power' && m.wells.length === 3 && m.wells.every(w => !w.awake), 'the quest starts at the power, three inkwells asleep')
-  check(/power switch/i.test(quest()), 'the quest line says to find the power switch', quest())
+  check(/power/i.test(quest()), 'the quest line points at the power', quest())
   m.setPower(true, false)
   await sleep(100)
   check(m.questStep === 'pack', 'with the power on, the next step is the Pack-a-Punch')

@@ -956,7 +956,7 @@ export class ZombiesRuntime {
     if (this.isGuest) {
       for (const well of this.wells) well.update(dt)
       const souls = this.wells.reduce((sum, well) => sum + Math.min(QUEST.souls, well.souls), 0)
-      this.zombieHud.quest(questHint(this.questStep, { souls, bottles: this.bottles }))
+      this.zombieHud.quest(this.questLine(souls))
       return
     }
     if (this.questStep === 'power' && this.power) this.questStep = 'pack'
@@ -979,7 +979,16 @@ export class ZombiesRuntime {
     }
     if (this.editorTimer > 0 && (this.editorTimer -= dt) <= 0) this.spawnEditor()
     const souls = this.wells.reduce((sum, well) => sum + Math.min(QUEST.souls, well.souls), 0)
-    this.zombieHud.quest(questHint(this.questStep, { souls, bottles: this.bottles }))
+    this.zombieHud.quest(this.questLine(souls))
+  }
+
+  /** The quest line, spelling out the power step: find the lever, fit it, pull it. */
+  private questLine(souls: number) {
+    if (this.questStep === 'power' && this.powerSwitch) {
+      if (this.powerSwitch.state === 'ready') return 'Pull the power switch'
+      return this.carried.has('lever') ? 'Fit the lever on the power switch' : 'Find the power lever (look for its light)'
+    }
+    return questHint(this.questStep, { souls, bottles: this.bottles })
   }
 
   private takeBottle(well: Inkwell) {

@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { Draft, wallText } from '../../render/ink'
+import { Draft, createRarityBeam, wallText } from '../../render/ink'
 import type { WallSpot } from './placement'
 
 /**
@@ -24,8 +24,9 @@ export const BUILDS: Record<BuildId, { label: string; parts: readonly PartId[] }
 
 /** Each part turns up in one of its places, chosen at the start of a game. */
 export const PARTS: Record<PartId, { label: string; build: BuildId; places: readonly Place[] }> = {
-  // Up the observation tower, out in the southwest yard, or down in the south barracks.
-  lever: { label: 'power lever', build: 'power', places: [[-50.4, 6.8, 16.5], [-44, 0, 36], [30, 0, 44]] },
+  // Always in the starting area, so the power is the first thing you can do: up the observation tower,
+  // inside the mess hall, or out in the mess yard.
+  lever: { label: 'power lever', build: 'power', places: [[-50.4, 6.8, 16.5], [-38, 0.3, -46], [-22, 0, -22]] },
   gear: { label: 'press gear', build: 'pack', places: [[60, 0, -21], [54, 0, -30], [68, 0, -14]] },
   plate: { label: 'printing plate', build: 'pack', places: [[-57, 0.7, 64], [10.95, 12.6, -31.2], [20, 0, 20]] },
   tank: { label: 'ink tank', build: 'pack', places: [[120, 0, 0], [132, 0, -10], [112, 0, 10]] },
@@ -34,8 +35,8 @@ export const PARTS: Record<PartId, { label: string; build: BuildId; places: read
   grip: { label: 'shield grip', build: 'shield', places: [[20, 0, 20], [30, 0, 44], [25.5, 0.7, -6]] },
 }
 
-/** The power switch in the warehouse, and the shield workbench by the start. */
-export const POWER_PLACE: Place = [28, 0.7, -4]
+/** The power switch in the building by the start (the first rooms), and the shield workbench nearby. */
+export const POWER_PLACE: Place = [-30, 0.3, -50]
 export const BENCH_PLACE: Place = [-45, 0, -40]
 
 /** The shield on your back: what it soaks up, and how far round from straight behind it covers. */
@@ -116,7 +117,9 @@ export class PartPickup {
     this.ring = new THREE.Mesh(new THREE.RingGeometry(0.42, 0.47, 40), new THREE.MeshBasicMaterial({ color: 0x111111, transparent: true, toneMapped: false, depthWrite: false }))
     this.ring.rotation.x = -Math.PI / 2
     this.ring.position.y = 0.02
-    this.root.add(this.model, this.ring)
+    // A tall column of light over it, seen from across the yard, as the box's is.
+    const beam = createRarityBeam(0xffd27a, 7)
+    this.root.add(this.model, this.ring, beam)
     this.point = at.clone().setY(at.y + 0.3)
   }
 
