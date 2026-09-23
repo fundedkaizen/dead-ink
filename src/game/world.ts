@@ -13,6 +13,12 @@ import { SIGNALS_COMPUTER_ID } from './mission'
 import { CAMERA_LIGHTS } from './security'
 import { createMissionControl as control } from './mission-controls'
 
+/** A station you can walk through: added late, it must not change the guards' authored routes. */
+function passable(station: Station) {
+  station.object.userData.noCollision = true
+  return station
+}
+
 const FLOOR = 0.12
 const DOOR_WIDTH = 2.1
 const DOOR_HEIGHT = 2.65
@@ -367,6 +373,10 @@ export function createMissionWorld(compound?: THREE.Group): MissionWorld {
     { id: 'rescue-jeep', kind: 'jeep', object: jeep,
       point: new THREE.Vector3(154.65, 1.05, 9.95), label: 'Board jeep' } satisfies Station,
     control('supply', 'maintenance-supplies', 'Take field supplies', [114.7, FLOOR, -45.5], -Math.PI / 2),
+    // Two more first-aid posts along the way: in the guard building by the insertion point, and outside
+    // the warehouse halfway to the detention block. One use each; health does not come back by itself.
+    passable(control('supply', 'guardroom-supplies', 'Take field supplies', [-44, 0.28, -54], 0.98)),
+    passable(control('supply', 'warehouse-supplies', 'Take field supplies', [28, 0, -16], -0.93)),
     control('distraction', 'service-bell', 'Ring service bell', [-39, 0, 3]),
   ]
   stations.forEach(station => { if (!station.object.parent) root.add(station.object) })
