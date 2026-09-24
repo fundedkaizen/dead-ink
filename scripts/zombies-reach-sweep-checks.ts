@@ -1,4 +1,4 @@
-// The fast version of the zombie reach sweep (the whole map is zombies-reach-sweep.ts, about half an hour,
+// The fast version of the zombie reach sweep (the whole map is zombies-reach-sweep.ts, about an hour,
 // report in artifacts/). The same player-side flood fill and real-director play-out, over a few regions
 // with every kind of footing: the cell block under the detention guardroom (its stairs, cells and bunks),
 // the mess hall (its roof, stairs and furniture) and the warehouse slab with a container. Then named

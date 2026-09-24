@@ -1,7 +1,8 @@
 // The full zombie reach sweep over the whole compound. Every place a player can stand (flood-filled from the
 // spawn with the player's own moves), checked against the navigation graph, then a representative of each
 // graph spot (every raised, sunken or walled-in one, every failure, and a spread of open ground) played out
-// with the real director. Writes artifacts/zombies-reach-sweep.md and .json. Takes about half an hour:
+// with the real director, in the world as the runtime sets it up (zone gates, boarded windows, dressing).
+// Writes artifacts/zombies-reach-sweep.md and .json. Takes about an hour on a busy machine:
 //   node scripts/check-player.mjs scripts/zombies-reach-sweep.ts
 // SWEEP_OUT=name writes artifacts/name.md/.json instead; SWEEP_LIMIT=n caps the director runs per zone setup.
 // The fast regression version is zombies-reach-sweep-checks.ts (part of npm test).
