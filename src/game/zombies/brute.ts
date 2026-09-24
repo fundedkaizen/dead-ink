@@ -1026,7 +1026,7 @@ export class Brutes {
   private started(z: Zombie, move: BruteMove) {
     const b = z.brute!, at = this.headHeight(z)
     if (move === 'slam') this.host.emit({ kind: 'boss-roar', position: at, radius: 90 })
-    if (move === 'charge') this.host.emit({ kind: 'brute-snort', position: at, radius: 80 })
+    if (move === 'charge') this.host.emit({ kind: 'brute-snort', position: at, radius: 80, duration: bruteWindup(b, BOSS.charge.windup) })
     if (move === 'throw') this.host.emit({ kind: 'boss-growl', position: at, radius: 40 })
     if (move === 'roar') {
       this.host.emit({ kind: 'brute-enrage', position: at, radius: 250 })
