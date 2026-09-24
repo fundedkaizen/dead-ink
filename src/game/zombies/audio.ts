@@ -1,5 +1,8 @@
 import { MissionAudio } from '../audio'
 import type { SoundEvent } from '../types'
+import { BRUTE_KINDS, playBrute } from './brute-sounds'
+import { INKWING_KINDS, playInkwing } from './inkwing-sounds'
+import type { SoundKit } from './sound-kit'
 
 /**
  * Dead Ink's sounds on top of the mission's (guns, footsteps, hits, bodies): zombie voices, the ground
@@ -41,7 +44,7 @@ export class DeadInkAudio extends MissionAudio {
     const handled = ['zombie-groan', 'zombie-scream', 'zombie-snarl', 'zombie-swipe', 'zombie-rise', 'powerup-drop', 'powerup-grab', 'nuke', 'round-start', 'round-end',
       'perk-drink', 'perk-jingle', 'pack-work', 'pack-ready', 'boss-roar', 'boss-growl', 'boss-slam', 'box-leave', 'box-open', 'box-spin', 'box-offer', 'ink-burst', 'grenade-blast', 'grenade-throw',
       'headshot-pop', 'gore-rip', 'gib', 'gas-burst', 'blot-gurgle', 'storm', 'doll-clap', 'heartbeat', 'shot-raygun', 'soul', 'soul-in', 'board-tear', 'board-hammer',
-      'shot-rocket', 'rocket-boom', 'round-burst']
+      'shot-rocket', 'rocket-boom', 'round-burst', ...INKWING_KINDS, ...BRUTE_KINDS]
     if (event.kind === 'door' && this.context && this.active && !this.muted) this.slam(event)
     // The Magnum: the usual report with a chest punch, a hard crack and a rolling echo under it.
     // Only your own Magnum (fired at your position): a teammate's comes from where they stand, without the chest punch.
@@ -54,6 +57,9 @@ export class DeadInkAudio extends MissionAudio {
     if (event.position && event.position.distanceTo(this.listenerPosition) > (event.radius ?? 60)) return
     if (this.sources.size >= 72) return
     if (this.sample(event)) return
+    // The Inkwings' and the Brute's own sounds (inkwing-sounds.ts, brute-sounds.ts), through this engine's outputs.
+    const kit: SoundKit = { context, noise: this.noise, output: e => this.output(e), track: (source, nodes, priority) => this.track(source, nodes, priority), duck: () => this.duckMusic() }
+    if (playInkwing(kit, event) || playBrute(kit, event)) return
     const r = Math.random
     switch (event.kind) {
       case 'zombie-groan': this.voice(event, { pitch: 62 + r() * 34, glide: 0.72 + r() * 0.2, length: 1 + r() * 0.9, rasp: 0.35, drive: 5, vowel: r() < 0.5 ? VOWELS.uh : VOWELS.oo, level: 0.5 }); break
