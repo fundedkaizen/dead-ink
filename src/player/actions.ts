@@ -13,6 +13,9 @@ export type ActionTarget = {
   icon?: string
 }
 
+/** A zip line trolley's speed along the cable, metres a second. */
+export const ZIPLINE_SPEED = 11
+
 export class PlayerActions {
   readonly doors: THREE.Group[] = []
   readonly ladders: THREE.Object3D[] = []
@@ -46,6 +49,9 @@ export class PlayerActions {
     const y = top ? data.landingHeight : data.bottomHeight
     return ladder.localToWorld(new THREE.Vector3(0, y + 0.025, top && !outside ? -data.landingDepth - 0.18 : 0.44))
   }
+
+  /** How long this ride takes, at the trolley's speed (for its sound). */
+  get rideSeconds() { return this.riding ? this.riding.distance / ZIPLINE_SPEED : 0 }
 
   ziplinePoint(zipline: THREE.Object3D, end: boolean) {
     return zipline.localToWorld(new THREE.Vector3().fromArray(zipline.userData[end ? 'endLanding' : 'startLanding']))
@@ -237,7 +243,7 @@ export class PlayerActions {
   updateTraversal(dt: number) {
     if (!this.riding) return this.updateClimb(dt)
     const ride = this.riding
-    let travel = Math.max(0, Math.min(dt, 0.05)) * 11
+    let travel = Math.max(0, Math.min(dt, 0.05)) * ZIPLINE_SPEED
     while (travel > 0 && ride.points.length) {
       const next = ride.points[0], distance = this.body.position.distanceTo(next)
       const moved = Math.min(distance, travel)

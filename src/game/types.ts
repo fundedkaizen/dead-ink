@@ -4,7 +4,7 @@ import type { CollisionWorld } from '../player/collision'
 export type Vec3 = [number, number, number]
 export type WeaponName = 'pistol' | 'ak' | 'smg' | 'shotgun' | 'sniper' | 'magnum' | 'lmg' | 'rocket'
 export type WeaponItem = { id: string; name: WeaponName; magazine: number; reserve: number; position?: Vec3; rarity?: import('./loot').Rarity; special?: 'deathMachine' | 'rayGun'; packed?: boolean; packLevel?: number }
-export type SoundEvent = { kind: string; position?: THREE.Vector3; source?: THREE.Vector3; intensity?: number; radius?: number; text?: string; voice?: string; speaker?: number; weapon?: WeaponName; zone?: import('./hit-reactions').HitZone; volume?: number; packed?: number }
+export type SoundEvent = { kind: string; position?: THREE.Vector3; source?: THREE.Vector3; intensity?: number; radius?: number; text?: string; voice?: string; speaker?: number; weapon?: WeaponName; zone?: import('./hit-reactions').HitZone; volume?: number; packed?: number; duration?: number }
 export type EmitSound = (event: SoundEvent) => void
 /** What a hostage-mission guard can carry: never Dead Ink's Ink Rocket, a box-only launcher. */
 export type GuardWeapon = Exclude<WeaponName, 'rocket'>
