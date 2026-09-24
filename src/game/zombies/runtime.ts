@@ -63,6 +63,9 @@ import type { Rarity } from '../loot'
 import { MACHINE_PLACES, PACK, PERKS, PERK_EFFECT, PERK_LIMIT, PackAPunch, PackedLook, PerkBottle, PerkMachine, type PerkKind } from './perks'
 import { Minimap, type MinimapMate } from './minimap'
 import { Barriers, WINDOW, type Barrier } from './windows'
+// The Ink Storm's flyers (flyers.ts) and what a storm brings (rules.ts).
+import { StormPack } from './flyers'
+import { inkwingHealth, stormNumber } from './rules'
 
 export type ZombieState = {
   phase: 'active' | 'dead' | 'complete'
@@ -318,6 +321,8 @@ export class ZombiesRuntime {
   /** An Ink Storm round is on; the last kill's place, for its Max Ammo. */
   private storm = false
   private lastKillAt: THREE.Vector3 | null = null
+  /** What the storm brings as it comes: groups of Inkwings, a few sprinters. */
+  private stormPack = new StormPack()
   private random: Random
   private spawn = new THREE.Vector3(...SPAWN_POINT)
   private abort = new AbortController()
@@ -1856,7 +1861,7 @@ export class ZombiesRuntime {
     const body = this.player.body, feet = body.position
     const push = new THREE.Vector3()
     for (const zombie of this.director?.zombies ?? []) {
-      if (zombie.state !== 'chase' || zombie.rise > 0 || zombie.climb) continue
+      if (zombie.state !== 'chase' || zombie.rise > 0 || zombie.climb || this.director?.flyers.owns(zombie)) continue
       if (Math.abs(zombie.position.y - feet.y) > 1.2) continue
       const reach = PLAYER_BODY + ZOMBIE_BODY * (zombie.boss ? BOSS.scale : 1)
       const dx = feet.x - zombie.position.x, dz = feet.z - zombie.position.z, d = Math.hypot(dx, dz)
@@ -2454,6 +2459,11 @@ export class ZombiesRuntime {
   private spawnZombie() {
     const director = this.director, graph = this.graph
     if (!director || !graph) return false
+    // The Ink Storm: its Inkwings come out of the storm in groups (flyers.ts); its sprinters rise as zombies do, below.
+    if (this.storm) {
+      const group = this.stormPack.next(this.random, 1 + Math.min(this.rounds.toSpawn, MAX_ALIVE - 1 - director.aliveCount))
+      if (group) return this.spawnInkwings(group)
+    }
     // Some come from the road, clawing up outside a boarded window of the mess hall and tearing their way in.
     const entry = this.barriers?.pickSpawn(this.random) ?? null
     const spot = entry?.rise ?? pickSpawn(graph, this.player.world, { near: 14, far: 42, eyes: [] }, this.random)
@@ -2465,6 +2475,21 @@ export class ZombiesRuntime {
     const zombie = director.spawn(spot, health, this.storm ? 'sprint' : this.gait(), entry ? entry.barrier.facing : Math.atan2(feet.x - spot.x, feet.z - spot.z), true, false, blot)
     if (zombie && entry) director.sendToWindow(zombie, entry.barrier)
     return !!zombie
+  }
+
+  /**
+   * A group of Inkwings out of the storm round the players (flyers.ts). The round fed in one of them; the rest
+   * are taken from its count here, and any that found nowhere to come out go back to it.
+   */
+  private spawnInkwings(group: number) {
+    const director = this.director!, players = 1 + this.matesHere().length
+    this.rounds.toSpawn -= group - 1
+    const targets: ZombieTarget[] = [{ id: 'p1', feet: this.player.body.position, alive: !this.down },
+      ...this.matesHere().filter(mate => mate.state.dn === 0).map(mate => ({ id: `p${mate.id + 1}`, feet: mate.avatar.feet, alive: true }))]
+    const health = Math.round(inkwingHealth(this.rounds.round, players) * DIFFICULTY[this.difficulty].health)
+    const placed = director.flyers.arrive(group, targets, health, this.random, stormNumber(this.rounds.round))
+    if (placed < group) { this.stormPack.back(group - placed); this.rounds.toSpawn += group - placed - (placed ? 0 : 1) }
+    return placed > 0
   }
 
   /** The Ink Storm darkens the page while it lasts. */
@@ -2613,8 +2638,8 @@ export class ZombiesRuntime {
         this.toastUnlocks(recordRound(events.roundStarted))
         this.setStorm(isStormRound(events.roundStarted))
         if (this.storm) {
-          // A smaller pack: this step may already have fed some in.
-          this.rounds.toSpawn = Math.max(0, Math.ceil((this.rounds.toSpawn + events.spawn) * STORM.count) - events.spawn)
+          // The storm's own pack, Inkwings and a few sprinters (flyers.ts): this step may already have fed some in.
+          this.rounds.toSpawn = Math.max(0, this.stormPack.begin(events.roundStarted, 1 + this.matesHere().length) - events.spawn)
           this.shout(`Round ${events.roundStarted}: Ink Storm`, 3.5)
           this.emit({ kind: 'storm' })
         } else this.shout(`Round ${events.roundStarted}`)

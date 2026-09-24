@@ -15,6 +15,7 @@ import { InkGore, restoreParts, setPartLost } from './gore'
 import { BLOT, GasClouds, bloatCentre, bloatDripPoint, setBloat } from './gas'
 import { WINDOW } from './windows'
 import { Brutes, bruteSpeed, type BruteState } from './brute'
+import { Inkwings } from './flyers'
 
 /**
  * Dead Ink's zombies. They reuse the game's stickman (rig, walk and run animations, death falls,
@@ -350,6 +351,8 @@ export class ZombieDirector {
   random: () => number = Math.random
   /** The boarded windows zombies may be sent to (windows.ts), in co-op order. */
   windows: readonly WindowSlot[] = []
+  /** The Ink Storm's flyers (flyers.ts): each takes an idle body's place in the pool while it lives. */
+  readonly flyers: Inkwings
 
   constructor(private context: ZombieContext) {
     this.navigation = new EnemyNavigation(context.world, context.doors, context.emit)
@@ -366,6 +369,8 @@ export class ZombieDirector {
       canTouch: (z, feet) => this.canTouch(z, feet),
       random: () => this.random(),
     })
+    this.flyers = new Inkwings({ scene: context.scene, world: context.world, gore: this.gore, emit: context.emit, damagePlayer: context.damagePlayer,
+      pool: this.zombies, graph: context.graph, pushDoors: (zombie, toward) => this.pushDoors(zombie, toward) })
   }
 
   /** Build the pool. Sequential loads, as the mission's AI does, so the rig initialises in order. */
@@ -484,8 +489,9 @@ export class ZombieDirector {
     this.gore.update(dt)
     this.gas.update(dt)
     this.brutes.frame(dt, this.context.players?.() ?? targets)
+    this.flyers.update(dt, targets)
     for (const zombie of this.zombies) {
-      if (zombie.state === 'idle') continue
+      if (zombie.state === 'idle' || this.flyers.owns(zombie)) continue
       if (zombie.state === 'dead') {
         zombie.deadFor += dt
         // A crawler has no death clip: it slumps flat where it lies.
@@ -592,6 +598,7 @@ export class ZombieDirector {
     const rows: ZombieSnap[] = []
     this.zombies.forEach((z, i) => {
       if (z.state === 'idle') return
+      if (this.flyers.owns(z)) { rows.push(this.flyers.row(z, i)); return }
       const flags = (z.crawler ? 1 : 0) | (z.blot ? 2 : 0) | (z.boss ? 4 : 0) | (z.lost.head ? 8 : 0) | (z.lost.L ? 16 : 0) | (z.lost.R ? 32 : 0)
         | (z.gibbed ? 64 : 0) | (z.climb ? 128 : 0) | windowFlags(z) | this.brutes.flags(z)
       // Climbing out of the ground is posed from where it stands, so the guest needs that spot, not the body's.
@@ -614,6 +621,8 @@ export class ZombieDirector {
     this.gore.update(dt)
     this.gas.update(dt)
     this.brutes.frame(dt, null)
+    // The Ink Storm's flyers ride in the same rows, marked in their flags: they take theirs first (flyers.ts).
+    rows = this.flyers.puppet(dt, rows)
     const seen = new Set<number>()
     const follow = 1 - Math.exp(-dt * 14)
     for (const row of rows) {
@@ -679,7 +688,7 @@ export class ZombieDirector {
     }
     // Bodies the host no longer has: the dead finish sinking here, anything else is gone.
     this.zombies.forEach((zombie, index) => {
-      if (seen.has(index) || zombie.state === 'idle') return
+      if (seen.has(index) || zombie.state === 'idle' || this.flyers.owns(zombie)) return
       if (zombie.state === 'dead') this.lieDead(zombie, dt)
       else { zombie.state = 'idle'; zombie.actor.root.visible = false }
     })
@@ -1493,6 +1502,7 @@ export class ZombieDirector {
   // ---------------------------------------------------------------- damage
 
   private bodyHit(zombie: Zombie, origin: THREE.Vector3, direction: THREE.Vector3, maxDistance: number) {
+    if (this.flyers.owns(zombie)) return this.flyers.bodyHit(zombie, origin, direction, maxDistance)
     const scale = zombie.boss ? BOSS.scale : 1
     const centre = zombie.position.clone().addScaledVector(BODY_CENTRE, scale)
     if (rayCapsuleDistance(origin, direction, centre, centre, 1.9 * scale) > maxDistance) return null
@@ -1554,7 +1564,7 @@ export class ZombieDirector {
     const hits: ZombieHit[] = [], from = centre.clone().setY(centre.y + 0.4)
     for (const zombie of this.zombies) {
       if (zombie.state !== 'chase') continue
-      const chest = zombie.position.clone().setY(zombie.position.y + 1.1 * (zombie.boss ? BOSS.scale : 1))
+      const chest = this.flyers.centre(zombie) ?? zombie.position.clone().setY(zombie.position.y + 1.1 * (zombie.boss ? BOSS.scale : 1))
       const distance = chest.distanceTo(centre)
       if (distance > radius || !this.context.world.visible(from, chest, zombie.actor.root)) continue
       const outward = chest.clone().sub(centre).setY(0.3).normalize()
@@ -1569,15 +1579,16 @@ export class ZombieDirector {
     let best: Zombie | null = null, bestDistance = range
     for (const zombie of this.zombies) {
       if (zombie.state !== 'chase') continue
-      const to = zombie.position.clone().add(new THREE.Vector3(0, 1.1, 0)).sub(origin)
+      const chest = this.flyers.centre(zombie) ?? zombie.position.clone().add(new THREE.Vector3(0, 1.1, 0))
+      const to = chest.clone().sub(origin)
       const distance = Math.hypot(to.x, to.z)
       if (distance > bestDistance || Math.abs(to.y) > 1.4) continue
       if (to.setY(0).normalize().dot(flatForward) < Math.cos(THREE.MathUtils.degToRad(40))) continue
-      if (!this.context.world.visible(origin, zombie.position.clone().add(new THREE.Vector3(0, 1.1, 0)), zombie.actor.root)) continue
+      if (!this.context.world.visible(origin, chest, zombie.actor.root)) continue
       best = zombie; bestDistance = distance
     }
     if (!best) return null
-    const point = best.position.clone().add(new THREE.Vector3(0, 1.15, 0))
+    const point = this.flyers.centre(best) ?? best.position.clone().add(new THREE.Vector3(0, 1.15, 0))
     return this.applyHit(best, instaKill && !best.boss ? best.health : damage, 'torso', point, flatForward, undefined, undefined)
   }
 
@@ -1610,6 +1621,7 @@ export class ZombieDirector {
   }
 
   private kill(zombie: Zombie) {
+    if (this.flyers.owns(zombie)) { this.flyers.kill(zombie); return }
     if (zombie.window) this.dropFromWindow(zombie)
     if (zombie.brute) this.brutes.died(zombie)
     if (zombie.climb) {
@@ -1663,6 +1675,7 @@ export class ZombieDirector {
    * legs falls as a crawler.
    */
   private wound(zombie: Zombie, lethal: boolean, zone: HitZone, direction: THREE.Vector3, bone: BoneName | undefined, weapon: Shot['weapon'], blast?: number) {
+    if (this.flyers.owns(zombie)) { this.flyers.wound(zombie, lethal, direction); return }
     const roll = this.random, heavy = weapon ? GORE_ODDS.arm[weapon] : undefined
     const side: 'L' | 'R' = bone?.endsWith('.L') ? 'L' : 'R'
     if (blast !== undefined) {
@@ -1784,6 +1797,7 @@ export class ZombieDirector {
   clear() {
     this.plans.clear()
     this.restoreLinks(true)
+    this.flyers.clear()
     for (const zombie of this.zombies) { zombie.state = 'idle'; zombie.actor.root.visible = false; zombie.window = null }
     for (const slot of this.windows) { slot.occupant = null; slot.waiting.length = 0; slot.vaulting = null }
     this.gore.clear()
@@ -1794,6 +1808,7 @@ export class ZombieDirector {
   dispose() {
     this.disposed = true
     this.plans.clear()
+    this.flyers.dispose()
     this.gore.dispose()
     this.gas.dispose()
     this.brutes.dispose()

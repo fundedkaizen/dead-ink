@@ -176,13 +176,33 @@ export const isBossRound = (round: number) => round > 0 && round % BOSS.every ==
 
 /**
  * The Ink Storm, Dead Ink's answer to Call of Duty's hellhound rounds: now and then ink floods the
- * compound and the light goes, and a smaller pack comes all at a sprint, weaker but quicker to arrive.
- * Clear it and a Max Ammo drops where the last one fell. Our own design, tuned by play: round 7, then
- * every seventh round, never on a Brute round.
+ * compound and the light goes, and the Inkwings come out of it (flyers.ts): ink creatures on ragged wings
+ * that circle and dive at you, with a few sprinters running under them. Clear it and a Max Ammo drops where
+ * the last one fell. Our own design: round 7, then every seventh round, never on a Brute round. `health` is
+ * the sprinters' share of a zombie's; `spawnDelay` scales the round's spawn delay between arrivals (a group
+ * of Inkwings is one arrival).
  */
-export const STORM = { first: 7, every: 7, count: 0.6, health: 0.6, spawnDelay: 0.5 } as const
+export const STORM = { first: 7, every: 7, health: 0.6, spawnDelay: 1.5 } as const
 export const isStormRound = (round: number) =>
   round >= STORM.first && (round - STORM.first) % STORM.every === 0 && !isBossRound(round)
+/** Which storm a round's is: 1 on round 7, 2 on round 14, and so on. */
+export const stormNumber = (round: number) => Math.max(1, Math.floor((Math.floor(round) - STORM.first) / STORM.every) + 1)
+
+/**
+ * What a storm brings. Our own numbers, tuned in the storm simulation of scripts/dead-ink-flyers-checks.ts:
+ * `flyers` Inkwings for one player on the first storm and `perStorm` more on each storm after it, times
+ * `players` for one to four players; sprinters, a `sprinters` share of the Inkwings; each Inkwing's health a
+ * `health` share of a zombie's, `perPlayer` more for each player past the first; they come in groups of
+ * `group` (fewest, most).
+ */
+export const INKWINGS = { flyers: 10, perStorm: 3, players: [1, 1.7, 2.3, 2.9], sprinters: 0.2, health: 0.5, perPlayer: 0.15, group: [2, 4] } as const
+export function stormPack(round: number, players: number) {
+  const n = Math.min(4, Math.max(1, Math.floor(players)))
+  const flyers = Math.round((INKWINGS.flyers + INKWINGS.perStorm * (stormNumber(round) - 1)) * INKWINGS.players[n - 1])
+  return { flyers, sprinters: Math.round(flyers * INKWINGS.sprinters) }
+}
+export const inkwingHealth = (round: number, players: number) =>
+  Math.round(zombieHealth(round) * INKWINGS.health * (1 + INKWINGS.perPlayer * (Math.min(4, Math.max(1, Math.floor(players))) - 1)))
 
 /**
  * Difficulty, our own: health and damage multipliers on Call of Duty's numbers, how many rounds earlier
