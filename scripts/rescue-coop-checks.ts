@@ -390,3 +390,25 @@ installFakeDom()
   host.dispose(); local.dispose()
   console.log('PASS Guest: a guard who dies between ticks stays down and his fall plays on; a checkpoint brings him back')
 }
+{
+  // Doors: a guest swings one and the host swings it for everyone else; a tick sent before the swing does not
+  // undo it here, and once the swing has had time to reach the host, the host's ticks say how it stands.
+  const g = stage('guest'), h = stage('host')
+  const door = () => { const group = new THREE.Group(); group.userData.open = false; return group }
+  g.r.player.actions.doors.push(door(), door()); h.r.player.actions.doors.push(door(), door())
+  const [, guestDoor] = g.r.player.actions.doors, [, hostDoor] = h.r.player.actions.doors
+  guestDoor.userData.open = true
+  g.coop.doorUsed(guestDoor)
+  const swung = g.sent.find(each => each.m.t === 'door')?.m as Extract<RescueMessage, { t: 'door' }> | undefined
+  assert(swung && swung.i === 1 && swung.o === 1, 'the guest tells the host which door, and that it is open')
+  h.message(swung, 1)
+  assert.equal(hostDoor.userData.open, true, 'the host opens it')
+  assert(h.sent.some(each => each.m.t === 'door' && each.route?.skip === 1), 'and passes it on to everyone but the guest')
+  const stale: RescueMessage = { t: 'tick', g: [], m: mirrorMission(initialMission()), d: '00', players: [], h: [] }
+  g.message(stale, 0)
+  assert.equal(guestDoor.userData.open, true, 'a tick from before the swing leaves it open')
+  for (let i = 0; i < 60; i++) g.coop.idle(1 / 60)
+  g.message(stale, 0)
+  assert.equal(guestDoor.userData.open, false, 'later ticks are the host\'s word on it')
+  console.log('PASS Doors: a guest\'s door goes through the host to everyone, and an older tick does not swing it back')
+}
