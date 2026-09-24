@@ -4,7 +4,8 @@ import { RESCUE_LAYOUT } from './rescue-layout'
 export const CAMERA_SHUTDOWN_SECONDS = 60
 export const SIGNALS_COMPUTER_ID = 'signals-office-computer'
 
-export type HostageState = { id: string; status: 'captive' | 'following' | 'loaded'; position: Vec3; routeIndex: number }
+/** `by`: in co-op, who freed him (he follows them first). */
+export type HostageState = { id: string; status: 'captive' | 'following' | 'loaded'; position: Vec3; routeIndex: number; by?: number }
 export type MissionState = {
   phase: 'active' | 'dead' | 'complete'
   camerasActive: boolean; camerasDisabledUntil: number | null; alarm: 'inactive' | 'active' | 'silenced'; alarmElapsed: number

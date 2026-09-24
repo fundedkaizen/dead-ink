@@ -6,7 +6,8 @@ import type { Vec3, WeaponName } from './types'
 
 export type HitZone = 'head' | 'torso' | 'arm' | 'leg'
 export type ActorHit = { distance: number; point: THREE.Vector3; zone: HitZone; bone: BoneName }
-export type HitReaction = { zone: HitZone; point: THREE.Vector3; direction: THREE.Vector3; lethal: boolean; bone?: BoneName; weapon?: WeaponName; targetId?: string }
+/** A guard struck: where and how. `clip` and `travel` are the reaction it played (a co-op guest plays the same one). */
+export type HitReaction = { zone: HitZone; point: THREE.Vector3; direction: THREE.Vector3; lethal: boolean; bone?: BoneName; weapon?: WeaponName; targetId?: string; clip?: string; travel?: number }
 export type ActorReactionSnapshot = { clip: string; elapsed: number; zone: HitZone; lethal: boolean }
 export type HitVolume = { a: THREE.Vector3; b: THREE.Vector3; radius: number; zone: HitZone; bone: BoneName }
 
