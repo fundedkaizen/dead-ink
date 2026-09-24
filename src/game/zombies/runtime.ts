@@ -49,6 +49,7 @@ import { InkTrap, TRAP, TRAP_GATES } from './traps'
 import { INKWELL_PLACES, Inkwell, QUEST, SoulStreams, questHint, type QuestStep } from './quest'
 import { BLOT, GAS, rollBlot } from './gas'
 import { POWER_ICON, WorldMarker } from './markers'
+import { REVIVE_ICON, ReviveSyringe } from './last-stand'
 import { playMythicSting } from './mythic'
 import { CoopLink, PartnerAvatar, PartnerTag, toVector, vec, type CoopMessage, type CoopStatus, type PlayerState, type WorldState } from './coop'
 import type { Shot as ShotType } from '../types'
@@ -269,6 +270,10 @@ export class ZombiesRuntime {
   down: 0 | 1 | 2 = 0
   private bleed = 0
   private reviving = 0
+  /** The guns you went down with, back in your hands when you are picked up. */
+  private downWeapons: WeaponSnapshot | null = null
+  private syringe: ReviveSyringe
+  private downMarker: WorldMarker
   private boxOwner: 'host' | 'guest' = 'host'
   private coopPanel: HTMLElement | null = null
   private coopStatus: CoopStatus = { kind: 'idle' }
@@ -345,6 +350,7 @@ export class ZombiesRuntime {
     this.bolts = new InkRayBolts(scene, player.world, (origin, direction, max) => this.director?.aimDistance(origin, direction, max) ?? Infinity)
     this.powerups = new PowerupDrops(scene)
     this.bottle = new PerkBottle(camera.perspective)
+    this.syringe = new ReviveSyringe(camera.perspective)
     this.dropper = new PowerupDropper(this.random)
     this.bulletTrails = new BulletTrails(scene, 'Player bullet')
     player.lookSensitivity = () => lookScale(this.weapons.lookSensitivity, this.aiming)
@@ -362,6 +368,8 @@ export class ZombiesRuntime {
     this.hits = new HitMarkers(hudRoot)
     this.partnerTag = new PartnerTag(hudRoot, 'Partner')
     this.powerMarker = new WorldMarker(hudRoot, POWER_ICON, 'The power switch')
+    this.downMarker = new WorldMarker(hudRoot, REVIVE_ICON, 'A downed teammate', 0)
+    this.downMarker.element.classList.add('revive')
     this.indicator = new DamageIndicator(hudRoot)
     // One more cell than you start with, for Spare Nib's third gun; the hotbar hides cells you do not have.
     this.hotbar = new Hotbar(hudRoot, ZOMBIE_SLOTS + 1)
@@ -571,6 +579,7 @@ export class ZombiesRuntime {
     this.safePosition.copy(this.player.body.position)
     this.lastHurt = -100; this.knifeCooldown = 0; this.strandTimer = 0
     this.down = 0; this.bleed = 0; this.reviving = 0; this.boxOwner = 'host'; this.partnerKills = 0
+    this.downWeapons = null; this.player.crawling = false; this.player.actions.disabled = false; this.syringe.stop(); this.zombieHud.lastStand(null)
     this.lastTick = null
     this.partnerLures = []
     if (this.coop.role === 'host') { this.sendSync(); this.coop.send({ t: 'start' }) }
@@ -715,7 +724,8 @@ export class ZombiesRuntime {
     }
     if (this.paired && this.partnerState?.dn === 1 && !this.down && this.partner.feet.distanceTo(this.player.body.position) < COOP.reviveReach)
       targets.push({ object: this.partner.actor?.root ?? this.scene, point: this.partner.feet.clone().setY(this.partner.feet.y + 0.6), kind: 'mission', descending: false,
-        label: `Revive ${this.partnerState.name} (stay close)`, use: () => { this.reviving = 0.001; this.player.movementLocked = true; return true } })
+        label: `Hold to revive ${this.partnerState.name}`, use: () => {
+          this.reviving = 0.001; this.player.movementLocked = true; this.cancelInput(); this.syringe.start(); return true } })
     for (const part of this.parts) {
       if (part.point.distanceTo(eye) > 3 || !part.root.visible) continue
       targets.push({ object: part.root, point: part.point, kind: 'mission', descending: false, label: `Pick up the ${PARTS[part.id].label}`, use: () => this.pickPart(part) })
@@ -1078,7 +1088,8 @@ export class ZombiesRuntime {
     const e = new THREE.Euler().setFromQuaternion(cam.quaternion, 'YXZ')
     const body = this.player.body
     return { p: vec(body.position), yaw: Math.round(e.y * 100) / 100, pitch: Math.round(e.x * 100) / 100, w: this.weapons.current?.name ?? null,
-      mv: Math.hypot(body.velocity.x, body.velocity.z) > 0.6 ? 1 : 0, dn: this.down, pts: this.state.points, kills: this.state.kills, name: this.playerName }
+      mv: Math.hypot(body.velocity.x, body.velocity.z) > 0.6 ? 1 : 0, dn: this.down, pts: this.state.points, kills: this.state.kills, name: this.playerName,
+      rv: this.reviving > 0 ? Math.round(this.reviving / this.reviveTime() * 100) / 100 : 0 }
   }
 
   /** The host tells the guest how the world stands: open gates, the power, the box's place. */
@@ -1096,22 +1107,35 @@ export class ZombiesRuntime {
     if (this.coop.role === 'host' && partner && partner.dn === 0)
       for (const taken of this.powerups.collect(this.partner.feet)) this.grabbed(taken.kind, taken.position, 'guest')
     if (this.down === 1 && (this.bleed -= dt) <= 0) {
+      // Bled out: nothing in your hands, flat on the floor until the next round.
       this.down = 2
+      this.player.crawling = false
+      this.player.movementLocked = true
+      this.downWeapons = null
+      this.weapons.restore({ slots: [null, null], selected: 0, pickups: [], nextId: this.weapons.snapshot().nextId })
       this.coop.send({ t: 'down', dn: 2 })
       this.hud.notify('You bled out. You will be back next round.', 4, true)
     }
     if (this.reviving > 0) {
       const near = partner && partner.dn === 1 && this.partner.feet.distanceTo(this.player.body.position) < COOP.reviveReach
-      if (!near || this.down) { this.reviving = 0; this.player.movementLocked = !!this.down }
-      else if ((this.reviving += dt) >= COOP.reviveSeconds * (this.perks.has('secondDraft') ? 0.5 : 1)) {
+      // Held the whole way (F, or the pad's X): let go, step away or go down yourself and it stops.
+      if (!near || this.down || !this.player.useHeld) { this.reviving = 0; this.player.movementLocked = this.down === 2; this.syringe.stop() }
+      else if ((this.reviving += dt) >= this.reviveTime()) {
         this.reviving = 0
         this.player.movementLocked = false
+        this.syringe.stop()
         this.coop.send({ t: 'revive' })
         if (this.partnerState) this.partnerState.dn = 0
         this.award(COOP.revivePoints)
         this.hud.notify('You got your partner back up.', 2.5)
-      } else this.hud.notify(`Reviving… ${Math.ceil((COOP.reviveSeconds * (this.perks.has('secondDraft') ? 0.5 : 1) - this.reviving) * 10) / 10} s`, 0.3)
+      } else this.interactionTime = Math.max(this.interactionTime, 0.2)
     }
+    // One bar under the crosshair: yours to fill, theirs filling for you, or your time running out.
+    const name = partner?.name ?? 'Your partner'
+    if (this.reviving > 0) this.zombieHud.lastStand(`Reviving ${name}`, this.reviving / this.reviveTime())
+    else if (this.down === 1 && partner?.rv) this.zombieHud.lastStand(`${name} is reviving you`, partner.rv)
+    else if (this.down === 1) this.zombieHud.lastStand('Bleeding out', this.bleed / COOP.bleedSeconds, 'bleed')
+    else this.zombieHud.lastStand(null)
     // Both down (or out): the game is over for both.
     if (this.coop.role === 'host' && this.down && partner && partner.dn) {
       this.coop.send({ t: 'gameover' })
@@ -1125,6 +1149,7 @@ export class ZombiesRuntime {
     this.partner.update(dt, partner)
     this.partnerTag.update(this.camera.perspective, partner ? this.partner.head() : null, !!partner?.dn)
     this.powerMarker.update(this.camera.perspective, this.player.playing && !this.power && this.powerSwitch ? this.powerSwitch.point : null)
+    this.downMarker.update(this.camera.perspective, this.player.playing && partner?.dn === 1 ? this.partner.feet.clone().setY(this.partner.feet.y + 0.9) : null)
     if (partner) this.partnerTag.name(partner.name)
     this.zombieHud.scoreboard(this.paired ? [{ name: this.playerName, points: this.state.points, me: true, down: !!this.down },
       { name: partner?.name ?? 'Partner', points: partner?.pts ?? 0, me: false, down: !!partner?.dn }] : null)
@@ -1153,15 +1178,35 @@ export class ZombiesRuntime {
     this.bleed = COOP.bleedSeconds
     this.state.health = 0
     this.losePerks()
-    this.weapons.cancel(); this.cancelInput()
-    this.player.movementLocked = true
+    this.cancelInput()
+    this.reviving = 0; this.syringe.stop()
+    // The last stand, as Call of Duty: on the floor with a pistol, crawling, still shooting.
+    if (this.timers.deathMachine && this.heldWeapons) { this.weapons.restore(this.heldWeapons); this.heldWeapons = null }
+    delete this.timers.deathMachine
+    this.lastStandPistol()
+    this.player.movementLocked = false
+    this.player.crawling = true
+    this.player.actions.disabled = true
     this.player.body.velocity.set(0, 0, 0)
     this.revive.holdDown()
     this.audio.play({ kind: 'player-fall' })
     this.zombieHud.announce('You are down', 2.5)
-    this.hud.notify('Hold on: your partner can pick you up.', 4, true)
+    this.hud.notify('Crawl and keep shooting: your partner can pick you up.', 4, true)
     this.coop.send({ t: 'down', dn: 1 })
   }
+
+  /** Out comes the best pistol you carry (the Ink Ray first, as the Ray Gun in Call of Duty), or a spare one. */
+  private lastStandPistol() {
+    const snapshot = this.weapons.snapshot()
+    this.downWeapons = snapshot
+    const rank = (item: WeaponItem | null) => !item ? 0 : item.special === 'rayGun' ? 4 : item.name === 'magnum' ? 3 : item.name === 'pistol' ? 2 : 0
+    const best = snapshot.slots.reduce<WeaponItem | null>((a, b) => rank(b) > rank(a) ? b : a, null)
+    const pistol = best && best.magazine + best.reserve > 0 ? best : { ...startingPistol(), id: 'last-stand-pistol' }
+    this.weapons.restore({ slots: [pistol, null], selected: 0, pickups: [], nextId: snapshot.nextId })
+  }
+
+  /** How long a revive takes you: Second Draft halves it. */
+  private reviveTime() { return COOP.reviveSeconds * (this.perks.has('secondDraft') ? 0.5 : 1) }
 
   /** Back up: revived by the partner, or back at the start of a round after bleeding out. */
   private getUp(respawn = false) {
@@ -1173,9 +1218,19 @@ export class ZombiesRuntime {
     this.reviveGrace = 2
     this.revive.release()
     this.player.movementLocked = false
+    this.player.crawling = false
+    this.player.actions.disabled = false
     if (respawn) {
+      this.downWeapons = null
       this.weapons.restore({ slots: [startingPistol(), null], selected: 0, pickups: [], nextId: 1 })
       this.revive.reset()
+    } else if (this.downWeapons) {
+      // Back up with every gun you went down with; the pistol keeps what it has left.
+      const back = this.downWeapons, pistol = this.weapons.current
+      this.downWeapons = null
+      const same = pistol && back.slots.find(item => item?.id === pistol.id)
+      if (same && pistol) { same.magazine = pistol.magazine; same.reserve = pistol.reserve }
+      this.weapons.restore(back)
     }
     this.coop.send({ t: 'down', dn: 0 })
   }
@@ -1327,7 +1382,7 @@ export class ZombiesRuntime {
       this.partner.load()
       if (this.coop.role === 'host') this.sendSync()
     }
-    if (status.kind === 'error' || status.kind === 'waiting' || status.kind === 'alone') this.partnerState = null
+    if (status.kind === 'error' || status.kind === 'waiting' || status.kind === 'alone') { this.partnerState = null; this.zombieHud.lastStand(null) }
     this.renderCoopPanel()
   }
 
@@ -2409,6 +2464,7 @@ export class ZombiesRuntime {
     if (reactionActive) {
       const zoom = this.aiming && this.weapons.current?.name === 'sniper' && !this.weapons.reloading ? this.weapons.scopeMagnification : 1
       this.playerHits.applyCamera(this.camera.perspective, this.player.world, 1 / zoom)
+      this.revive.crawl = this.down === 1 ? Math.hypot(this.player.body.velocity.x, this.player.body.velocity.z) : 0
       this.revive.applyCamera(this.camera.perspective, this.hud.reducedMotion)
     }
     deathVisible = this.death.active && this.player.enabled && !this.player.immersive
@@ -2418,10 +2474,11 @@ export class ZombiesRuntime {
       this.hud.setDeath(this.death)
     } else {
       if (this.death.active) { this.death.reset(); this.weapons.resetDeath(); this.hud.clearDeath() }
-      this.weapons.update(dt, { active: reactionActive && this.interactionTime === 0 && !this.revive.down, climbing: this.player.actions.traversing,
+      this.weapons.update(dt, { active: reactionActive && this.interactionTime === 0 && (!this.revive.down || this.revive.settled), climbing: this.player.actions.traversing,
         moving: this.player.body.velocity.length(), aiming: this.aiming, reducedMotion: this.hud.reducedMotion, feet: this.player.body.position, hitPose })
     }
     this.bottle.update(dt)
+    this.syringe.update(dt, this.reviving > 0 ? this.reviving / this.reviveTime() : 1)
     const held = this.weapons.current
     this.packedLook.update(dt, this.weapons.heldModel, held?.packed ? held.packLevel ?? 1 : 0)
     this.audio.update(this.camera.perspective)
@@ -2460,7 +2517,7 @@ export class ZombiesRuntime {
     for (const skull of this.skulls) skull.object.removeFromParent()
     delete document.body.dataset.deadInkStorm
     delete document.body.dataset.deadInkOneHit
-    this.coop.close(); this.partner.dispose(); this.partnerTag.dispose(); this.powerMarker.dispose()
+    this.coop.close(); this.partner.dispose(); this.partnerTag.dispose(); this.powerMarker.dispose(); this.downMarker.dispose(); this.syringe.dispose()
     for (const part of this.parts) part.dispose()
     for (const site of this.sites.values()) site.dispose()
     this.powerSwitch?.dispose()

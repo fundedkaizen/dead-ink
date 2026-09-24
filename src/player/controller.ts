@@ -30,6 +30,13 @@ export class FirstPersonController {
   /** A gamepad's left stick (-1 to 1, y forward) and its sprint click; see src/player/gamepad.ts. */
   readonly padMove = new THREE.Vector2()
   padSprint = false
+  /** Downed (Dead Ink's last stand): a slow crawl at this share of walking pace, no sprint, no jump. */
+  crawling = false
+  crawlScale = 0.22
+  /** F held on the keyboard, or the pad's use button held: a teammate's revive runs only while one is. */
+  private useKey = false
+  padUse = false
+  get useHeld() { return this.useKey || this.padUse }
   /** The last input came from a gamepad: resuming then skips the pointer lock, which a pad press cannot request. */
   usingPad = false
   private fallback = false
@@ -83,7 +90,7 @@ export class FirstPersonController {
     }, options)
     document.addEventListener('pointerlockerror', this.lockRefused, options)
     window.addEventListener('keydown', this.keyDown, options)
-    window.addEventListener('keyup', event => { this.pressed.delete(event.code) }, options)
+    window.addEventListener('keyup', event => { this.pressed.delete(event.code); if (event.code === 'KeyF') this.useKey = false }, options)
     window.addEventListener('blur', this.pause, options)
     document.addEventListener('visibilitychange', () => { if (document.hidden) this.pause() }, options)
   }
@@ -215,7 +222,7 @@ export class FirstPersonController {
 
   /** A gamepad's jump, as Space. */
   padJump() {
-    if (this.enabled && this.playing && !this.immersive && !this.movementLocked && !this.actions.traversing) this.body.jump()
+    if (this.enabled && this.playing && !this.immersive && !this.movementLocked && !this.actions.traversing && !this.crawling) this.body.jump()
   }
 
   private keyDown = (event: KeyboardEvent) => {
@@ -223,11 +230,12 @@ export class FirstPersonController {
     if (event.target instanceof HTMLElement && event.target.closest('button, summary, input, textarea, select, [contenteditable="true"]')) return
     if (event.code === 'Escape') { this.pause(); return }
     if (!this.playing) return
+    if (event.code === 'KeyF') this.useKey = true
     if (this.movementLocked) return
     if (movementKeys.includes(event.code)) {
       event.preventDefault()
       this.pressed.add(event.code)
-      if (event.code === 'Space' && !event.repeat && !this.actions.traversing) this.body.jump()
+      if (event.code === 'Space' && !event.repeat && !this.actions.traversing && !this.crawling) this.body.jump()
     }
     if (event.code === 'KeyF' && !event.repeat) { event.preventDefault(); this.actions.activate(this.camera.active) }
     if (event.code === 'KeyR' && !event.repeat && !this.missionMode) { event.preventDefault(); this.respawn() }
@@ -252,7 +260,8 @@ export class FirstPersonController {
       this.forward.normalize()
       this.direction.set(-this.forward.z, 0, this.forward.x).multiplyScalar(x).addScaledVector(this.forward, z)
       if (!analog || this.direction.lengthSq() > 1) this.direction.normalize()
-      const wantsSprint = this.pressed.has('ShiftLeft') || this.pressed.has('ShiftRight') || this.padSprint
+      const wantsSprint = !this.crawling && (this.pressed.has('ShiftLeft') || this.pressed.has('ShiftRight') || this.padSprint)
+      this.body.speedScale = this.crawling ? this.crawlScale : 1
       this.body.update(dt, this.direction, this.stamina.update(dt, wantsSprint, this.direction.lengthSq() > 0.01))
     } else this.stamina.update(dt, false, false)
     if (this.body.position.y < -20 || Math.max(Math.abs(this.body.position.x), Math.abs(this.body.position.z)) > 1150) this.respawn()
