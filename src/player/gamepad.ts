@@ -51,6 +51,8 @@ export type PadBindings = {
   action: (action: PadAction, down: boolean) => void
   /** An interaction prompt is showing, so X/Square waits to see if it is a hold (use) or a tap (reload). */
   hasTarget: () => boolean
+  /** Whether X/Square is held right now (a revive runs only while it is). */
+  useHeld?: (held: boolean) => void
   menu: (action: MenuAction) => void
 }
 
@@ -173,6 +175,7 @@ export class GamepadInput {
       if (down(BUTTON.B)) b.menu('back')
       if (down(BUTTON.START)) b.menu('start')
     }
+    b.useHeld?.(playing && now.has(BUTTON.X))
     this.held = now
     return true
   }

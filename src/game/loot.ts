@@ -87,7 +87,9 @@ export const PACKED_NAMES: Record<WeaponName, string> = { pistol: 'Fountain Pen'
 export function weaponRules(item: { name: WeaponName; rarity?: Rarity; special?: 'deathMachine' | 'rayGun'; packed?: boolean; packLevel?: number }): ScaledRules {
   const base = WEAPON_RULES[item.name]
   // The Ink Ray's bolts do their damage by bursting (the runtime's blast), so its rules are its handling.
-  if (item.special === 'rayGun') return { ...base, label: 'Ink Ray', interval: 0.3, kick: 0.02, settle: 0.5, range: 120 }
+  // Upgraded, it is Porter's X2: twice the magazine and a little faster.
+  if (item.special === 'rayGun') return { ...base, label: item.packed ? 'Ink Ray X2' : 'Ink Ray', capacity: item.packed ? 40 : 20,
+    interval: item.packed ? 0.26 : 0.3, kick: 0.02, settle: 0.5, range: 120 }
   if (item.special === 'deathMachine') return { ...base, label: 'Death Machine', automatic: true,
     interval: DEATH_MACHINE.interval, damage: base.damage * DEATH_MACHINE.damage, kick: DEATH_MACHINE.kick, settle: DEATH_MACHINE.settle }
   const rules: ScaledRules = { ...base }

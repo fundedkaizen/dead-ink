@@ -144,6 +144,19 @@ body[data-dead-ink-revive="true"] #world { animation: dead-ink-revive 2.4s linea
 .dead-ink-difficulty { display: grid; gap: 6px; }
 .dead-ink-difficulty select { font: inherit; max-width: 100%; padding: 6px 8px; border: 1px solid var(--ink-rule); border-radius: 4px 6px 3px 5px; background: var(--paper, #fbfaf5); color: var(--ink); }
 
+/* The last stand: one bar under the crosshair (reviving, being revived, bleeding out); the downed teammate's red cross. */
+.dead-ink-stand { position: absolute; left: 50%; top: calc(50% + 44px); transform: translateX(-50%); display: grid; justify-items: center; gap: 5px;
+  pointer-events: none; font: 700 15px/1.2 var(--notes, "Chalkboard SE", "Comic Sans MS", cursive); color: var(--ink, #111);
+  text-shadow: 1px 1px 0 #fff, -1px 1px 0 #fff, 1px -1px 0 #fff, -1px -1px 0 #fff; }
+.dead-ink-stand[hidden] { display: none; }
+.dead-ink-stand div { width: 200px; height: 10px; border: 2px solid var(--ink, #111); border-radius: 3px 5px 2px 4px; background: #fbfaf5; overflow: hidden; }
+.dead-ink-stand i { display: block; height: 100%; transform-origin: left center; background: #2f6fd0; }
+.dead-ink-stand[data-tone="bleed"] i { background: #c8322b; }
+.world-marker.revive { opacity: 1; animation: dead-ink-revive-marker 0.9s ease-in-out infinite alternate; }
+.world-marker.revive svg { stroke-width: 1.2; }
+@keyframes dead-ink-revive-marker { from { opacity: 0.6; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .world-marker.revive { animation: none; } }
+
 /* The mini map (minimap.ts), top left as in Call of Duty: a paper disc with an ink rim. While it shows, the
    round tally and the quest line sit under it, and the boss bar keeps clear of it on narrow screens. */
 .dead-ink-hud { --minimap: 180px; --minimap-edge: 20px; --tally: 58px; }
