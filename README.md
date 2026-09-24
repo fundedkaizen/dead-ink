@@ -5,7 +5,7 @@ A Call of Duty Zombies-style survival game that runs in the browser, drawn in in
 ![The Brute](docs/brute.png)
 ![An Ink Storm](docs/ink-storm.png)
 
-**Play it now:** https://fundedkaizen.github.io/dead-ink/?mode=zombies (the hostage mission: https://fundedkaizen.github.io/dead-ink/)
+**Play it now:** https://fundedkaizen.github.io/dead-ink/?mode=zombies (the hostage mission: https://fundedkaizen.github.io/dead-ink/). Co-op works there too: open Co-op, press Play with a friend and send them the link.
 
 ## What's in it
 
