@@ -1360,6 +1360,15 @@ export class FirstPersonWeapons {
     this.loose.set(item.id, { item, model })
   }
 
+  /** Clear a lying gun away without taking it (co-op: a teammate picked it up). */
+  removePickup(id: string) {
+    const found = this.loose.get(id)
+    if (!found) return false
+    this.loose.delete(id)
+    disposeGun(found.model)
+    return true
+  }
+
   pickupTargets() {
     return [...this.loose.values()].map(({ item, model }) => ({
       object: model as THREE.Object3D, point: model.position.clone().add(new THREE.Vector3(0, 0.10, 0)),
