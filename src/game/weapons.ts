@@ -374,7 +374,7 @@ export class FirstPersonWeapons {
 
   reload() {
     const item = this.current
-    if (!this.enabled || !item || this.reloading || this.switchTime > 0 || item.reserve <= 0 || item.magazine >= WEAPON_RULES[item.name].capacity) return false
+    if (!this.enabled || !item || this.reloading || this.switchTime > 0 || item.reserve <= 0 || item.magazine >= weaponRules(item).capacity) return false
     this.held = false
     this.pendingShot = false
     this.reloadAim = this.aim
@@ -634,7 +634,7 @@ export class FirstPersonWeapons {
       if (this.reloadElapsed >= weaponRules(this.current).reload * this.reloadScale) {
         const shellReload = this.current.name === 'shotgun'
         const shells = upgraded(this.current) ? PACKED_SHELLS : 1
-        const amount = Math.min(WEAPON_RULES[this.current.name].capacity - this.current.magazine, this.current.reserve, shellReload ? shells : Infinity)
+        const amount = Math.min(weaponRules(this.current).capacity - this.current.magazine, this.current.reserve, shellReload ? shells : Infinity)
         this.current.magazine += amount
         this.current.reserve -= amount
         if (shellReload) this.context.emit({ kind: 'shell-load', radius: 2, position: this.feet.clone() })
@@ -1180,7 +1180,8 @@ export class FirstPersonWeapons {
     const yaw = (Math.random() - 0.5) * rules.kick * (item.name === 'shotgun' ? 0.55 : 1)
     this.nudge(pitch, yaw)
     this.settle.pitch += pitch * rules.settle; this.settle.yaw += yaw * 0.35
-    this.context.emit({ kind: `shot-${item.name}`, position: origin.clone(), radius: item.name === 'pistol' ? 38 : 55, text: `${rules.label} fired` })
+    this.context.emit({ kind: item.special === 'rayGun' ? 'shot-raygun' : `shot-${item.name}`, position: origin.clone(), radius: item.name === 'pistol' ? 38 : 55,
+      text: `${rules.label} fired`, packed: item.packed ? item.packLevel ?? 1 : 0 })
     this.pose(0)
   }
 
@@ -1221,7 +1222,7 @@ export class FirstPersonWeapons {
     if (this.disposed || this.loose.has(source.id) || this.inventory.some(item => item?.id === source.id)) return
     const item = copyItem(source)
     item.id ||= `loose-weapon-${this.nextId++}`
-    item.magazine = Math.max(0, Math.min(WEAPON_RULES[item.name].capacity, Math.floor(item.magazine)))
+    item.magazine = Math.max(0, Math.min(weaponRules(item).capacity, Math.floor(item.magazine)))
     item.reserve = Math.max(0, Math.floor(item.reserve))
     item.position ??= this.feet.toArray() as [number, number, number]
     const model = createMissionGun(item.name)

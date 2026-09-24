@@ -30,6 +30,8 @@ export type PlayerState = {
   pts: number
   kills: number
   name: string
+  /** Reviving a teammate: how far it has run, 0 to 1 (0 or missing when not reviving). */
+  rv?: number
 }
 
 /** The host's buildables, traps and quest, as the guest needs them (sent with every tick). */
@@ -64,6 +66,7 @@ export type CoopMessage =
   | { t: 'drop'; k: PowerupKind; p: [number, number, number] }
   | { t: 'grab'; k: PowerupKind; p: [number, number, number]; by: CoopRole }
   | { t: 'boom'; p: [number, number, number]; r: number }
+  | { t: 'soul'; p: [number, number, number]; i: number }
   | { t: 'gameover' }
   | { t: 'start' }
   // guest -> host

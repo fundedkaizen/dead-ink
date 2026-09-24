@@ -55,6 +55,18 @@ const status = window.__buildCheck = { done: false, results }
   await press()
   check(m.power && m.powerSwitch.state === 'on', 'pulling it turns the power on')
   check(m.perkMachines.every(x => x.powered), 'every perk machine has power')
+  // With the power on, every machine sells: buy one of each (up to the limit) with real presses.
+  const bought = []
+  for (const kind of ['thickInk', 'longStroke', 'doubleLine']) {
+    const at = m.perkMachines.find(x => x.kind === kind)
+    m.state.points = 9000
+    standFacing(at.spot, at.point.clone())
+    await press()
+    await new Promise(r => setTimeout(r, 2200))
+    bought.push(`${kind}:${m.perks.has(kind)}:${m.state.points}:${document.querySelector('.interaction-prompt, .hud-prompt, [class*=prompt]')?.textContent ?? ''}`)
+    check(m.perks.has(kind), `with the power on, ${kind} can be bought`, bought.join(' | '))
+  }
+  m.perks.clear(); m.state.points = 5000
 
   // An ink trap: pay at its switch, zombies in the jets die (no points), you get hurt in them.
   const trap = m.traps[0]

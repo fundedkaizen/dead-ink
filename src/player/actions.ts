@@ -75,9 +75,12 @@ export class PlayerActions {
     trolley.position.copy(point).sub(new THREE.Vector3().fromArray(trolley.userData.origin))
   }
 
+  /** No prompts at all (Dead Ink's last stand: down on the floor, you use nothing). */
+  disabled = false
+
   findTarget(camera: THREE.Camera): ActionTarget | null {
     this.target = null
-    if (this.traversing) return null
+    if (this.traversing || this.disabled) return null
     camera.getWorldDirection(this.direction)
     let best = Infinity
     const consider = (target: ActionTarget) => {
