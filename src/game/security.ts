@@ -75,7 +75,8 @@ export class SecuritySystem {
     return true
   }
 
-  update(dt: number, state: MissionState, eye: THREE.Vector3) {
+  /** `eyes`: the player's eye, or in co-op every player the cameras can catch. */
+  update(dt: number, state: MissionState, eyes: THREE.Vector3 | readonly THREE.Vector3[]) {
     this.sync(state)
     if (state.phase !== 'active' || dt <= 0) return
     dt = Math.min(dt, 0.1)
@@ -94,19 +95,22 @@ export class SecuritySystem {
       if (state.silencedElapsed >= SECURITY_RULES.searchCooldown) state.alarm = 'inactive'
     }
     if (!state.camerasActive) return
+    const watched: readonly THREE.Vector3[] = Array.isArray(eyes) ? eyes : [eyes as THREE.Vector3]
     for (const camera of this.missionWorld.rescue?.cameras ?? []) {
       const spec = RESCUE_LAYOUT.cameras.find(candidate => candidate.id === camera.id)
       if (!spec) continue
       const origin = new THREE.Vector3(...spec.position)
-      const dx = eye.x - origin.x, dz = eye.z - origin.z
-      const distance = Math.hypot(dx, dz)
       const yaw = camera.pivot.rotation.y
-      const inCone = distance > 0.2 && distance <= spec.range && Math.abs(eye.y - origin.y) < 6 &&
-        (Math.sin(yaw) * dx + Math.cos(yaw) * dz) / distance >= Math.cos(28 * Math.PI / 180)
-      const sees = inCone && this.world.visible(origin, eye, camera.pivot)
-      const elapsed = sees ? (this.dwell.get(camera.id) ?? 0) + dt : 0
+      const eye = watched.find(eye => {
+        const dx = eye.x - origin.x, dz = eye.z - origin.z
+        const distance = Math.hypot(dx, dz)
+        const inCone = distance > 0.2 && distance <= spec.range && Math.abs(eye.y - origin.y) < 6 &&
+          (Math.sin(yaw) * dx + Math.cos(yaw) * dz) / distance >= Math.cos(28 * Math.PI / 180)
+        return inCone && this.world.visible(origin, eye, camera.pivot)
+      })
+      const elapsed = eye ? (this.dwell.get(camera.id) ?? 0) + dt : 0
       this.dwell.set(camera.id, elapsed)
-      if (elapsed >= SECURITY_RULES.detectionDwell) this.trigger(state, eye.clone().add(new THREE.Vector3(0, -1.65, 0)))
+      if (eye && elapsed >= SECURITY_RULES.detectionDwell) this.trigger(state, eye.clone().add(new THREE.Vector3(0, -1.65, 0)))
     }
   }
 }

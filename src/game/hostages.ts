@@ -21,7 +21,9 @@ export type EscortMissionState = {
 
 
 type Travel = { detour: THREE.Vector3[]; stalled: number; retryAfter: number; previous: THREE.Vector3 | null;
-  boardingFrom: THREE.Vector3 | null; boardingTime: number }
+  boardingFrom: THREE.Vector3 | null; boardingTime: number; seated: boolean }
+/** How a hostage moved this frame, as the host shows him to co-op guests: moving, cowering (0 or 1), run speed, heading. */
+export type HostageMotion = [number, number, number, number]
 
 /** Authored multilevel corridor plus real capsule steps, shared with guard navigation. */
 export class HostageEscort {
@@ -37,6 +39,8 @@ export class HostageEscort {
   private routePoint = new THREE.Vector3()
   private travel: Travel[] = []
   private calmFor = 0
+  /** Each hostage as update() last moved him, for co-op guests (see follow()). */
+  readonly motion: HostageMotion[] = []
 
   constructor(private scene: THREE.Scene, world: CollisionWorld, doors: THREE.Group[]) {
     this.navigation = new EnemyNavigation(world, doors, () => {})
@@ -56,7 +60,7 @@ export class HostageEscort {
     }
   }
 
-  private freshTravel(): Travel { return { detour: [], stalled: 0, retryAfter: 0, previous: null, boardingFrom: null, boardingTime: 0 } }
+  private freshTravel(): Travel { return { detour: [], stalled: 0, retryAfter: 0, previous: null, boardingFrom: null, boardingTime: 0, seated: false } }
 
   private progress(position: THREE.Vector3) {
     let bestDistance = Infinity, progress = 0
@@ -111,10 +115,15 @@ export class HostageEscort {
     }
   }
 
-  update(dt: number, state: EscortMissionState, playerFeet: THREE.Vector3, danger: boolean) {
+  /**
+   * `leaders`: the player's feet, or in co-op the players a hostage follows (whoever freed him and the nearest);
+   * he runs on while any of them is ahead of him on the route.
+   */
+  update(dt: number, state: EscortMissionState, leaders: THREE.Vector3 | readonly THREE.Vector3[], danger: boolean) {
     const elapsed = Math.max(0, Math.min(dt, 0.1))
     this.calmFor = danger ? 0 : this.calmFor + elapsed
-    const leaderProgress = this.progress(playerFeet)
+    const leaderProgress = Array.isArray(leaders) ? leaders.reduce((best, feet) => Math.max(best, this.progress(feet)), -Infinity)
+      : this.progress(leaders as THREE.Vector3)
     state.hostages.forEach((hostage, index) => {
       const actor = this.actors[index], motion = this.travel[index]
       if (!actor || !motion) return
@@ -123,17 +132,8 @@ export class HostageEscort {
       let moveSpeed = 0
       actor.advanceRelease(elapsed, hostage.status === 'captive')
       const cowering = hostage.status === 'following' && this.calmFor < 1.1
-      if (hostage.status === 'loaded') {
-        if (motion.boardingFrom) {
-          motion.boardingTime = Math.min(BOARD_SECONDS, motion.boardingTime + elapsed)
-          const t = motion.boardingTime / BOARD_SECONDS
-          position.copy(motion.boardingFrom).lerp(new THREE.Vector3(...RESCUE_LAYOUT.jeepSeats[index]), t * t * (3 - 2 * t))
-          if (t === 1) motion.boardingFrom = null
-        } else position.fromArray(RESCUE_LAYOUT.jeepSeats[index])
-        position.sub(this.jeepOrigin).applyQuaternion(this.jeepRotation).add(this.jeepOrigin).add(this.jeepOffset)
-        actor.root.rotation.set(0, Math.PI / 2, 0)
-        actor.root.quaternion.premultiply(this.jeepRotation)
-      } else if (hostage.status === 'following' && actor.canWalk && !cowering) {
+      if (hostage.status === 'loaded') this.seat(index, motion, position, elapsed)
+      else if (hostage.status === 'following' && actor.canWalk && !cowering) {
         const progress = this.progress(position)
         const led = leaderProgress + 1.6 >= progress
         motion.retryAfter = Math.max(0, motion.retryAfter - elapsed)
@@ -162,6 +162,7 @@ export class HostageEscort {
           })
           if (waitingForCompanion) {
             actor.animate(elapsed, false, false, false, false)
+            this.motion[index] = [0, 0, 0, actor.root.rotation.y]
             return
           }
           const stepped = this.navigation.step(position, next, elapsed * HOSTAGE_RUN_SPEED)
@@ -187,6 +188,49 @@ export class HostageEscort {
       hostage.position = position.toArray() as Vec3
       actor.root.position.copy(position)
       actor.animate(elapsed, moving, cowering, hostage.status === 'loaded', hostage.status === 'captive', moveSpeed)
+      this.motion[index] = [moving ? 1 : 0, cowering ? 1 : 0, moveSpeed, actor.root.rotation.y]
+    })
+  }
+
+  /** A loaded hostage: sitting down into his seat from where he boarded, then riding with the jeep. */
+  private seat(index: number, motion: Travel, position: THREE.Vector3, elapsed: number) {
+    if (motion.boardingFrom) {
+      motion.boardingTime = Math.min(BOARD_SECONDS, motion.boardingTime + elapsed)
+      const t = motion.boardingTime / BOARD_SECONDS
+      position.copy(motion.boardingFrom).lerp(new THREE.Vector3(...RESCUE_LAYOUT.jeepSeats[index]), t * t * (3 - 2 * t))
+      if (t === 1) motion.boardingFrom = null
+    } else position.fromArray(RESCUE_LAYOUT.jeepSeats[index])
+    position.sub(this.jeepOrigin).applyQuaternion(this.jeepRotation).add(this.jeepOrigin).add(this.jeepOffset)
+    const actor = this.actors[index]
+    actor.root.rotation.set(0, Math.PI / 2, 0)
+    actor.root.quaternion.premultiply(this.jeepRotation)
+  }
+
+  /**
+   * Co-op guest: the host moves the hostages. Draw each where the host has him, easing between its snapshots,
+   * with the host's run, cower and stand-up; boarding and the ride in the jeep play here as on the host.
+   */
+  follow(dt: number, state: EscortMissionState, motion: readonly (readonly number[])[]) {
+    const elapsed = Math.max(0, Math.min(dt, 0.1))
+    const ease = 1 - Math.exp(-elapsed * 14)
+    state.hostages.forEach((hostage, index) => {
+      const actor = this.actors[index], travel = this.travel[index]
+      if (!actor || !travel) return
+      const [moving = 0, cowering = 0, speed = 0, yaw = Math.PI / 2] = motion[index] ?? []
+      const loaded = hostage.status === 'loaded', captive = hostage.status === 'captive'
+      actor.advanceRelease(elapsed, captive)
+      const position = actor.root.position
+      if (loaded) {
+        if (!travel.seated) { travel.seated = true; travel.boardingFrom = position.clone(); travel.boardingTime = 0 }
+        this.seat(index, travel, position, elapsed)
+      } else {
+        travel.seated = false
+        const goal = new THREE.Vector3(...hostage.position)
+        if (position.distanceToSquared(goal) > 9) position.copy(goal)
+        else position.lerp(goal, ease)
+        actor.root.rotation.set(0, yaw, 0)
+      }
+      actor.animate(elapsed, !!moving && !loaded, !!cowering, loaded, captive, speed || HOSTAGE_RUN_SPEED)
     })
   }
 

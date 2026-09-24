@@ -41,7 +41,7 @@ assert.equal(movementMix(1).walk, 1, 'round 1 zombies all walk')
 assert(movementMix(20).sprint > movementMix(10).sprint)
 
 // Economy.
-assert.deepEqual({ ...POINTS }, { hit: 10, kill: 60, headshotKill: 100, knifeKill: 130, board: 10 })
+assert.deepEqual({ ...POINTS }, { hit: 10, kill: 60, limbKill: 50, headshotKill: 100, knifeKill: 130, explosiveKill: 50, board: 10 })
 assert.equal(PRICES.box, 950)
 assert.equal(PRICES.packAPunch, 5000)
 assert.equal(wallAmmoPrice(1500), 750)
