@@ -50,6 +50,7 @@ import { INKWELL_PLACES, Inkwell, QUEST, SoulStreams, questHint, type QuestStep 
 import { BLOT, GAS, rollBlot } from './gas'
 import { POWER_ICON, WorldMarker } from './markers'
 import { REVIVE_ICON, ReviveSyringe } from './last-stand'
+import { GameOverFlight } from './game-over'
 import { playMythicSting } from './mythic'
 import { CoopLink, PLAYER_COLORS, PLAYER_CSS, PartnerAvatar, PartnerTag, toVector, vec, type CoopIncoming, type CoopMessage, type CoopStatus, type PlayerState, type WorldState } from './coop'
 import type { Shot as ShotType } from '../types'
@@ -279,6 +280,8 @@ export class ZombiesRuntime {
   /** The guns you went down with, back in your hands when you are picked up. */
   private downWeapons: WeaponSnapshot | null = null
   private syringe: ReviveSyringe
+  /** The game over: ink, then a flight over the map under GAME OVER, then the scores. */
+  private gameOverFlight = new GameOverFlight(document.body)
   /** The player who paid for the box's spin: the gun is theirs. */
   private boxOwner = 0
   private coopPanel: HTMLElement | null = null
@@ -616,7 +619,7 @@ export class ZombiesRuntime {
   }
 
   restart() {
-    this.death.reset(); this.weapons.resetDeath(); this.playerHits.clear()
+    this.death.reset(); this.weapons.resetDeath(); this.playerHits.clear(); this.gameOverFlight.end(); delete document.body.dataset.deadInkOver
     this.player.pause(); this.cancelInput(); this.audio.reset(); this.player.actions.reset()
     this.player.movementLocked = false
     this.blood.restore(undefined)
@@ -2320,6 +2323,20 @@ export class ZombiesRuntime {
     this.hud.notify(`+${report.inkTotal} Ink`, 3)
     this.lowHealth.clear()
     delete document.body.dataset.deadInkOneHit
+    // As in Call of Duty: the fall, then ink, then the map from above under GAME OVER while the requiem plays.
+    this.gameOverFlight.begin(this.player.body.position.clone(), this.flightStops(), Math.max(1, this.state.round), this.player.world)
+  }
+
+  /** Where the game-over flight passes: the start, the box, the Pack-a-Punch and every perk machine. */
+  private flightStops() {
+    return [this.spawn, this.box?.root.position, this.pack?.root.position, ...this.perkMachines.map(machine => machine.root.position)]
+      .filter((point): point is THREE.Vector3 => !!point).map(point => point.clone())
+  }
+
+  /** What the HUD shows of a death here: the fall's blur until the flight, then the scores on the flight's clock. */
+  private deathView() {
+    const flight = this.gameOverFlight, death = this.death
+    return { reducedMotion: death.reducedMotion, menuVisible: flight.menuVisible, menuOpacity: flight.menuOpacity, visionLoss: flight.flying ? 0 : death.visionLoss }
   }
 
   // ---------------------------------------------------------------- zombies
@@ -2438,7 +2455,8 @@ export class ZombiesRuntime {
     const lures = this.dolls.resting()
     const allLures = [...lures.map(doll => doll.position), ...this.partnerLures.map(lure => lure.position)]
     const target = (): ZombieTarget[] => allLures.length ? allLures.map((feet, i) => ({ id: `doll-${i}`, feet, alive: true }))
-      : [{ id: 'p1', feet: this.player.body.position, alive: this.state.phase === 'active' && !this.down },
+      // After the game ends the horde still shambles about, closing in on where you fell (as in Call of Duty).
+      : [{ id: 'p1', feet: this.player.body.position, alive: (this.state.phase === 'active' && !this.down) || this.gameOverFlight.active },
         ...(this.coop.role === 'host' && this.paired ? this.matesHere().filter(mate => mate.state.dn === 0).map(mate => ({ id: `p${mate.id + 1}`, feet: mate.avatar.feet, alive: true })) : [])]
     if (active && this.director) {
       this.state.elapsed += dt
@@ -2632,11 +2650,17 @@ export class ZombiesRuntime {
     }
     deathVisible = this.death.active && this.player.enabled && !this.player.immersive
     if (deathVisible) {
-      if (this.death.update(document.hidden ? 0 : dt, this.camera.perspective, this.player.world)) this.audio.play({ kind: 'player-fall' })
+      // The fall until the screen has gone to ink; then the flight has the camera. The fall's clock stops
+      // there, so the horde keeps moving and frames keep coming for as long as the flight runs.
+      const flying = this.gameOverFlight.flying
+      if (!flying && this.death.update(document.hidden ? 0 : dt, this.camera.perspective, this.player.world)) this.audio.play({ kind: 'player-fall' })
+      this.gameOverFlight.update(document.hidden ? 0 : dt, this.camera.perspective, this.hud.reducedMotion)
+      if (flying) document.body.dataset.deadInkOver = 'flying'
       this.weapons.updateDeath(this.death.elapsed, this.death.reducedMotion, this.death.hitKick, this.death.hitSide)
-      this.hud.setDeath(this.death)
+      this.hud.setDeath(this.deathView())
     } else {
       if (this.death.active) { this.death.reset(); this.weapons.resetDeath(); this.hud.clearDeath() }
+      if (this.gameOverFlight.active) { this.gameOverFlight.end(); delete document.body.dataset.deadInkOver }
       this.weapons.update(dt, { active: reactionActive && this.interactionTime === 0 && (!this.revive.down || this.revive.settled), climbing: this.player.actions.traversing,
         moving: this.player.body.velocity.length(), aiming: this.aiming, reducedMotion: this.hud.reducedMotion, feet: this.player.body.position, hitPose })
     }
@@ -2695,7 +2719,7 @@ export class ZombiesRuntime {
     for (const skull of this.skulls) skull.object.removeFromParent()
     delete document.body.dataset.deadInkStorm
     delete document.body.dataset.deadInkOneHit
-    this.coop.close(); for (const id of [...this.mates.keys()]) this.dropMate(id); this.powerMarker.dispose(); this.syringe.dispose()
+    this.coop.close(); for (const id of [...this.mates.keys()]) this.dropMate(id); this.powerMarker.dispose(); this.syringe.dispose(); this.gameOverFlight.dispose(); delete document.body.dataset.deadInkOver
     for (const part of this.parts) part.dispose()
     for (const site of this.sites.values()) site.dispose()
     this.powerSwitch?.dispose()

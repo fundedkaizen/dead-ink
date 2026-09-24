@@ -178,3 +178,18 @@ body[data-dead-ink-revive="true"] #world { animation: dead-ink-revive 2.4s linea
 .dead-ink-hud:has(> .dead-ink-minimap:not([hidden])) .dead-ink-boss { width: min(460px, 70vw, calc(100vw - 2 * (var(--minimap-edge) + var(--minimap) + 12px))); }
 @media (max-width: 900px), (max-height: 700px) { .dead-ink-hud { --minimap: 140px; --minimap-edge: 16px; } }
 @media (max-width: 640px) { .dead-ink-hud { --minimap: 112px; --minimap-edge: 12px; --tally: 44px; } }
+
+/* Game over, as Call of Duty: the ink the screen sinks into, then GAME OVER over a flight across the map.
+   Above the fall's own overlay, below the scores. While the camera flies, the rest of the HUD steps aside. */
+.dead-ink-over { position: fixed; inset: 0; z-index: 5; pointer-events: none; }
+.dead-ink-over[hidden] { display: none; }
+.dead-ink-over-ink { position: absolute; inset: 0; background: #0b0b0b; opacity: 0; }
+.dead-ink-over-title { position: absolute; left: 0; right: 0; top: 7vh; display: grid; justify-items: center; gap: 8px; opacity: 0; transform: scale(1.18);
+  transition: opacity 0.8s ease-out, transform 1.2s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.dead-ink-over.titled .dead-ink-over-title { opacity: 1; transform: scale(1); }
+.dead-ink-over-title strong { font: 900 clamp(44px, 9vw, 108px)/0.95 var(--notes, "Chalkboard SE", "Comic Sans MS", cursive); letter-spacing: 0.05em; color: #c8322b;
+  text-shadow: 3px 4px 0 #111, -1px -1px 0 #fff, 1px -1px 0 #fff, 0 0 22px rgba(255, 255, 255, 0.85); }
+.dead-ink-over-title span { font: 700 clamp(18px, 2.6vw, 30px)/1.1 var(--notes, "Chalkboard SE", "Comic Sans MS", cursive); color: #111;
+  text-shadow: 1px 1px 0 #fff, -1px 1px 0 #fff, 1px -1px 0 #fff, -1px -1px 0 #fff, 0 0 10px #fff; }
+body[data-dead-ink-over="flying"] #mission-hud, body[data-dead-ink-over="flying"] .mission-death { visibility: hidden; }
+@media (prefers-reduced-motion: reduce) { .dead-ink-over-title { transition: opacity 0.3s linear; transform: none; } }
