@@ -36,6 +36,9 @@ export class ZombieHud {
   private partsEl = document.createElement('div')
   private questEl = document.createElement('div')
   private scoresEl = document.createElement('div')
+  private standEl = document.createElement('div')
+  private standLabel = document.createElement('span')
+  private standFill = document.createElement('i')
   private shownScores = ''
   private shownQuest = ''
   private shownBossLabel = 'THE BRUTE'
@@ -84,7 +87,13 @@ export class ZombieHud {
     this.scoresEl.className = 'dead-ink-scores'
     this.scoresEl.setAttribute('role', 'status')
     this.scoresEl.hidden = true
-    this.root.append(this.partsEl, this.shieldEl, this.questEl, this.scoresEl)
+    this.standEl.className = 'dead-ink-stand'
+    this.standEl.setAttribute('role', 'status')
+    const standBar = document.createElement('div')
+    standBar.append(this.standFill)
+    this.standEl.append(this.standLabel, standBar)
+    this.standEl.hidden = true
+    this.root.append(this.partsEl, this.shieldEl, this.questEl, this.scoresEl, this.standEl)
     this.root.append(this.roundEl, this.pointsEl, this.banner, this.powerupsEl, this.perksEl, this.bossEl)
     parent.append(this.root)
   }
@@ -157,14 +166,23 @@ export class ZombieHud {
   }
 
   /** Co-op: every player's points stacked by your own, Call of Duty style; null hides it (solo). */
-  scoreboard(rows: { name: string; points: number; me: boolean; down: boolean }[] | null) {
-    const key = rows ? rows.map(r => `${r.name}:${r.points}:${r.me}:${r.down}`).join('|') : ''
+  scoreboard(rows: { name: string; points: number; me: boolean; down: boolean; color?: string }[] | null) {
+    const key = rows ? rows.map(r => `${r.name}:${r.points}:${r.me}:${r.down}:${r.color}`).join('|') : ''
     if (key === this.shownScores) return
     this.shownScores = key
     this.scoresEl.hidden = !rows
     if (!rows) return
     const clean = (text: string) => text.replace(/[<>&"]/g, '')
-    this.scoresEl.innerHTML = rows.map(r => `<div class="${r.me ? 'me' : ''}${r.down ? ' down' : ''}"><span>${r.me ? '▸ ' : ''}${clean(r.name)}</span><strong>${r.points}</strong></div>`).join('')
+    this.scoresEl.innerHTML = rows.map(r => `<div class="${r.me ? 'me' : ''}${r.down ? ' down' : ''}"${r.color ? ` style="--tag: ${clean(r.color)}"` : ''}><span>${r.me ? '▸ ' : ''}${clean(r.name)}</span><strong>${r.points}</strong></div>`).join('')
+  }
+
+  /** The last stand's bar under the crosshair: reviving, being revived, or bleeding out. `null` hides it. */
+  lastStand(label: string | null, fraction = 0, tone: 'revive' | 'bleed' = 'revive') {
+    this.standEl.hidden = !label
+    if (!label) return
+    if (this.standLabel.textContent !== label) this.standLabel.textContent = label
+    this.standEl.dataset.tone = tone
+    this.standFill.style.transform = `scaleX(${Math.min(1, Math.max(0, fraction)).toFixed(3)})`
   }
 
   /** The main quest's next step, a quiet line under the round; null hides it. */

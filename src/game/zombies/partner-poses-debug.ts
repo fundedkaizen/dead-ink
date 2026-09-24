@@ -36,8 +36,8 @@ export function install() {
   let frame = 0
   // Where the stickman stands, and the way it faces: toward you.
   const origin = new THREE.Vector3(), facing = new THREE.Vector3(), left = new THREE.Vector3()
-  const state: PlayerState = { p: [0, 0, 0], yaw: 0, pitch: 0, w: 'pistol', mv: 0, dn: 0, rv: 0, pts: 0, kills: 0, name: 'Partner' }
-  const patientState: PlayerState = { ...state, dn: 1, name: 'Teammate' }
+  const state: PlayerState = { id: 1, p: [0, 0, 0], yaw: 0, pitch: 0, w: 'pistol', mv: 0, dn: 0, rv: 0, pts: 0, kills: 0, name: 'Partner' }
+  const patientState: PlayerState = { ...state, id: 2, dn: 1, name: 'Teammate' }
   /** A look yaw for a facing direction (the camera looks down -Z at yaw 0). */
   const yawOf = (x: number, z: number) => Math.atan2(-x, -z)
 

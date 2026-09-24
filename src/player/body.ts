@@ -34,6 +34,9 @@ export class PlayerBody {
     return this.capsule
   }
 
+  /** Walking pace times this (Dead Ink's last-stand crawl). */
+  speedScale = 1
+
   jump() {
     if (!this.grounded) return false
     this.velocity.y = 7
@@ -51,7 +54,7 @@ export class PlayerBody {
   private step(dt: number, direction: THREE.Vector3, sprint: boolean) {
     const wasGrounded = this.grounded
     const acceleration = 1 - Math.exp(-(wasGrounded ? 18 : 5) * dt)
-    const speed = sprint ? 7.6 : 4.2
+    const speed = (sprint ? 7.6 : 4.2) * this.speedScale
     this.velocity.x += (direction.x * speed - this.velocity.x) * acceleration
     this.velocity.z += (direction.z * speed - this.velocity.z) * acceleration
     if (wasGrounded && this.velocity.y < 0) this.velocity.y = 0

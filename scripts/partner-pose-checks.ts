@@ -30,7 +30,7 @@ const summary: string[] = []
 class Run {
   readonly scene = new THREE.Scene()
   readonly avatar = new PartnerAvatar(this.scene)
-  state: PlayerState = { p: [3, GROUND, -1], yaw: 0.4, pitch: 0, w: 'pistol', mv: 0, dn: 0, pts: 0, kills: 0, name: 'P2' }
+  state: PlayerState = { id: 1, p: [3, GROUND, -1], yaw: 0.4, pitch: 0, w: 'pistol', mv: 0, dn: 0, pts: 0, kills: 0, name: 'P2' }
   time = 0
   /** Per phase: the fastest bone turn (rad/s) and the largest frame-to-frame change in a bone's turn rate. */
   readonly turn = new Map<string, [number, string]>()

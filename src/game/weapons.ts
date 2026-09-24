@@ -52,6 +52,11 @@ const FEEL: Record<WeaponName, { kick: number; roll: number; shake: number; flas
 const DEATH_MACHINE_FEEL = { kick: 0.3, roll: 0.02, shake: 0.002, flash: 1.1 }
 /** Where a watch face points: up and toward the eye, so a glance at the wrist shows it. */
 const WATCH_FACE = new THREE.Vector3(-0.35, 0.75, 0.6).normalize()
+/**
+ * The charm's swing: the share of the hand's movement that carries it along (the rest swings it), how much
+ * of its speed it keeps each 60th of a second, and the furthest it swings off straight down (radians).
+ */
+const CHARM_SWING = { follow: 0.9, damping: 0.8, limit: 0.45 } as const
 /** Charms are drawn facing +Z; the eye sits behind the gun and off its +X side. */
 const CHARM_FACING = new THREE.Quaternion().setFromAxisAngle(up, 2.6)
 /** An upgraded shotgun loads this many shells per reload cycle, as in Call of Duty. */
@@ -374,7 +379,7 @@ export class FirstPersonWeapons {
 
   reload() {
     const item = this.current
-    if (!this.enabled || !item || this.reloading || this.switchTime > 0 || item.reserve <= 0 || item.magazine >= WEAPON_RULES[item.name].capacity) return false
+    if (!this.enabled || !item || this.reloading || this.switchTime > 0 || item.reserve <= 0 || item.magazine >= weaponRules(item).capacity) return false
     this.held = false
     this.pendingShot = false
     this.reloadAim = this.aim
@@ -634,7 +639,7 @@ export class FirstPersonWeapons {
       if (this.reloadElapsed >= weaponRules(this.current).reload * this.reloadScale) {
         const shellReload = this.current.name === 'shotgun'
         const shells = upgraded(this.current) ? PACKED_SHELLS : 1
-        const amount = Math.min(WEAPON_RULES[this.current.name].capacity - this.current.magazine, this.current.reserve, shellReload ? shells : Infinity)
+        const amount = Math.min(weaponRules(this.current).capacity - this.current.magazine, this.current.reserve, shellReload ? shells : Infinity)
         this.current.magazine += amount
         this.current.reserve -= amount
         if (shellReload) this.context.emit({ kind: 'shell-load', radius: 2, position: this.feet.clone() })
@@ -1117,10 +1122,22 @@ export class FirstPersonWeapons {
     if (!charm.ready || this.frame.reducedMotion || charm.anchor.distanceTo(anchor) > 0.5) {
       charm.bob.copy(rest); charm.previous.copy(rest); charm.ready = true
     } else {
-      const velocity = charm.bob.clone().sub(charm.previous).multiplyScalar(Math.pow(0.9, dt * 60))
+      // Most of the hand's own movement carries the charm along: only what is left over swings it, so a
+      // sprint rocks it gently instead of flinging it back through the gun.
+      const carried = anchor.clone().sub(charm.anchor).multiplyScalar(CHARM_SWING.follow)
+      charm.bob.add(carried); charm.previous.add(carried)
+      const velocity = charm.bob.clone().sub(charm.previous).multiplyScalar(Math.pow(CHARM_SWING.damping, dt * 60))
       charm.previous.copy(charm.bob)
       charm.bob.add(velocity).addScaledVector(down, 9.8 * dt * dt)
       charm.bob.sub(anchor).setLength(CHARM_LENGTH).add(anchor)
+      // Never further than this off hanging straight down: past it, it would swing into the gun.
+      const offset = charm.bob.clone().sub(anchor)
+      if (offset.angleTo(down) > CHARM_SWING.limit) {
+        const axis = new THREE.Vector3().crossVectors(down, offset).normalize()
+        charm.bob.copy(anchor).addScaledVector(down.clone().applyAxisAngle(axis, CHARM_SWING.limit), CHARM_LENGTH)
+        // It stops there, and most of its speed with it.
+        charm.previous.lerp(charm.bob, 0.6)
+      }
     }
     charm.anchor.copy(anchor)
     const local = charm.pivot.worldToLocal(charm.bob.clone()).normalize()
@@ -1180,7 +1197,8 @@ export class FirstPersonWeapons {
     const yaw = (Math.random() - 0.5) * rules.kick * (item.name === 'shotgun' ? 0.55 : 1)
     this.nudge(pitch, yaw)
     this.settle.pitch += pitch * rules.settle; this.settle.yaw += yaw * 0.35
-    this.context.emit({ kind: `shot-${item.name}`, position: origin.clone(), radius: item.name === 'pistol' ? 38 : 55, text: `${rules.label} fired` })
+    this.context.emit({ kind: item.special === 'rayGun' ? 'shot-raygun' : `shot-${item.name}`, position: origin.clone(), radius: item.name === 'pistol' ? 38 : 55,
+      text: `${rules.label} fired`, packed: item.packed ? item.packLevel ?? 1 : 0 })
     this.pose(0)
   }
 
@@ -1221,7 +1239,7 @@ export class FirstPersonWeapons {
     if (this.disposed || this.loose.has(source.id) || this.inventory.some(item => item?.id === source.id)) return
     const item = copyItem(source)
     item.id ||= `loose-weapon-${this.nextId++}`
-    item.magazine = Math.max(0, Math.min(WEAPON_RULES[item.name].capacity, Math.floor(item.magazine)))
+    item.magazine = Math.max(0, Math.min(weaponRules(item).capacity, Math.floor(item.magazine)))
     item.reserve = Math.max(0, Math.floor(item.reserve))
     item.position ??= this.feet.toArray() as [number, number, number]
     const model = createMissionGun(item.name)
