@@ -151,14 +151,14 @@ const BULK: readonly Blob[] = [
   { bone: 'chest', at: [0, 1.25, 0], size: [0.21, 0.08, 0.13] },
   { bone: 'chest', at: [0, 1.15, 0.05], size: [0.25, 0.16, 0.17] },
   { bone: 'spine', at: [0, 0.97, 0.05], size: [0.2, 0.15, 0.17] },
-  { bone: 'hips', at: [0, 0.85, 0], size: [0.19, 0.11, 0.15] },
+  { bone: 'hips', at: [0, 0.85, 0], size: [0.21, 0.13, 0.17] },
   ...mirror([
     { bone: 'upper_arm.L', at: [0.2, 1.23, 0], size: [0.13, 0.13, 0.13] },
     { bone: 'upper_arm.L', at: [0.3, 1.2, 0], size: [0.14, 0.08, 0.085] },
     { bone: 'forearm.L', at: [0.53, 1.19, 0], size: [0.14, 0.095, 0.1] },
     { bone: 'hand.L', at: [0.7, 1.2, 0], size: [0.075, 0.075, 0.07] },
-    { bone: 'thigh.L', at: [0.09, 0.61, 0], size: [0.1, 0.2, 0.105] },
-    { bone: 'shin.L', at: [0.11, 0.27, -0.015], size: [0.075, 0.15, 0.08] },
+    { bone: 'thigh.L', at: [0.09, 0.62, 0.01], size: [0.125, 0.21, 0.135] },
+    { bone: 'shin.L', at: [0.11, 0.27, -0.02], size: [0.095, 0.16, 0.105] },
   ]),
 ]
 /** Paper bandages stitched in ink: rings round a limb (`axis` x) or the body (`axis` y); radii across the ring. */
@@ -166,8 +166,8 @@ const BANDS: readonly { bone: BoneName; axis: 'x' | 'y'; at: V3; radius: readonl
   { bone: 'forearm.L', axis: 'x', at: [0.465, 1.19, 0], radius: [0.093, 0.098], width: 0.045 },
   { bone: 'forearm.L', axis: 'x', at: [0.575, 1.19, 0], radius: [0.096, 0.1], width: 0.04 },
   { bone: 'upper_arm.R', axis: 'x', at: [-0.3, 1.2, 0], radius: [0.09, 0.095], width: 0.05 },
-  { bone: 'thigh.R', axis: 'y', at: [-0.09, 0.66, 0], radius: [0.108, 0.113], width: 0.055 },
-  { bone: 'hips', axis: 'y', at: [0, 0.9, 0.03], radius: [0.19, 0.17], width: 0.06 },
+  { bone: 'thigh.R', axis: 'y', at: [-0.09, 0.66, 0.01], radius: [0.129, 0.139], width: 0.055 },
+  { bone: 'hips', axis: 'y', at: [0, 0.9, 0.02], radius: [0.206, 0.18], width: 0.06 },
 ]
 /** Iron shackles on both wrists; the chain hangs from the eye under each. */
 const SHACKLES: readonly { bone: BoneName; at: V3 }[] = [{ bone: 'forearm.L', at: [0.628, 1.19, 0] }, { bone: 'forearm.R', at: [-0.628, 1.19, 0] }]
@@ -469,8 +469,8 @@ const LIMB_VOLUMES: Volume[] = [
   { bone: 'upper_arm.L', a: [0.2, 1.2, 0], b: [0.41, 1.2, 0], radius: 0.085, zone: 'arm' },
   { bone: 'forearm.L', a: [0.42, 1.19, 0], b: [0.64, 1.19, 0], radius: 0.1, zone: 'arm' },
   { bone: 'hand.L', a: [0.7, 1.2, 0], b: [0.7, 1.2, 0], radius: 0.075, zone: 'arm' },
-  { bone: 'thigh.L', a: [0.08, 0.78, 0], b: [0.1, 0.44, 0], radius: 0.1, zone: 'leg' },
-  { bone: 'shin.L', a: [0.1, 0.42, 0], b: [0.13, 0.05, 0], radius: 0.075, zone: 'leg' },
+  { bone: 'thigh.L', a: [0.08, 0.78, 0], b: [0.1, 0.44, 0], radius: 0.125, zone: 'leg' },
+  { bone: 'shin.L', a: [0.1, 0.42, 0], b: [0.13, 0.05, 0], radius: 0.095, zone: 'leg' },
 ]
 const VOLUMES: readonly Volume[] = [
   { bone: 'head', a: [0, 1.51, 0.01], b: [0, 1.51, 0.01], radius: MASK.radius + 0.01, zone: 'head' },
@@ -1496,7 +1496,7 @@ export class Brutes {
     const b = z.brute!, { actor } = z, bones = actor.rig.bones, t = b.t
     const forward = scratch.f.set(Math.sin(z.yaw), 0, Math.cos(z.yaw)), left = scratch.l.set(Math.cos(z.yaw), 0, -Math.sin(z.yaw))
     const breathe = Math.sin(this.time * 1.7 + z.carriage.phase) * 0.03
-    let lean = 0.5 + breathe, twist = 0, raise = 0, crouch = 0, scrape = 0
+    let lean = 0.72 + breathe, twist = 0, raise = 0, crouch = 0, scrape = 0
     let pose: 'hang' | 'slam' | 'charge' | 'skid' | 'throw' | 'roar' | 'dazed' | 'face' | 'sink' | 'swing' = 'hang'
     const swingU = z.swing > 0 ? 1 - z.swing / BOSS.attack.swing : -1
     switch (b.move) {
