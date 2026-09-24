@@ -14,6 +14,8 @@ import type { ChallengeCamoId } from './catalogue'
 export const CHALLENGE_WEAPONS: readonly WeaponName[] = ['pistol', 'smg', 'ak', 'shotgun', 'sniper', 'magnum', 'lmg']
 export const WEAPON_LABELS: Record<WeaponName, string> = {
   pistol: 'Pistol', smg: 'SMG', ak: 'AK', shotgun: 'Shotgun', sniper: 'Sniper', magnum: 'Magnum', lmg: 'LMG',
+  // The box's launcher has no camo challenges (its kills are its blast's, like a grenade's).
+  rocket: 'Ink Rocket',
 }
 
 /** What a gun's tier counts. */

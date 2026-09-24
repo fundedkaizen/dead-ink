@@ -90,8 +90,9 @@ function puffMaterial() {
   })
 }
 
-function puffMesh(name: string, capacity: number) {
-  const geometry = new THREE.IcosahedronGeometry(1, 3)
+/** Shared with the Ink Rocket's smoke trail (rockets.ts), which asks for rounder-cut, cheaper puffs. */
+export function puffMesh(name: string, capacity: number, detail = 3) {
+  const geometry = new THREE.IcosahedronGeometry(1, detail)
   geometry.setAttribute('puff', new THREE.InstancedBufferAttribute(new Float32Array(capacity * 4), 4).setUsage(THREE.DynamicDrawUsage))
   const mesh = new THREE.InstancedMesh(geometry, puffMaterial(), capacity)
   return setup(mesh, name)
@@ -192,7 +193,7 @@ function setup<T extends THREE.InstancedMesh>(mesh: T, name: string) {
   return mesh
 }
 
-function finish(mesh: THREE.InstancedMesh, count: number, ...attributes: string[]) {
+export function finish(mesh: THREE.InstancedMesh, count: number, ...attributes: string[]) {
   mesh.count = count
   mesh.visible = count > 0
   mesh.instanceMatrix.needsUpdate = true
@@ -200,7 +201,7 @@ function finish(mesh: THREE.InstancedMesh, count: number, ...attributes: string[
   for (const name of attributes) mesh.geometry.getAttribute(name).needsUpdate = true
 }
 
-function release(mesh: THREE.InstancedMesh) {
+export function release(mesh: THREE.InstancedMesh) {
   mesh.removeFromParent()
   mesh.geometry.dispose()
   const material = mesh.material as THREE.Material & { uniforms?: { map?: { value: THREE.Texture | null } } }

@@ -73,6 +73,11 @@ export const CRAWL = {
   speed: 1.6, fall: 0.55, pitch: 1.22, climbPace: 0.55,
   front: 0.4, back: 0.02, swing: 0.32, stride: 0.56,
   attack: { range: 1.15, windup: 0.35, reach: 1.55, swing: 0.7, recover: 0.5 },
+  /**
+   * Dead Ink weapons: at most this many crawl at once. Past it, a blast or a heavy round that would take the
+   * legs takes an arm instead, so explosives in the late rounds never turn the crowd into a crawl.
+   */
+  most: 4,
 } as const
 /**
  * Gore odds, our own and tuned by play. A blast that does not kill takes the legs (a crawler) or an arm;
@@ -1394,7 +1399,7 @@ export class ZombieDirector {
         if (roll() < GORE_ODDS.lethalArm) this.loseArm(zombie, roll() < 0.5 ? 'L' : 'R', direction)
         return
       }
-      if (!zombie.crawler && zombie.rise <= 0 && !zombie.climb && roll() < GORE_ODDS.blastCrawl) this.makeCrawler(zombie, direction)
+      if (!zombie.crawler && zombie.rise <= 0 && !zombie.climb && this.crawlers() < CRAWL.most && roll() < GORE_ODDS.blastCrawl) this.makeCrawler(zombie, direction)
       else if (roll() < GORE_ODDS.blastArm) this.loseArm(zombie, roll() < 0.5 ? 'L' : 'R', direction)
       return
     }
@@ -1402,7 +1407,14 @@ export class ZombieDirector {
     if (zombie.boss) return
     if (zone === 'arm' && heavy && roll() < (lethal ? Math.max(heavy, GORE_ODDS.lethalArm) : heavy)) this.loseArm(zombie, side, direction)
     const leg = weapon ? GORE_ODDS.leg[weapon] : undefined
-    if (!lethal && zone === 'leg' && leg && !zombie.crawler && zombie.rise <= 0 && !zombie.climb && roll() < leg) this.makeCrawler(zombie, direction)
+    if (!lethal && zone === 'leg' && leg && !zombie.crawler && zombie.rise <= 0 && !zombie.climb && this.crawlers() < CRAWL.most && roll() < leg) this.makeCrawler(zombie, direction)
+  }
+
+  /** Dead Ink weapons: how many are crawling now (see CRAWL.most). */
+  private crawlers() {
+    let count = 0
+    for (const zombie of this.zombies) if (zombie.state === 'chase' && zombie.crawler) count++
+    return count
   }
 
   /** The legs go: they fly off, and the zombie drops onto its front and crawls on. */

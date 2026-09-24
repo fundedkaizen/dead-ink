@@ -5,6 +5,7 @@ import { createMissionGun } from '../weapon-models'
 import { disposeGun } from '../../lab/weapons/models'
 import type { WeaponName } from '../types'
 import type { ZombieSnap } from './director'
+import type { BlastKind } from './blasts'
 import type { PowerupKind } from './rules'
 
 /**
@@ -65,7 +66,8 @@ export type CoopMessage =
   | { t: 'box'; a: 'spin' | 'take' | 'close' | 'move'; r?: { name: WeaponName; rarity: string; special?: 'rayGun' }; teddy?: boolean; by?: CoopRole; spot?: number }
   | { t: 'drop'; k: PowerupKind; p: [number, number, number] }
   | { t: 'grab'; k: PowerupKind; p: [number, number, number]; by: CoopRole }
-  | { t: 'boom'; p: [number, number, number]; r: number }
+  // `k`: how it looks and sounds (a rocket's, a Deadline round's); a frag's when missing.
+  | { t: 'boom'; p: [number, number, number]; r: number; k?: BlastKind }
   | { t: 'soul'; p: [number, number, number]; i: number }
   | { t: 'gameover' }
   | { t: 'start' }
@@ -73,7 +75,7 @@ export type CoopMessage =
   | { t: 'me'; me: PlayerState }
   | { t: 'shot'; o: [number, number, number]; d: [number, number, number]; range: number; damage: number; weapon: WeaponName; scale: number; pierce: number; pellet?: number }
   | { t: 'knife'; o: [number, number, number]; f: [number, number, number]; range: number; damage: number }
-  | { t: 'blast'; p: [number, number, number]; r: number; dmg: number }
+  | { t: 'blast'; p: [number, number, number]; r: number; dmg: number; k?: BlastKind }
   | { t: 'use'; what: 'gate'; id: string }
   | { t: 'use'; what: 'box'; guns: WeaponName[] }
   | { t: 'use'; what: 'box-take' }

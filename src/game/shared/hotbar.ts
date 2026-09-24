@@ -7,7 +7,7 @@ import type { WeaponItem } from '../types'
  * gun says so, its name in the tier's crimson-to-violet.
  */
 const MYTHIC_TEXT = 'linear-gradient(90deg, #ff2d55, #e0268f 45%, #8b3dff)'
-const SHORT: Record<WeaponItem['name'], string> = { pistol: 'Pistol', ak: 'AK', smg: 'SMG', shotgun: 'Shotgun', sniper: 'Sniper', magnum: 'Magnum', lmg: 'LMG' }
+const SHORT: Record<WeaponItem['name'], string> = { pistol: 'Pistol', ak: 'AK', smg: 'SMG', shotgun: 'Shotgun', sniper: 'Sniper', magnum: 'Magnum', lmg: 'LMG', rocket: 'Ink Rocket' }
 
 export class Hotbar {
   readonly root = document.createElement('div')
