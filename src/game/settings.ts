@@ -29,12 +29,14 @@ export type Settings = {
   muted: boolean
   /** Null follows the system's prefers-reduced-motion. */
   reducedMotion: boolean | null
+  /** Dead Ink's mini map in the top-left corner. */
+  minimap: boolean
 }
 
 /** What the game used before settings existed: 75 degrees walking, 55% volume, full resolution, red blood. */
 export const DEFAULT_SETTINGS: Readonly<Settings> = {
   fov: 75, sensitivity: 1, adsSensitivity: 1, controllerSensitivity: 1, invertY: false, blood: 'red', quality: 'high',
-  masterVolume: 55, musicVolume: 100, effectsVolume: 100, muted: false, reducedMotion: null,
+  masterVolume: 55, musicVolume: 100, effectsVolume: 100, muted: false, reducedMotion: null, minimap: true,
 }
 export const SETTING_LIMITS = {
   fov: { min: 60, max: 110, step: 1 },
@@ -80,6 +82,7 @@ export function sanitizeSettings(raw: unknown): Settings {
     effectsVolume: Math.round(clamp(data.effectsVolume, 0, 100, d.effectsVolume)),
     muted: typeof data.muted === 'boolean' ? data.muted : d.muted,
     reducedMotion: typeof data.reducedMotion === 'boolean' ? data.reducedMotion : null,
+    minimap: typeof data.minimap === 'boolean' ? data.minimap : d.minimap,
   }
 }
 

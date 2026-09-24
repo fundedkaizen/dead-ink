@@ -54,6 +54,7 @@ import { CoopLink, PartnerAvatar, PartnerTag, toVector, vec, type CoopMessage, t
 import type { Shot as ShotType } from '../types'
 import type { Rarity } from '../loot'
 import { MACHINE_PLACES, PACK, PERKS, PERK_EFFECT, PERK_LIMIT, PackAPunch, PackedLook, PerkBottle, PerkMachine, type PerkKind } from './perks'
+import { MATE_INK, Minimap, type MinimapMate } from './minimap'
 
 export type ZombieState = {
   phase: 'active' | 'dead' | 'complete'
@@ -313,6 +314,10 @@ export class ZombiesRuntime {
   /** Solid boxes for the things you should not walk through: the Mystery Box and the machines. */
   private solids = new Map<THREE.Object3D, THREE.Mesh>()
   private skulls: { object: THREE.Object3D; found: boolean }[] = []
+  /** Mini map (minimap.ts), and the teammates it shows: the co-op partner, one entry reused every frame. */
+  private minimap: Minimap | null = null
+  private mapMate: MinimapMate = { position: new THREE.Vector3(), yaw: 0, color: MATE_INK }
+  private mapMates: MinimapMate[] = []
 
   constructor(private scene: THREE.Scene, private camera: EnvironmentCamera, readonly player: FirstPersonController,
     readonly world: MissionWorld, private invalidate: () => void, seed = Math.floor(Math.random() * 2 ** 31)) {
@@ -438,6 +443,8 @@ export class ZombiesRuntime {
       const floor = this.player.world.floor(this.spawn.clone().setY(0.6), 1, 1.5, 0.28)
       if (Number.isFinite(floor)) this.spawn.y = floor
       this.placeStations()
+      // Mini map: its plan is built once, here, from the map as it now stands.
+      this.minimap = new Minimap(this.zombieHud.root, { scene: this.scene, bounds: this.world.bounds, graph, home: this.spawn, power: this.powerSwitch?.point ?? null })
       // Junk, graffiti and hidden details, kept off every station, the doll wall and the skulls.
       const keepClear = [...this.wallBuys.map(b => b.spot.wall), ...this.boxSpots.map(s => s.wall),
         ...this.perkMachines.map(m => m.spot.wall), ...(this.pack ? [this.pack.spot.wall] : []),
@@ -2381,12 +2388,22 @@ export class ZombiesRuntime {
     const boss = this.editor && this.editor.state === 'chase' ? this.editor : this.brute && this.brute.state === 'chase' ? this.brute : null
     this.zombieHud.boss(boss ? boss.health / boss.maxHealth : null, boss === this.editor ? 'THE EDITOR' : 'THE BRUTE')
     this.zombieHud.grenades(this.grenadeCount, this.dollCount)
+    // Mini map: you, the stations (this runtime's perk machines, box, Pack-a-Punch, power, gates), parts, teammates.
+    this.minimap?.update(dt, this.player.body.position, yaw, this, this.parts, this.minimapMates(), this.player.playing)
     this.updateMusic()
     // The heart shows health as a share of your maximum, which Thick Ink raises.
     this.hud.update(dt, { ...this.state, health: this.state.health / this.maxHealth() * 100 }, { playing: this.player.playing, enabled: this.player.enabled && !this.player.immersive,
       weapon: this.weapons.current, reloading: this.weapons.reloading, position: this.player.body.position,
       yaw, deaths: this.deaths, ready: this.ready })
     return active || this.death.running
+  }
+
+  /** Mini map teammates: the co-op partner while connected. */
+  private minimapMates() {
+    const partner = this.paired ? this.partnerState : null
+    this.mapMates.length = 0
+    if (partner) { this.mapMate.position.copy(this.partner.feet); this.mapMate.yaw = partner.yaw; this.mapMates.push(this.mapMate) }
+    return this.mapMates
   }
 
   finishFrame() { this.revive.removeCamera(); this.playerHits.removeCamera() }
@@ -2401,6 +2418,7 @@ export class ZombiesRuntime {
     this.pack?.dispose(); this.bottle.dispose(); this.packedLook.dispose()
     this.director?.dispose()
     this.hits.dispose(); this.indicator.dispose(); this.hotbar.dispose(); this.zombieHud.dispose()
+    this.minimap?.dispose()
     this.uninstallCosmetics(); this.lowHealth.dispose(); this.stopSettings(); this.bulletTrails.dispose(); this.weapons.dispose(); this.blood.dispose(); this.impacts.dispose(); this.riseMarks.dispose(); this.sparks.dispose(); this.shockwaves.dispose(); this.explosions.dispose(); this.nukeCloud.dispose(); this.undress?.(); this.grenades.dispose(); this.dolls.dispose(); this.dollBuy?.dispose(); this.bolts.dispose(); this.powerups.dispose()
     for (const skull of this.skulls) skull.object.removeFromParent()
     delete document.body.dataset.deadInkStorm

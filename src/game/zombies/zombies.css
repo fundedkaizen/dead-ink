@@ -143,3 +143,15 @@ body[data-dead-ink-revive="true"] #world { animation: dead-ink-revive 2.4s linea
 /* Difficulty on the Settings page. */
 .dead-ink-difficulty { display: grid; gap: 6px; }
 .dead-ink-difficulty select { font: inherit; max-width: 100%; padding: 6px 8px; border: 1px solid var(--ink-rule); border-radius: 4px 6px 3px 5px; background: var(--paper, #fbfaf5); color: var(--ink); }
+
+/* The mini map (minimap.ts), top left as in Call of Duty: a paper disc with an ink rim. While it shows, the
+   round tally and the quest line sit under it, and the boss bar keeps clear of it on narrow screens. */
+.dead-ink-hud { --minimap: 180px; --minimap-edge: 20px; --tally: 58px; }
+.dead-ink-minimap { position: absolute; left: var(--minimap-edge); top: var(--minimap-edge); width: var(--minimap); height: var(--minimap);
+  border-radius: 50%; box-shadow: 2px 3px 0 #00000014; }
+.dead-ink-minimap[hidden] { display: none; }
+.dead-ink-hud:has(> .dead-ink-minimap:not([hidden])) .dead-ink-round { top: calc(var(--minimap-edge) + var(--minimap) + 8px); }
+.dead-ink-hud:has(> .dead-ink-minimap:not([hidden])) .dead-ink-quest { top: calc(var(--minimap-edge) + var(--minimap) + var(--tally) + 26px); }
+.dead-ink-hud:has(> .dead-ink-minimap:not([hidden])) .dead-ink-boss { width: min(460px, 70vw, calc(100vw - 2 * (var(--minimap-edge) + var(--minimap) + 12px))); }
+@media (max-width: 900px), (max-height: 700px) { .dead-ink-hud { --minimap: 140px; --minimap-edge: 16px; } }
+@media (max-width: 640px) { .dead-ink-hud { --minimap: 112px; --minimap-edge: 12px; --tally: 44px; } }
