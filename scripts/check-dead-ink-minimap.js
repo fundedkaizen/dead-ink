@@ -167,12 +167,13 @@ const status = window.__minimapCheck = { done: false, results }
   m.zombieHud.boss(0.6, 'THE BRUTE')
   m.zombieHud.quest('Kill zombies near the inkwells to fill them (12 of 36)')
   m.zombieHud.update(0, 4, m.state.points)
+  m.zombieHud.lastStand('Reviving Tester', 0.5)
   const mapBox = map.getBoundingClientRect()
   const overlaps = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
   for (const [name, selector] of [['round', '.dead-ink-round'], ['quest line', '.dead-ink-quest'], ['points', '.dead-ink-points'], ['perks', '.dead-ink-perks'],
     ['power-up timers', '.dead-ink-powerups'], ['parts list', '.dead-ink-parts'], ['shield', '.dead-ink-shield'], ['co-op scoreboard', '.dead-ink-scores'],
     ['boss bar', '.dead-ink-boss'], ['round banner', '.dead-ink-banner.show'], ['notify line', '#mission-caption.visible-notice'], ['health', '.mission-vitals'],
-    ['magazine', '.mission-weapon'], ['weapon slots', '.hud-hotbar']]) {
+    ['magazine', '.mission-weapon'], ['weapon slots', '.hud-hotbar'], ['last-stand bar', '.dead-ink-stand']]) {
     const element = document.querySelector(selector)
     check(element && element.getClientRects().length > 0, `the ${name} is showing`)
     check(!overlaps(mapBox, element.getBoundingClientRect()), `the map clears the ${name}`, JSON.stringify(element.getBoundingClientRect()))
