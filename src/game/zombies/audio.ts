@@ -148,19 +148,39 @@ export class DeadInkAudio extends MissionAudio {
     this.track(punch, [body, ...(bodyPanner ? [bodyPanner] : [])]); punch.start(t); punch.stop(t + 0.15)
   }
 
-  /** The Pack-a-Punch layer: a quick bright chirp falling fast, with a ring a fifth above. */
+  /**
+   * The Pack-a-Punch layer, as upgraded guns sound in Call of Duty: under the gun's own report, a resonant
+   * synth "pew" falling from a whistle to a growl, a bright ring at its start and a short low punch. Loud
+   * enough to hear over the shot, short enough for a machine gun.
+   */
   private zap(event: SoundEvent) {
     const context = this.context!, t = context.currentTime
-    for (const ratio of [1, 1.5]) {
-      const { gain, panner } = this.output(event)
-      const tone = context.createOscillator()
-      tone.type = ratio === 1 ? 'triangle' : 'sine'
-      tone.frequency.setValueAtTime(2600 * ratio, t); tone.frequency.exponentialRampToValueAtTime(620 * ratio, t + 0.08)
-      gain.gain.setValueAtTime(0.0001, t); gain.gain.exponentialRampToValueAtTime(ratio === 1 ? 0.2 : 0.09, t + 0.003); gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.11)
-      tone.connect(gain)
-      this.track(tone, [gain, ...(panner ? [panner] : [])], 'incidental'); tone.start(t); tone.stop(t + 0.12)
-    }
+    const level = Math.min(3, event.packed ?? 1)
+    const { gain, panner } = this.output(event)
+    const pew = context.createOscillator(), filter = context.createBiquadFilter()
+    pew.type = 'sawtooth'
+    pew.frequency.setValueAtTime(1400 + level * 150, t); pew.frequency.exponentialRampToValueAtTime(280, t + 0.17)
+    filter.type = 'lowpass'; filter.Q.value = 9
+    filter.frequency.setValueAtTime(5200, t); filter.frequency.exponentialRampToValueAtTime(700, t + 0.18)
+    gain.gain.setValueAtTime(0.0001, t); gain.gain.exponentialRampToValueAtTime(0.32, t + 0.004); gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.21)
+    pew.connect(filter).connect(gain)
+    this.track(pew, [filter, gain, ...(panner ? [panner] : [])], 'incidental'); pew.start(t); pew.stop(t + 0.22)
+    const { gain: ring, panner: ringPanner } = this.output(event)
+    const tsing = context.createOscillator()
+    tsing.type = 'sine'
+    tsing.frequency.setValueAtTime(3300, t); tsing.frequency.exponentialRampToValueAtTime(1800, t + 0.07)
+    ring.gain.setValueAtTime(0.0001, t); ring.gain.exponentialRampToValueAtTime(0.13, t + 0.003); ring.gain.exponentialRampToValueAtTime(0.0001, t + 0.09)
+    tsing.connect(ring)
+    this.track(tsing, [ring, ...(ringPanner ? [ringPanner] : [])], 'incidental'); tsing.start(t); tsing.stop(t + 0.1)
+    const { gain: body, panner: bodyPanner } = this.output(event)
+    const punch = context.createOscillator()
+    punch.type = 'sine'
+    punch.frequency.setValueAtTime(140, t); punch.frequency.exponentialRampToValueAtTime(60, t + 0.08)
+    body.gain.setValueAtTime(0.0001, t); body.gain.exponentialRampToValueAtTime(0.3, t + 0.004); body.gain.exponentialRampToValueAtTime(0.0001, t + 0.1)
+    punch.connect(body)
+    this.track(punch, [body, ...(bodyPanner ? [bodyPanner] : [])], 'incidental'); punch.start(t); punch.stop(t + 0.11)
   }
+
 
   /** A plank torn off: the nails' squeal, a sharp crack, splinters, and the plank's own hollow knock. */
   private crack(event: SoundEvent) {
