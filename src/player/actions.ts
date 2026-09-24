@@ -51,17 +51,37 @@ export class PlayerActions {
     return zipline.localToWorld(new THREE.Vector3().fromArray(zipline.userData[end ? 'endLanding' : 'startLanding']))
   }
 
-  private boardingClear(endpoint: THREE.Vector3) {
+  private boardingClear(endpoint: THREE.Vector3, from: THREE.Vector3 = this.body.position) {
     // Eye-level visibility can see over rails. Check the standing player's short
     // approach too, so boarding cannot pull their body through a rail or post.
-    const steps = Math.max(1, Math.ceil(this.body.position.distanceTo(endpoint) / 0.15))
+    const steps = Math.max(1, Math.ceil(from.distanceTo(endpoint) / 0.15))
     for (let i = 0; i <= steps; i++) {
-      this.boardingPoint.copy(this.body.position).lerp(endpoint, i / steps)
+      this.boardingPoint.copy(from).lerp(endpoint, i / steps)
       this.boardingCapsule.start.copy(this.boardingPoint).y += 0.28
       this.boardingCapsule.end.copy(this.boardingPoint).y += 1.52
       if (!this.body.world.fits(this.boardingCapsule)) return false
     }
     return true
+  }
+
+  /**
+   * The way onto a zip line from where you stand: straight to its start, or, when a post or rail of the
+   * launch frame is in the way (standing off to its side on a narrow deck), a step round behind the
+   * start first, on the same floor. Null when neither way is clear.
+   */
+  boardingPath(zipline: THREE.Object3D): THREE.Vector3[] | null {
+    const start = this.ziplinePoint(zipline, false)
+    if (this.boardingClear(start)) return [start]
+    const back = start.clone().sub(this.ziplinePoint(zipline, true)).setY(0).normalize()
+    const side = new THREE.Vector3(-back.z, 0, back.x)
+    for (const [behind, across] of [[0.7, 0], [0.7, 0.6], [0.7, -0.6], [1.2, 0]]) {
+      const via = start.clone().addScaledVector(back, behind).addScaledVector(side, across)
+      const floor = this.body.world.floor(via.clone().setY(via.y + 0.4), 0.6, 0.7)
+      if (!Number.isFinite(floor) || Math.abs(floor - start.y) > 0.2) continue
+      via.y = Math.max(start.y, floor + 0.02)
+      if (this.boardingClear(via) && this.boardingClear(start, via)) return [via, start]
+    }
+    return null
   }
 
   private syncTrolley(object: THREE.Object3D) {
@@ -89,7 +109,7 @@ export class PlayerActions {
       const facing = this.offset.normalize().dot(this.direction)
       if (distance > 2.65 || facing < 0.25 || !this.body.world.visible(camera.position, target.point, target.object)) return
       const score = distance + (1 - facing) * 1.4
-      if (score < best && (target.kind !== 'zipline' || this.boardingClear(this.ziplinePoint(target.object, target.descending)))) {
+      if (score < best) {
         best = score; this.target = target
       }
     }
@@ -113,9 +133,15 @@ export class PlayerActions {
       const endpoint = this.ziplinePoint(zipline, false)
       if (Math.abs(this.body.position.y - endpoint.y) > 0.8 ||
         Math.hypot(this.body.position.x - endpoint.x, this.body.position.z - endpoint.z) > 2.3) continue
-      const point = endpoint.clone().add(new THREE.Vector3(0, 1.3, 0))
-      consider({ object: zipline, point, kind: 'zipline', descending: false,
-        label: 'Ride zipline' })
+      // Looking at the landing or up at the launch frame both count: from right beside it, the frame is
+      // what you look at.
+      // (Just under the pulley: the pulley itself sits inside the frame's crossbar, hidden by it.)
+      const frame = zipline.localToWorld(new THREE.Vector3().fromArray(zipline.userData.start))
+      frame.y -= 0.4
+      // Only when there is a clear way onto it (worked out once, not per point).
+      if (!this.boardingPath(zipline)) continue
+      for (const point of [endpoint.clone().add(new THREE.Vector3(0, 1.3, 0)), frame, endpoint.clone().lerp(frame, 0.5)])
+        consider({ object: zipline, point, kind: 'zipline', descending: false, label: 'Ride zipline' })
     }
     for (const target of this.extraTargets()) consider(target)
     return this.target
@@ -160,7 +186,8 @@ export class PlayerActions {
         this.body.teleport(end)
       } else {
         const from = new THREE.Vector3().fromArray(data.start), to = new THREE.Vector3().fromArray(data.end)
-        const points = [start]
+        // Onto the start, round the frame's post first if that is the clear way.
+        const points = this.boardingPath(object) ?? [start]
         for (let i = 0; i <= 96; i++) {
           const t = i / 96
           const point = from.clone().lerp(to, t)
