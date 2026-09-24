@@ -30,18 +30,8 @@ const status = window.__bruteCheck = { done: false, results }
   const bar = () => document.querySelector('.dead-ink-boss')
   const caption = () => document.querySelector('#mission-caption')?.textContent ?? ''
   const clearZombies = () => { m.rounds.toSpawn = 0; for (const z of m.director.zombies) if (z.state === 'chase' && !z.boss) { z.health = 0; z.state = 'dead'; z.deadFor = 99; z.actor.root.visible = false } }
-  const place = (at, face) => { p.body.teleport(at.clone()); p.actions.syncCamera(cam); cam.lookAt(face.x, face.y + 1.6, face.z); e.invalidate() }
+  const place = (at, face) => { p.body.teleport(at.clone()); p.body.velocity.set(0, 0, 0); p.actions.syncCamera(cam); cam.lookAt(face.x, face.y + 1.6, face.z); e.invalidate() }
   const flat = (a, b) => Math.hypot(a.x - b.x, a.z - b.z)
-  /** Metres of standing room straight along `yaw` from `from` (as the charge measures it). */
-  const straight = (from, yaw, most) => {
-    let y = from.y
-    for (let d = 0.45; d <= most; d += 0.45) {
-      const q = m.director.navigation.floor(new V(from.x + Math.sin(yaw) * d, y, from.z + Math.cos(yaw) * d))
-      if (!q) return d - 0.45
-      y = q.y
-    }
-    return most
-  }
   /** Hold every special attack but `open`. */
   const allow = (...open) => { const b = m.brute.brute; for (const k of ['slam', 'charge', 'throw', 'burrow']) b.cool[k] = open.includes(k) ? 0 : 999; b.cool.gap = 0; b.move = null; m.brute.swing = 0 }
 
@@ -73,7 +63,18 @@ const status = window.__bruteCheck = { done: false, results }
 
   // ---- The charge: a clear straight line, 12 m.
   let yaw = 0, best = 0
-  for (let a = 0; a < 48; a++) { const r = straight(brute.position, a / 48 * Math.PI * 2, 18); if (r > best) { best = r; yaw = a / 48 * Math.PI * 2 } }
+  // The lane is chosen with the Brute's own measure of room, so the test never asks for a charge it would rightly refuse.
+  // and a lane clear a little either side too, so aiming at you a hair off its middle still has room.
+  const room = a => Math.min(...[-0.1, 0, 0.1].map(o => m.director.brutes.clearRun(brute.position, a + o, 18)))
+  for (let a = 0; a < 48; a++) { const r = room(a / 48 * Math.PI * 2); if (r > best) { best = r; yaw = a / 48 * Math.PI * 2 } }
+  if (best < 14) {
+    // It happens to stand somewhere cramped: walk it to open ground first (any graph spot with a long clear lane).
+    const g = m.director.context.graph
+    for (let spot = 0; spot < g.size && best < 14; spot += 23) {
+      const at = g.point(spot)
+      for (let a = 0; a < 16 && best < 14; a++) { const r = Math.min(...[-0.1, 0, 0.1].map(o => m.director.brutes.clearRun(at, a / 16 * Math.PI * 2 + o, 18))); if (r >= 14) { brute.position.copy(at); best = r; yaw = a / 16 * Math.PI * 2 } }
+    }
+  }
   check(best >= 14, 'room for a charge', `${best.toFixed(1)} m`)
   const lane = d => { const q = brute.position.clone().add(new V(Math.sin(yaw) * d, 0, Math.cos(yaw) * d)); return m.director.navigation.floor(q) ?? q }
   place(lane(12), brute.position)
@@ -83,19 +84,27 @@ const status = window.__bruteCheck = { done: false, results }
   check(await until(() => brute.brute.move === 'charge', 3000), 'it plants itself to charge')
   check(await until(() => sounds.includes('brute-snort'), 500), 'snorting')
   const from = brute.position.clone()
-  check(await until(() => flat(brute.position, from) > 4, 3000), 'then runs at you', `${flat(brute.position, from).toFixed(1)} m`)
+  check(await until(() => flat(brute.position, from) > 4, 3000), 'then runs at you', `${flat(brute.position, from).toFixed(1)} m; room on its line ${brute.brute.limit?.toFixed?.(1)}, move ${brute.brute.move}`)
   check(await until(() => hits.some(h => h.n >= 70), 2500), 'and runs you down', JSON.stringify(hits.map(h => h.n)))
   check(hits.find(h => h.n >= 70).knock >= 7, 'throwing you')
   await until(() => brute.brute.move !== 'charge', 3000)
 
   // ---- The slam: close by.
   allow('slam')
-  place(brute.position.clone().add(new V(Math.sin(brute.yaw + 0.3) * 3, 0, Math.cos(brute.yaw + 0.3) * 3)), brute.position)
+  // You stand 3 m off on open ground at its level, nothing between (the wave rightly stops at walls and runs under a ledge).
+  let standAt = null
+  for (let a = 0; a < 24 && !standAt; a++) {
+    const q = m.director.navigation.floor(brute.position.clone().add(new V(Math.sin(brute.yaw + a / 24 * Math.PI * 2) * 3, 0, Math.cos(brute.yaw + a / 24 * Math.PI * 2) * 3)))
+    if (q && Math.abs(q.y - brute.position.y) < 0.1 && p.world.visible(brute.position.clone().setY(brute.position.y + 0.8), q.clone().setY(q.y + 0.8))) standAt = q
+  }
+  place(standAt ?? brute.position.clone().add(new V(Math.sin(brute.yaw + 0.3) * 3, 0, Math.cos(brute.yaw + 0.3) * 3)), brute.position)
+  // Settled on the ground first: a player still in the air from the charge's throw would rightly jump the wave.
+  await until(() => p.body.grounded, 1500)
   hits.length = 0
   check(await until(() => brute.brute.move === 'slam', 3000), 'close by, it raises its fists to slam')
   check(await until(() => brute.brute.struck, 2000), 'and brings them down')
   check(m.director.brutes.waves.count >= 1, 'an ink wave runs out along the ground')
-  check(await until(() => hits.length > 0, 1000), 'it hurts you', JSON.stringify(hits.map(h => h.n)))
+  check(await until(() => hits.length > 0, 1000), 'it hurts you', JSON.stringify(hits.map(h => h.n)) + ` at ${flat(p.body.position, brute.position).toFixed(1)} m, dy ${(p.body.position.y - brute.position.y).toFixed(2)}, grounded ${p.body.grounded}, player ${p.body.position.toArray().map(v => v.toFixed(1))}`)
   await until(() => brute.brute.move !== 'slam', 3000)
 
   // ---- The throw: out of reach, in plain sight.

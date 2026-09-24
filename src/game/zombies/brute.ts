@@ -575,8 +575,9 @@ class InkWaves {
         }
         const d = Math.hypot(player.feet.x - wave.centre.x, player.feet.z - wave.centre.z)
         if (d <= before || d > wave.radius || d <= BOSS.slam.inner) continue
-        // Up on something, or a wall between: the wave runs along the ground and stops at walls.
-        if (Math.abs(player.feet.y - wave.centre.y) > 0.9 || !world.visible(scratch.b.copy(wave.centre).setY(wave.centre.y + 0.4), scratch.c.copy(player.feet).setY(player.feet.y + 0.4), NO_ONE)) { wave.done.add(player.id); continue }
+        // Up on something, or a wall between: the wave runs along the ground and stops at walls (tested at knee height, so a
+        // curb or a step does not count as one).
+        if (Math.abs(player.feet.y - wave.centre.y) > 0.9 || !world.visible(scratch.b.copy(wave.centre).setY(wave.centre.y + 0.8), scratch.c.copy(player.feet).setY(player.feet.y + 0.8), NO_ONE)) { wave.done.add(player.id); continue }
         if (safe) { wave.done.add(player.id); continue }
         if (player.lag) { wave.pending.set(player.id, wave.age + player.lag); continue }
         wave.done.add(player.id)
@@ -975,12 +976,16 @@ export class Brutes {
     return false
   }
 
-  /** Metres it could run straight along `yaw` from `from`, up to `most`: floor all the way and room for a body. */
+  /**
+   * Metres it could run straight along `yaw` from `from`, up to `most`: floor all the way and room for a body.
+   * Measured as the run itself moves (not as a route is planned), so a closed door is a wall here: a planned
+   * route may push through one, but a charge would only crash into it.
+   */
   private clearRun(from: THREE.Vector3, yaw: number, most: number) {
     const dx = Math.sin(yaw), dz = Math.cos(yaw), step = 0.45
     let y = from.y
     for (let d = step; d <= most + 1e-6; d += step) {
-      const point = this.host.navigation.floor(scratch.t.set(from.x + dx * d, y, from.z + dz * d))
+      const point = this.host.navigation.floor(scratch.t.set(from.x + dx * d, y, from.z + dz * d), false)
       if (!point) return d - step
       y = point.y
     }
@@ -1112,6 +1117,9 @@ export class Brutes {
       if (b.t < windup - charge.lock) { if (aim) this.host.face(z, aim.feet, dt, 5) }
       else if (!b.locked) {
         b.locked = true
+        // The line is fixed at where you stand now, even if it has not finished turning: a sidestep after
+        // the lock is what dodges it, not where it happened to be facing.
+        if (aim) z.yaw = Math.atan2(aim.feet.x - z.position.x, aim.feet.z - z.position.z)
         b.heading = z.yaw
         b.limit = this.clearRun(z.position, b.heading, charge.length)
         if (b.limit < 4) { b.move = null; b.t = 0; b.cool.charge = 2; b.cool.gap = 0.5 }
