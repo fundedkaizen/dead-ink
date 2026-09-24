@@ -470,7 +470,7 @@ export class ZombiesRuntime {
   private placeStations() {
     const graph = this.graph!
     graph.flow([this.spawn])
-    const spots = findWallSpots(graph, this.player.world, this.random, { count: WALL_WEAPONS.length + 1, near: 6, far: 70, spacing: 9 })
+    const spots = findWallSpots(graph, this.player.world, this.random, { count: WALL_WEAPONS.length + 1, near: 6, far: 70, spacing: 9, size: MysteryBox.SIZE })
     // The box sits in the middle of the ring: not the first thing you see, not far away either.
     const boxIndex = Math.min(2, spots.length - 1)
     spots.forEach((spot, i) => {
@@ -484,7 +484,7 @@ export class ZombiesRuntime {
     const taken = spots.map(spot => spot.stand)
     for (const [kind, [x, y, z]] of MACHINE_PLACES) {
       graph.flow([new THREE.Vector3(x, y, z)])
-      const [spot] = findWallSpots(graph, this.player.world, this.random, { count: 1, near: 0, far: 35, spacing: 7, avoid: taken })
+      const [spot] = findWallSpots(graph, this.player.world, this.random, { count: 1, near: 0, far: 35, spacing: 7, avoid: taken, size: kind === 'pack' ? PackAPunch.SIZE : PerkMachine.SIZE })
       if (!spot) { console.warn(`Dead Ink: no wall for ${kind} near ${x}, ${z}`); continue }
       taken.push(spot.stand)
       if (kind === 'pack') { this.pack = new PackAPunch(spot); this.scene.add(this.pack.root); continue }
@@ -509,11 +509,11 @@ export class ZombiesRuntime {
     }
     // The power switch in the warehouse, the shield bench by the start, the Pack-a-Punch's build site.
     graph.flow([new THREE.Vector3(...POWER_PLACE)])
-    const [powerSpot] = findWallSpots(graph, this.player.world, this.random, { count: 1, near: 0, far: 30, spacing: 7, avoid: taken })
+    const [powerSpot] = findWallSpots(graph, this.player.world, this.random, { count: 1, near: 0, far: 30, spacing: 7, avoid: taken, size: PowerSwitch.SIZE })
     if (powerSpot) { taken.push(powerSpot.stand); this.powerSwitch = new PowerSwitch(powerSpot); this.scene.add(this.powerSwitch.root) }
     else console.warn('Dead Ink: no wall for the power switch')
     graph.flow([new THREE.Vector3(...BENCH_PLACE)])
-    const [benchSpot] = findWallSpots(graph, this.player.world, this.random, { count: 1, near: 0, far: 30, spacing: 7, avoid: taken })
+    const [benchSpot] = findWallSpots(graph, this.player.world, this.random, { count: 1, near: 0, far: 30, spacing: 7, avoid: taken, size: BuildSite.BENCH })
     if (benchSpot) { taken.push(benchSpot.stand); const bench = new BuildSite('shield', benchSpot, true); this.sites.set('shield', bench); this.scene.add(bench.root) }
     else console.warn('Dead Ink: no wall for the shield bench')
     if (this.pack) { const site = new BuildSite('pack', this.pack.spot, false); this.sites.set('pack', site); this.scene.add(site.root) }
@@ -538,7 +538,7 @@ export class ZombiesRuntime {
     for (const machine of this.perkMachines) this.makeSolid(machine.root, [1.05, 2.05, 0.7], [0, 1.025, 0])
     for (const [x, y, z] of BOX_PLACES) {
       graph.flow([new THREE.Vector3(x, y, z)])
-      const [spot] = findWallSpots(graph, this.player.world, this.random, { count: 1, near: 0, far: 35, spacing: 7, avoid: taken })
+      const [spot] = findWallSpots(graph, this.player.world, this.random, { count: 1, near: 0, far: 35, spacing: 7, avoid: taken, size: MysteryBox.SIZE })
       if (!spot) continue
       taken.push(spot.stand)
       this.boxSpots.push(spot)

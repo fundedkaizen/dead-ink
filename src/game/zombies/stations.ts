@@ -5,7 +5,7 @@ import { disposeGun } from '../../lab/weapons/models'
 import { RARITY_INFO, rollRarity, type Rarity } from '../loot'
 import type { WeaponName } from '../types'
 import { BOX_OFFER, BOX_SPIN } from './economy'
-import type { WallSpot } from './placement'
+import type { WallSize, WallSpot } from './placement'
 import { LightMotes } from './effects'
 import { MYTHIC, MYTHIC_REVEAL, applyDragonSkin } from './mythic'
 
@@ -80,6 +80,11 @@ function haloTexture() {
 }
 
 export class MysteryBox {
+  /**
+   * The block it fills against its wall, for placement: the crate with its lid open and a gun rising out
+   * of it. The wall guns share its ring of spots, and their sheets fit in this block too.
+   */
+  static readonly SIZE: WallSize = { halfWidth: 0.72, top: 1.75, depth: 0.66 }
   readonly root = new THREE.Group()
   readonly point = new THREE.Vector3()
   spot: WallSpot
