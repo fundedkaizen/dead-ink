@@ -56,6 +56,7 @@ import type { Shot as ShotType } from '../types'
 import type { Rarity } from '../loot'
 import { MACHINE_PLACES, PACK, PERKS, PERK_EFFECT, PERK_LIMIT, PackAPunch, PackedLook, PerkBottle, PerkMachine, type PerkKind } from './perks'
 import { Minimap, type MinimapMate } from './minimap'
+import { Barriers, WINDOW, type Barrier } from './windows'
 
 export type ZombieState = {
   phase: 'active' | 'dead' | 'complete'
@@ -331,6 +332,15 @@ export class ZombiesRuntime {
   private minimap: Minimap | null = null
   private mapMatePool: MinimapMate[] = []
   private mapMates: MinimapMate[] = []
+  /**
+   * Boarded windows (windows.ts): the mess hall's windows on the road side. The window being rebuilt while
+   * F is held, the wait until the next plank, and (on the guest) its rebuild points this round as the host
+   * counts them.
+   */
+  barriers: Barriers | null = null
+  private repairing: Barrier | null = null
+  private repairWait = 0
+  private barrierPaid = 0
 
   constructor(private scene: THREE.Scene, private camera: EnvironmentCamera, readonly player: FirstPersonController,
     readonly world: MissionWorld, private invalidate: () => void, seed = Math.floor(Math.random() * 2 ** 31)) {
@@ -456,6 +466,9 @@ export class ZombiesRuntime {
       // Every zone but the first shut behind its gate, before anything is placed.
       this.zones = new ZoneGates(this.scene, this.player.world, graph)
       this.zones.closeAll()
+      // The mess hall's road-side windows boarded up: the only way in from the road (before anything is placed).
+      this.barriers = new Barriers(this.scene, this.player.world, graph, event => this.emit(event))
+      this.director.windows = this.barriers.list
       this.director.navigation.clear()
       this.player.world.warm()
       const floor = this.player.world.floor(this.spawn.clone().setY(0.6), 1, 1.5, 0.28)
@@ -565,6 +578,7 @@ export class ZombiesRuntime {
     this.state = { phase: 'active', health: PLAYER_HEALTH.base, elapsed: 0, kills: 0, points: STARTING_POINTS, round: 0, headshots: 0, knifeKills: 0 }
     this.rounds = newGame()
     this.director?.clear()
+    this.barriers?.reset(); this.repairing = null; this.barrierPaid = 0
     this.zones?.closeAll()
     this.director?.navigation.clear()
     if (this.box && this.boxSpots[0]) { this.box.place(this.boxSpots[0]); this.makeSolid(this.box.root, [1.44, 0.66, 0.64], [0, 0.33, 0]) }
@@ -711,6 +725,7 @@ export class ZombiesRuntime {
         use: () => this.useWall(buy) })
     }
     const eye = this.camera.perspective.position
+    this.barrierTargets(targets, eye)
     for (const gate of this.zones?.gates ?? []) {
       if (gate.state !== 'closed') continue
       const point = this.zones!.nearestPoint(gate, eye), cost = gate.spec.cost
@@ -1297,6 +1312,7 @@ export class ZombiesRuntime {
       carried: [...this.carried], placed, power: this.powerSwitch?.state ?? 'broken', shieldOnBench: this.shieldOnBench ? 1 : 0,
       traps: this.traps.map(t => [t.state, Math.round(t.timer * 10) / 10]), quest: this.questStep,
       wells: this.wells.map(w => [w.awake ? 1 : 0, w.souls, w.bottleTaken ? 1 : 0]), bottles: this.bottles,
+      win: this.barriers?.counts(), wp: [0, 1, 2, 3].map(id => this.barriers?.ledger.paidBy(`p${id + 1}`, this.rounds.round) ?? 0),
     }
   }
 
@@ -1328,6 +1344,8 @@ export class ZombiesRuntime {
       if (taken && !well.bottleTaken) well.takeBottle()
     })
     this.bottles = w.bottles
+    if (w.win) this.barriers?.apply(w.win)
+    this.barrierPaid = w.wp?.[this.coop.id] ?? 0
   }
 
   /** Every message from the other browsers (on the host, `from` says which guest). */
@@ -1416,6 +1434,7 @@ export class ZombiesRuntime {
         else if (m.what === 'trap') { const trap = this.traps[m.index]; if (trap && trap.state === 'idle' && this.power) { trap.start(); this.emit({ kind: 'pack-work', position: trap.point.clone(), radius: 20 }) } }
         else if (m.what === 'bottle') { const well = this.wells[m.index]; if (well?.takeBottle()) { this.bottles++; this.hud.notify(`${this.mateName(from)} took a bottle of ink (${this.bottles} of ${this.wells.length}).`, 2.5) } }
         else if (m.what === 'pour') this.pourInk(true)
+        else if (m.what === 'window') this.partnerRebuild(m.index, from)
         break
       case 'lure': this.partnerLures.push({ position: toVector(m.p), left: m.s }); break
       case 'shield':
@@ -1945,6 +1964,48 @@ export class ZombiesRuntime {
     return true
   }
 
+  // ---------------------------------------------------------------- boarded windows (windows.ts)
+
+  /** From inside, at a window with planks missing: hold F to nail them back, a plank at a time. */
+  private barrierTargets(targets: ActionTarget[], eye: THREE.Vector3) {
+    const barriers = this.barriers
+    if (!barriers) return
+    const left = this.isGuest ? WINDOW.roundCap - this.barrierPaid : barriers.ledger.left('p1', this.rounds.round)
+    for (const barrier of barriers.list) {
+      if (barrier.boards >= WINDOW.boards || barrier.vaulting || !barrier.inside(eye) || barrier.point.distanceTo(eye) > 2.65) continue
+      targets.push({ object: barriers.root, point: barrier.point, kind: 'mission', descending: false,
+        label: left > 0 ? 'Hold to rebuild the barrier' : 'Hold to rebuild the barrier · no more points this round',
+        use: () => { this.repairing = barrier; return true } })
+    }
+  }
+
+  /**
+   * While F (or the pad's use button) stays down at a window: a plank every WINDOW.repairSeconds, however fast
+   * F is tapped, with the gun lowered. The host nails it and pays; the guest asks the host.
+   */
+  private updateRepair(dt: number) {
+    this.repairWait = Math.max(0, this.repairWait - dt)
+    const barrier = this.repairing
+    if (!barrier) return
+    const eye = this.camera.perspective.position
+    if (!this.player.useHeld || !this.isActive() || this.down || this.revive.down || barrier.boards >= WINDOW.boards
+      || !barrier.inside(eye) || barrier.point.distanceTo(eye) > 2.65) { this.repairing = null; return }
+    this.interactionTime = Math.max(this.interactionTime, 0.2)
+    if (this.repairWait > 0) return
+    this.repairWait = WINDOW.repairSeconds
+    if (this.isGuest) { this.coop.send({ t: 'use', what: 'window', index: barrier.index }); return }
+    const paid = this.barriers!.rebuild(barrier, 'p1', this.rounds.round, this.timers.doublePoints ? 2 : 1)
+    if (paid > 0) { this.state.points += paid; this.earned += paid; this.zombieHud.gain(paid) }
+  }
+
+  /** On the host: the guest nailed a plank back; the points go to the guest. */
+  private partnerRebuild(index: number, from: number) {
+    const barrier = this.barriers?.list[index]
+    if (!barrier || !this.mates.get(from) || this.mates.get(from)!.avatar.feet.distanceTo(barrier.point) > 3.5) return
+    const paid = this.barriers!.rebuild(barrier, `p${from + 1}`, this.rounds.round, this.timers.doublePoints ? 2 : 1)
+    if (paid > 0) this.coop.send({ t: 'award', n: paid }, { to: from })
+  }
+
   // ---------------------------------------------------------------- combat
 
   /** Points in; Double Points doubles every gain while it runs. */
@@ -2282,13 +2343,17 @@ export class ZombiesRuntime {
   private spawnZombie() {
     const director = this.director, graph = this.graph
     if (!director || !graph) return false
-    const spot = pickSpawn(graph, this.player.world, { near: 14, far: 42, eyes: [] }, this.random)
+    // Some come from the road, clawing up outside a boarded window of the mess hall and tearing their way in.
+    const entry = this.barriers?.pickSpawn(this.random) ?? null
+    const spot = entry?.rise ?? pickSpawn(graph, this.player.world, { near: 14, far: 42, eyes: [] }, this.random)
     if (!spot) return false
     const feet = this.player.body.position
     // From round 8 a few are Blots: bloated, slower, tougher, and they burst into poison gas.
     const blot = !this.storm && rollBlot(this.rounds.round, this.random)
     const health = Math.round(zombieHealth(this.rounds.round) * DIFFICULTY[this.difficulty].health * (this.storm ? STORM.health : 1) * (blot ? BLOT.health : 1))
-    return !!director.spawn(spot, health, this.storm ? 'sprint' : this.gait(), Math.atan2(feet.x - spot.x, feet.z - spot.z), true, false, blot)
+    const zombie = director.spawn(spot, health, this.storm ? 'sprint' : this.gait(), entry ? entry.barrier.facing : Math.atan2(feet.x - spot.x, feet.z - spot.z), true, false, blot)
+    if (zombie && entry) director.sendToWindow(zombie, entry.barrier)
+    return !!zombie
   }
 
   /** The Ink Storm darkens the page while it lasts. */
@@ -2525,6 +2590,7 @@ export class ZombiesRuntime {
       this.blood.update(dt); this.impacts.update(dt); this.riseMarks.update(dt); this.sparks.update(dt); this.shockwaves.update(dt)
       this.explosions.update(dt); this.nukeCloud.update(dt)
       this.zones?.update(dt)
+      this.barriers?.update(dt); this.updateRepair(dt)
       this.grenadeCooldown = Math.max(0, this.grenadeCooldown - dt)
       for (const pending of [...this.pendingThrows]) if ((pending.timer -= dt) <= 0) { this.pendingThrows.splice(this.pendingThrows.indexOf(pending), 1); pending.launch() }
       for (const at of this.grenades.update(dt)) this.grenadeBlast(at)
@@ -2636,6 +2702,7 @@ export class ZombiesRuntime {
     for (const trap of this.traps) trap.dispose()
     for (const well of this.wells) well.dispose()
     this.soulStreams?.dispose()
+    this.barriers?.dispose()
     document.body.style.removeProperty('--dead-ink-gas')
     this.audio.dispose(); this.music.dispose(); this.hud.dispose()
     this.player.movementLocked = false; this.player.onPlayingChange = () => {}; this.player.lookSensitivity = () => 1

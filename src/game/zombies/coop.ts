@@ -57,6 +57,9 @@ export type WorldState = {
   /** Each inkwell: awake, souls, bottle taken. */
   wells: [0 | 1, number, 0 | 1][]
   bottles: number
+  /** Boarded windows (windows.ts): planks up at each, and each player's rebuild points this round, by number (it has a cap). */
+  win?: number[]
+  wp?: number[]
 }
 
 export type CoopMessage =
@@ -91,6 +94,7 @@ export type CoopMessage =
   | { t: 'use'; what: 'trap'; index: number }
   | { t: 'use'; what: 'bottle'; index: number }
   | { t: 'use'; what: 'pour' }
+  | { t: 'use'; what: 'window'; index: number }
   | { t: 'lure'; p: [number, number, number]; s: number }
   // either way (a guest reviving another guest goes through the host: `target`)
   | { t: 'revive'; target?: number; by?: string }
