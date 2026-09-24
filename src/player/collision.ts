@@ -268,7 +268,8 @@ export class CollisionWorld {
   }
 
   private capsuleBounds(capsule: Capsule) {
-    this.bounds.set(capsule.start, capsule.end).expandByScalar(capsule.radius)
+    // Either end may be the lower one: a capsule swept down or back (Dead Ink's flyers) needs the same box as one swept up.
+    this.bounds.makeEmpty().expandByPoint(capsule.start).expandByPoint(capsule.end).expandByScalar(capsule.radius)
     return this.bounds
   }
 
