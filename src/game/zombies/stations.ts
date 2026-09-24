@@ -2,10 +2,10 @@ import * as THREE from 'three'
 import { Draft, createRarityBeam, wallText } from '../../render/ink'
 import { createMissionGun } from '../weapon-models'
 import { disposeGun } from '../../lab/weapons/models'
-import { RARITY_INFO, type Rarity } from '../loot'
+import { RARITY_INFO, rollRarity, type Rarity } from '../loot'
 import type { WeaponName } from '../types'
 import { BOX_OFFER, BOX_SPIN } from './economy'
-import type { WallSpot } from './placement'
+import type { WallSize, WallSpot } from './placement'
 import { LightMotes } from './effects'
 import { MYTHIC, MYTHIC_REVEAL, applyDragonSkin } from './mythic'
 
@@ -61,7 +61,30 @@ const BOX_LIGHT = 0xe8c46a
  * A Mythic roll makes a moment of it: the reel runs longer and crawls to its stop while the box flickers
  * magenta, then a burst and a tall beam of the tier's colour, and the gun pops up turning, dragon and all.
  */
+const WHITE = new THREE.Color(0xffffff)
+/** How often a gun sliding past in the reel flashes Mythic pink: a near miss, far more often than the real one in a thousand. */
+const REEL_MYTHIC = 0.006
+
+/** A soft round glow, white at the middle and gone at the rim, tinted per rarity. */
+function haloTexture() {
+  if (typeof document === 'undefined') return null
+  const canvas = document.createElement('canvas')
+  canvas.width = canvas.height = 128
+  const c = canvas.getContext('2d')!
+  const g = c.createRadialGradient(64, 64, 0, 64, 64, 64)
+  g.addColorStop(0, 'rgba(255,255,255,0.95)'); g.addColorStop(0.45, 'rgba(255,255,255,0.55)'); g.addColorStop(1, 'rgba(255,255,255,0)')
+  c.fillStyle = g; c.fillRect(0, 0, 128, 128)
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+  return texture
+}
+
 export class MysteryBox {
+  /**
+   * The block it fills against its wall, for placement: the crate with its lid open and a gun rising out
+   * of it. The wall guns share its ring of spots, and their sheets fit in this block too.
+   */
+  static readonly SIZE: WallSize = { halfWidth: 0.72, top: 1.75, depth: 0.66 }
   readonly root = new THREE.Group()
   readonly point = new THREE.Vector3()
   spot: WallSpot
@@ -89,6 +112,13 @@ export class MysteryBox {
   private spinLength = BOX_SPIN
   /** The Mythic's tall beams, while one is on offer. */
   private mythicBeam: THREE.Group | null = null
+  /**
+   * The reel, as a case opening: every gun that slides past shows a rarity (the box's own odds, and now
+   * and then a flash of Mythic pink), in a halo behind it and in the box's light. What you get is rolled
+   * apart from it, at the real odds.
+   */
+  private reelRarity: Rarity = 'uncommon'
+  private halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: haloTexture(), transparent: true, opacity: 0, depthWrite: false, toneMapped: false }))
   private baseY: number
 
   constructor(spot: WallSpot) {
@@ -126,7 +156,9 @@ export class MysteryBox {
     this.spill.position.y = 0.012
     this.baseY = height + 0.15
     this.teddy.visible = false
-    this.body.add(this.motes, this.teddy, this.glow, this.spill)
+    this.halo.scale.set(1.05, 0.62, 1)
+    this.halo.visible = false
+    this.body.add(this.motes, this.teddy, this.glow, this.spill, this.halo)
     this.root.add(this.body, this.marker)
     this.spot = spot
     this.place(spot)
@@ -193,6 +225,11 @@ export class MysteryBox {
     const burst = mythic && this.state === 'offering' ? Math.max(0, 1 - this.timer / MYTHIC_REVEAL.burst) : 0
     glow.color.set(0xffd36b)
     spill.color.set(0xffffff)
+    if (this.state === 'spinning') {
+      const reel = RARITY_INFO[this.reelRarity].color
+      glow.color.setHex(reel)
+      spill.color.setHex(reel).lerp(WHITE, 0.4)
+    }
     if (tease > 0 && Math.sin(this.timer * (26 + tease * 30)) > 0.2 - tease * 0.6) { glow.color.set(MYTHIC.color); spill.color.set(0xff7ac8) }
     if (burst > 0) {
       glow.color.set(MYTHIC.color).lerp(new THREE.Color(0xffffff), burst ** 3)
@@ -202,7 +239,7 @@ export class MysteryBox {
     const top = this.baseY - 0.15
     const mythicMote = () => Math.random() < 0.5 ? MYTHIC.crimson : MYTHIC.violet
     if (this.state === 'idle') this.motes.update(dt, 5, p => p.set((Math.random() - 0.5) * 1.3, top + 0.1, (Math.random() - 0.5) * 0.55), 0xe8b64a, 0.35)
-    else if (this.state === 'spinning') this.motes.update(dt, 110 + tease * 120, p => p.set((Math.random() - 0.5) * 1.2, top, (Math.random() - 0.5) * 0.45), tease > 0 && Math.random() < tease ? mythicMote() : 0xffc94a, 1.9 + tease)
+    else if (this.state === 'spinning') this.motes.update(dt, 110 + tease * 120, p => p.set((Math.random() - 0.5) * 1.2, top, (Math.random() - 0.5) * 0.45), tease > 0 && Math.random() < tease ? mythicMote() : RARITY_INFO[this.reelRarity].color, 1.9 + tease)
     else if (this.state === 'leaving') this.motes.update(dt, 70, p => p.set((Math.random() - 0.5) * 1.3, Math.random() * 0.4, (Math.random() - 0.5) * 0.5), 0xe8b64a, 1.2)
     else if (burst > 0) {
       // The burst: a fountain of the tier's colours off the box.
@@ -225,6 +262,7 @@ export class MysteryBox {
       if (this.cycle <= 0) {
         const pool = spinNames.length ? spinNames : [this.offer?.name ?? 'pistol']
         const next = pool[Math.floor(Math.random() * pool.length)]
+        this.reelRarity = Math.random() < REEL_MYTHIC ? 'mythic' : rollRarity('chest')
         this.setFloating(next)
         // A Mythic's reel crawls through its last few guns, each held longer than the one before.
         const progress = this.timer / this.spinLength
@@ -271,6 +309,14 @@ export class MysteryBox {
       this.floating.scale.setScalar(this.state === 'spinning' ? 1 - Math.abs(reel) * 0.5 : 1 + Math.sin(this.timer * 3) * 0.02)
       // The Ink Ray is pistol-sized; on offer it is shown larger, the box's prize.
       if (this.state === 'offering' && this.offer?.special === 'rayGun') this.floating.scale.multiplyScalar(1.6)
+      // The reel's colour behind each gun as it passes, brightest as it crosses the middle.
+      const halo = this.halo.material as THREE.SpriteMaterial
+      this.halo.visible = this.state === 'spinning'
+      if (this.halo.visible) {
+        this.halo.position.copy(this.floating.position)
+        halo.color.setHex(RARITY_INFO[this.reelRarity].color)
+        halo.opacity = 0.6 * (1 - Math.abs(reel) * 1.4)
+      }
       if (this.mythic && this.state === 'offering') {
         // It pops up big, turns one and a half times, and settles with its dragon's side (the gun's right,
         // which also faces you in first person) toward you, a little higher and larger.
@@ -321,6 +367,8 @@ export class MysteryBox {
 
   dispose() {
     this.setFloating(null); this.motes.dispose()
+    const halo = this.halo.material as THREE.SpriteMaterial
+    halo.map?.dispose(); halo.dispose()
     this.marker.traverse(o => { if (o instanceof THREE.Mesh) o.geometry.dispose() })
     this.teddy.traverse(o => { if (o instanceof THREE.Mesh) { o.geometry.dispose(); (o.material as THREE.Material).dispose() } })
     for (const mesh of [this.glow, this.spill]) { mesh.geometry.dispose(); (mesh.material as THREE.MeshBasicMaterial).map?.dispose(); (mesh.material as THREE.Material).dispose() }

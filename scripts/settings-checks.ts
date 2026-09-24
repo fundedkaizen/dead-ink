@@ -58,6 +58,15 @@ test('Controller sensitivity, invert Y and blood are stored and checked like the
   assert.equal(sanitizeSettings({ blood: 'off' }).blood, 'off')
 })
 
+test('The mini map is on unless switched off, and it stays off', () => {
+  assert.equal(DEFAULT_SETTINGS.minimap, true)
+  assert.equal(sanitizeSettings({ minimap: 'no' }).minimap, true)
+  store.clear(); resetSettingsCache()
+  setSettings({ minimap: false })
+  resetSettingsCache()
+  assert.equal(getSettings().minimap, false)
+})
+
 test('Without storage the settings still work in memory', () => {
   storageWorks = false; resetSettingsCache()
   try {

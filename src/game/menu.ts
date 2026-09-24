@@ -116,6 +116,8 @@ export class MissionMenu {
     const mode = currentMode(copy), otherMode: GameMode = mode === 'zombies' ? 'hostage' : 'zombies'
     const here = MODES[mode], other = MODES[otherMode]
     const music = copy.music ?? mode === 'zombies'
+    // Only Dead Ink has a mini map.
+    const minimap = mode === 'zombies'
     this.card.classList.add('menu-card')
     this.pause.classList.add('menu-host')
     this.card.dataset.page = 'home'
@@ -192,7 +194,7 @@ export class MissionMenu {
         ${back}
         <h2 id="settings-page-title">Settings</h2>
         <div class="settings-groups">
-          <fieldset class="settings-group mission-settings"><legend>Game</legend></fieldset>
+          <fieldset class="settings-group mission-settings"><legend>Game</legend>${minimap ? toggle('settings-minimap', 'Mini map', getSettings().minimap) : ''}</fieldset>
           <fieldset class="settings-group"><legend>Look</legend>
             ${slider('settings-fov', 'Field of view', SETTING_LIMITS.fov.min, SETTING_LIMITS.fov.max, SETTING_LIMITS.fov.step)}
             ${slider('settings-sensitivity', 'Mouse sensitivity', SETTING_LIMITS.sensitivity.min, SETTING_LIMITS.sensitivity.max, SETTING_LIMITS.sensitivity.step)}
@@ -329,6 +331,8 @@ export class MissionMenu {
     renderBlood()
     const invertY = this.element<HTMLInputElement>('#settings-invert-y')
     invertY.addEventListener('change', () => setSettings({ invertY: invertY.checked }), options)
+    const minimap = this.card.querySelector<HTMLInputElement>('#settings-minimap')
+    minimap?.addEventListener('change', () => setSettings({ minimap: minimap.checked }), options)
     const mute = this.element<HTMLInputElement>('#mission-mute'), motion = this.element<HTMLInputElement>('#mission-motion')
     mute.addEventListener('change', () => setSettings({ muted: mute.checked }), options)
     motion.addEventListener('change', () => setSettings({ reducedMotion: motion.checked }), options)

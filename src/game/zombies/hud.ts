@@ -36,6 +36,9 @@ export class ZombieHud {
   private partsEl = document.createElement('div')
   private questEl = document.createElement('div')
   private scoresEl = document.createElement('div')
+  private standEl = document.createElement('div')
+  private standLabel = document.createElement('span')
+  private standFill = document.createElement('i')
   private shownScores = ''
   private shownQuest = ''
   private shownBossLabel = 'THE BRUTE'
@@ -84,7 +87,13 @@ export class ZombieHud {
     this.scoresEl.className = 'dead-ink-scores'
     this.scoresEl.setAttribute('role', 'status')
     this.scoresEl.hidden = true
-    this.root.append(this.partsEl, this.shieldEl, this.questEl, this.scoresEl)
+    this.standEl.className = 'dead-ink-stand'
+    this.standEl.setAttribute('role', 'status')
+    const standBar = document.createElement('div')
+    standBar.append(this.standFill)
+    this.standEl.append(this.standLabel, standBar)
+    this.standEl.hidden = true
+    this.root.append(this.partsEl, this.shieldEl, this.questEl, this.scoresEl, this.standEl)
     this.root.append(this.roundEl, this.pointsEl, this.banner, this.powerupsEl, this.perksEl, this.bossEl)
     parent.append(this.root)
   }
@@ -168,6 +177,15 @@ export class ZombieHud {
   }
 
   /** The main quest's next step, a quiet line under the round; null hides it. */
+  /** The last stand's bar under the crosshair: reviving, being revived, or bleeding out. `null` hides it. */
+  lastStand(label: string | null, fraction = 0, tone: 'revive' | 'bleed' = 'revive') {
+    this.standEl.hidden = !label
+    if (!label) return
+    if (this.standLabel.textContent !== label) this.standLabel.textContent = label
+    this.standEl.dataset.tone = tone
+    this.standFill.style.transform = `scaleX(${Math.min(1, Math.max(0, fraction)).toFixed(3)})`
+  }
+
   quest(text: string | null) {
     const shown = text ?? ''
     if (shown === this.shownQuest) return

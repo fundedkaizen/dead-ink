@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { Draft, wallText } from '../../render/ink'
 import { PRICES } from './rules'
-import type { WallSpot } from './placement'
+import type { WallSize, WallSpot } from './placement'
 import { LightMotes, MuzzleSparks } from './effects'
 import { metal } from '../../lab/weapons/models/common'
 
@@ -105,6 +105,8 @@ function iconPlane(canvas: HTMLCanvasElement, size: number) {
 
 /** A perk machine against a wall: ink cabinet, a lit panel in the perk's colour, its badge and price. */
 export class PerkMachine {
+  /** The block it fills against its wall, for placement: the cabinet, 1.05 wide, 2.05 tall, out to 0.74. */
+  static readonly SIZE: WallSize = { halfWidth: 0.53, top: 2.05, depth: 0.74 }
   readonly root = new THREE.Group()
   readonly point: THREE.Vector3
   private light: THREE.Mesh
@@ -190,6 +192,12 @@ export class PackAPunch {
   private hue = 0
   private lastPound = -1
   static readonly REST = 2.42
+  /**
+   * The block it fills, sign and all, for placement. The sign stands clear of the wall on the pillars, so
+   * only the part up to the crossbeam needs plain wall behind it. Under 3.84 m, it fits the Detention
+   * block's rooms (3.88 m), its zone.
+   */
+  static readonly SIZE: WallSize = { halfWidth: 1.25, top: 3.84, depth: 1.2, face: 3.3 }
 
   constructor(readonly spot: WallSpot) {
     this.root.name = 'Pack-a-Punch'
@@ -219,7 +227,8 @@ export class PackAPunch {
     }
     frame.box(2.3, 0.32, 0.55, 0, 3.1, -0.3, 'paper', 'edge')
     for (let x = -1.05; x <= 1.06; x += 0.3) frame.box(0.04, 0.04, 0.02, x, 3.1, -0.02, 'concrete', 'detail')
-    frame.box(2.5, 0.66, 0.1, 0, 3.66, -0.36, 'paper', 'edge')
+    // The sign board sits on the crossbeam, its top at 3.83 m.
+    frame.box(2.5, 0.56, 0.1, 0, 3.545, -0.36, 'paper', 'edge')
     frame.finish()
     this.root.add(frame)
     // The press head, which moves.
@@ -248,7 +257,7 @@ export class PackAPunch {
     this.press.add(this.gear)
     // Colour: the sign, the emblem, the lights and the light on the ground all shift together.
     const sign = new THREE.Mesh(new THREE.PlaneGeometry(2.3, 0.5), this.tint(new THREE.MeshBasicMaterial({ map: signTexture(), transparent: true, depthWrite: false, toneMapped: false })))
-    sign.position.set(0, 3.66, -0.3)
+    sign.position.set(0, 3.545, -0.3)
     const emblem = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.62), this.tint(new THREE.MeshBasicMaterial({ map: emblemTexture(), transparent: true, depthWrite: false, toneMapped: false })))
     emblem.position.set(0, 0.57, front + 0.012)
     this.root.add(sign, emblem)
