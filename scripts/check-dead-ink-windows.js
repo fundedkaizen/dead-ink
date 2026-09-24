@@ -45,8 +45,9 @@ const status = window.__windowsCheck = { done: false, results }
   let sent = false
   const pickSpawn = barriers.pickSpawn
   barriers.pickSpawn = () => sent ? null : (sent = true, { barrier: b, rise: b.rises[0] })
+  // Zombie hits only: the runtime also calls damage() every frame with no fall damage.
   const hits = [], damage = m.damage
-  m.damage = function (...args) { hits.push(performance.now()); return damage.apply(this, args) }
+  m.damage = function (amount, cause, ...rest) { if (cause === 'zombie' && amount > 0) hits.push(performance.now()); return damage.call(this, amount, cause, ...rest) }
   m.rounds.timer = 0.01
   check(await until(() => m.director.aliveCount === 1, 8000), 'round 1 sends its first zombie')
   m.rounds.toSpawn = 0
