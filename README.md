@@ -5,6 +5,8 @@ A Call of Duty Zombies-style survival game that runs in the browser, drawn in in
 ![The Brute](docs/brute.png)
 ![An Ink Storm](docs/ink-storm.png)
 
+**Play it now:** https://fundedkaizen.github.io/dead-ink/?mode=zombies (the hostage mission: https://fundedkaizen.github.io/dead-ink/)
+
 ## What's in it
 
 - Endless rounds of zombies with Call of Duty's health curve, points and prices

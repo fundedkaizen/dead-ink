@@ -99,8 +99,11 @@ export class CoopLink<Out extends CoopEnvelope, In extends CoopEnvelope = Out & 
   open(code?: string) {
     this.close()
     this.closed = false
+    // The relay rides on the page's own server (dev, preview), or a separate one named at build time for a static
+    // host such as GitHub Pages (VITE_COOP_URL, e.g. wss://relay.example.com/coop).
     const scheme = location.protocol === 'https:' ? 'wss' : 'ws'
-    const socket = new WebSocket(`${scheme}://${location.host}/coop${code ? `?room=${encodeURIComponent(code)}` : ''}`)
+    const relay = (import.meta.env?.VITE_COOP_URL as string | undefined) || `${scheme}://${location.host}/coop`
+    const socket = new WebSocket(`${relay}${code ? `?room=${encodeURIComponent(code)}` : ''}`)
     this.socket = socket
     this.onStatus({ kind: 'connecting' })
     // No answer in a few seconds: say so instead of "Connecting..." forever.
