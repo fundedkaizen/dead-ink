@@ -1215,6 +1215,9 @@ export class ZombiesRuntime {
     const paired = this.paired
     for (const mate of this.mates.values()) {
       const state = paired ? mate.state : null
+      // A reviver kneels facing whoever they are reviving: us, or another teammate.
+      mate.avatar.poses.reviveAt = state?.rv && state.rt !== undefined
+        ? state.rt === this.coop.id ? this.player.body.position : this.mates.get(state.rt)?.avatar.feet ?? null : null
       mate.avatar.update(dt, state)
       if (state) mate.tag.name(state.name)
       mate.tag.update(this.camera.perspective, state ? mate.avatar.head() : null, !!state?.dn)

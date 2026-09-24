@@ -241,7 +241,7 @@ export class PartnerAvatar {
   }
 
   /** The head, for the name tag. */
-  head(out = new THREE.Vector3()) { return out.copy(this.feet).setY(this.feet.y + 1.95) }
+  head(out = new THREE.Vector3()) { return out.copy(this.feet).setY(this.feet.y + (this.state?.dn ? 0.95 : 1.95)) }
 
   update(dt: number, state: PlayerState | null) {
     const actor = this.actor
