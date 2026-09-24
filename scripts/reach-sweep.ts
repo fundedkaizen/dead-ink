@@ -273,7 +273,10 @@ export function sweepWorld(graphFile = 'public/nav/compound.json', dressed = tru
   // them), then the junk it scatters, its big props solid to players and zombies alike and not in the baked
   // graph. The runtime also keeps the junk off its stations, which the sweep does not place.
   const barriers = new Barriers(nav.scene, nav.world, graph)
-  if (dressed) addDressing(nav.scene, nav.world, seeded(0xDEAD1), [])
+  if (dressed) {
+    addDressing(nav.scene, nav.world, seeded(0xDEAD1), [])
+    graph.closeSolids(nav.world, nav.scene.getObjectByName('Dead Ink dressing')!.userData.solids)
+  }
   const doors = nav.doors.filter(door => !door.userData.missionLocked)
   const navigation = new EnemyNavigation(nav.world, doors, () => {})
   return { ...nav, doors, graph, zones, barriers, navigation, hash, ways: traversals(nav.scene, nav.world) }
