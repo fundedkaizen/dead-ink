@@ -1543,7 +1543,7 @@ export class ZombiesRuntime {
     if (!director) return
     let points = 0, kills = 0
     for (const hit of director.blast(at, radius, damage)) {
-      points += pointsForHit({ lethal: hit.lethal, zone: 'torso' })
+      points += pointsForHit({ lethal: hit.lethal, explosive: true })
       if (hit.lethal) { kills++; this.partnerKills++; this.killed(hit.zombie.position, hit.zombie, null, false, from) }
     }
     this.blastLook(at, radius, kind)
@@ -1689,7 +1689,7 @@ export class ZombiesRuntime {
     if (this.isGuest) return
     const damage = zombieHealth(this.rounds.round) * DIFFICULTY[this.difficulty].health * 3
     for (const hit of director.blast(at, DECOY.radius, damage)) {
-      this.award(pointsForHit({ lethal: hit.lethal, zone: 'torso' }))
+      this.award(pointsForHit({ lethal: hit.lethal, explosive: true }))
       this.hits.hit(hit.reaction.point, hit.dealt, hit.zombie.id, false, hit.lethal)
       if (hit.lethal) { this.state.kills++; this.killed(hit.zombie.position, hit.zombie) }
     }
@@ -2066,7 +2066,7 @@ export class ZombiesRuntime {
     // Twice a zombie's health: with the blast's falloff, everything inside the radius dies, at any round.
     const damage = zombieHealth(this.rounds.round) * DIFFICULTY[this.difficulty].health * 2
     for (const hit of director.blast(centre, burst.radius, damage)) {
-      this.award(pointsForHit({ lethal: hit.lethal, zone: 'torso' }))
+      this.award(pointsForHit({ lethal: hit.lethal, explosive: true }))
       this.hits.hit(hit.reaction.point, hit.dealt, hit.zombie.id, false, hit.lethal)
       if (hit.lethal) { this.state.kills++; this.killed(hit.zombie.position, hit.zombie) }
     }
@@ -2264,7 +2264,7 @@ export class ZombiesRuntime {
     if (this.isGuest || !director) return
     for (const hit of director.blast(at, radius, damage)) {
       this.hitFlash = 0.15
-      this.award(pointsForHit({ lethal: hit.lethal, zone: 'torso' }))
+      this.award(pointsForHit({ lethal: hit.lethal, explosive: true }))
       this.hits.hit(hit.reaction.point, hit.dealt, hit.zombie.id, false, hit.lethal)
       if (hit.lethal) { this.state.kills++; this.killed(hit.zombie.position, hit.zombie) }
     }
@@ -2292,7 +2292,7 @@ export class ZombiesRuntime {
     const damage = Math.max(1500, zombieHealth(this.rounds.round) * DIFFICULTY[this.difficulty].health * 1.6) * scale
     for (const hit of director.blast(at, radius, damage)) {
       this.hitFlash = 0.15
-      this.award(pointsForHit({ lethal: hit.lethal, zone: 'torso' }))
+      this.award(pointsForHit({ lethal: hit.lethal, explosive: true }))
       this.hits.hit(hit.reaction.point, hit.dealt, hit.zombie.id, false, hit.lethal)
       if (hit.lethal) { this.state.kills++; this.killed(hit.zombie.position, hit.zombie) }
     }
@@ -2313,7 +2313,7 @@ export class ZombiesRuntime {
     // A fixed blow, as a frag's is in Call of Duty (grenades.ts): a pack dies early on; from about round 6
     // the ones at the edge live through it, and some of them crawl.
     for (const hit of director.blast(at, GRENADE.radius, GRENADE.damage)) {
-      this.award(pointsForHit({ lethal: hit.lethal, zone: 'torso' }))
+      this.award(pointsForHit({ lethal: hit.lethal, explosive: true }))
       this.hits.hit(hit.reaction.point, hit.dealt, hit.zombie.id, false, hit.lethal)
       if (hit.lethal) { this.state.kills++; this.killed(hit.zombie.position, hit.zombie) }
     }

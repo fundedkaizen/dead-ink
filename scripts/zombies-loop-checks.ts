@@ -100,6 +100,10 @@ assert.equal(pointsForHit({ lethal: false, zone: 'head' }), 10, 'a headshot that
 assert.equal(pointsForHit({ lethal: true, zone: 'torso' }), 60)
 assert.equal(pointsForHit({ lethal: true, zone: 'head' }), 100)
 assert.equal(pointsForHit({ lethal: true, zone: 'torso', knife: true }), 130)
+assert.equal(pointsForHit({ lethal: true, zone: 'arm' }), 50, 'a limb kill pays 50, as in Call of Duty')
+assert.equal(pointsForHit({ lethal: true, zone: 'leg' }), 50)
+assert.equal(pointsForHit({ lethal: true, explosive: true }), 50, 'an explosive kill pays 50')
+assert.equal(pointsForHit({ lethal: false, explosive: true }), 10, 'a blast that does not kill is still a hit')
 assert.equal(pointsForHit({ lethal: true, zone: 'head' }, true), 200, 'double points')
 
 const start = startingPistol()
