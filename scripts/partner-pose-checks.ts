@@ -201,9 +201,19 @@ async function scenario(fps: number) {
   state.rv = 0.8
   run.step(0.1)
   assert((syringe.userData.ink as THREE.Object3D).scale.y < full - 0.5, `${run.label}: the plunger does not follow the revive`)
-  run.step(0.9)
+  // Told where the teammate lies (PlayerState.rt), the kneel turns to face them and reaches to them.
+  const kneelAt = run.actor.root.position.clone(), h = run.poses.heading
+  const aside = new THREE.Vector3(kneelAt.x + Math.cos(h) * 0.9, GROUND, kneelAt.z - Math.sin(h) * 0.9)
+  run.poses.reviveAt = aside
+  run.step(0.8)
+  const toward = Math.atan2(aside.x - kneelAt.x, aside.z - kneelAt.z), off = Math.atan2(Math.sin(toward - run.poses.heading), Math.cos(toward - run.poses.heading))
+  assert(Math.abs(off) < 0.08, `${run.label}: the kneel does not face the teammate (${off.toFixed(2)} rad off)`)
+  const syringeHand = run.bones['hand.L'].localToWorld(new THREE.Vector3(0, 0.035, 0))
+  assert(Math.hypot(syringeHand.x - aside.x, syringeHand.z - aside.z) < 0.3, `${run.label}: the syringe is ${Math.hypot(syringeHand.x - aside.x, syringeHand.z - aside.z).toFixed(2)} m from the teammate`)
+  run.step(0.1)
   state.rv = 0
   const stand = run.until('up', PARTNER_POSE_SECONDS.kneel + 2 * run.dt)
+  run.poses.reviveAt = null
   run.step(0.2)
   assert(!syringe.visible, `${run.label}: the syringe still shows after the revive`)
   run.step(0.5)
@@ -268,7 +278,7 @@ for (const fps of [30, 60, 144]) await scenario(fps)
     'lookRotation', 'aimBone', 'groundedEnd', 'trackHeading', 'restOnFloor', 'standOn', 'under', 'addEuler', 'place', 'arc', 'frame',
     'palmDown', 'layArm', 'softReach', 'elbowAngle', 'hingeFor', 'towardDirection', 'elbowScore', 'armOffFloor', 'idle', 'pushPlunger',
     'crawl', 'aim', 'clutch', 'reach', 'breath', 'settle', 'update', 'track', 'pose', 'pushUp', 'gunOnFloor', 'handOnFloor', 'restLimb',
-    'lift', 'aimPistol', 'clutchBelly', 'crawlReach', 'reviveHands', 'look']
+    'lift', 'aimPistol', 'clutchBelly', 'crawlReach', 'reviveHands', 'look', 'reviveDistance']
   // Comments and plain strings out first (template strings stay), so they can neither hide nor fake a match.
   const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '').replace(/'(?:[^'\\\n]|\\.)*'/g, "''")
   const bodies: [string, string][] = []

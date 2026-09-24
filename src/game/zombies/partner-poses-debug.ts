@@ -38,6 +38,7 @@ export function install() {
   const origin = new THREE.Vector3(), facing = new THREE.Vector3(), left = new THREE.Vector3()
   const state: PlayerState = { id: 1, p: [0, 0, 0], yaw: 0, pitch: 0, w: 'pistol', mv: 0, dn: 0, rv: 0, pts: 0, kills: 0, name: 'Partner' }
   const patientState: PlayerState = { ...state, id: 2, dn: 1, name: 'Teammate' }
+  const patientAt = new THREE.Vector3()
   /** A look yaw for a facing direction (the camera looks down -Z at yaw 0). */
   const yawOf = (x: number, z: number) => Math.atan2(-x, -z)
 
@@ -80,9 +81,12 @@ export function install() {
       state.yaw = yawOf(facing.x * c + left.x * s, facing.z * c + left.z * s)
     }
     if (name === 'revive' && state.rv) state.rv = Math.min(1, Math.max(0.02, (t - 0.8) / 3))
-    // The teammate lies 1.2 m ahead of the reviver, across its line.
+    // The teammate lies 1.2 m ahead of the reviver, across its line; the reviver is told where (PlayerState.rt).
     patientState.p = [x + facing.x * 1.2, origin.y, z + facing.z * 1.2]
     patientState.yaw = state.yaw + Math.PI / 2
+    patientAt.fromArray(patientState.p)
+    if (name === 'revive') state.rt = patientState.id
+    avatar!.poses.reviveAt = name === 'revive' ? patientAt : null
   }
 
   function feed(dt: number, name: Name, t: number) {

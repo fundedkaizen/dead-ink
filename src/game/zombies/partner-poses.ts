@@ -256,6 +256,8 @@ function aimBone(bone: THREE.Bone, end: THREE.Vector3, target: THREE.Vector3) {
   bone.quaternion.copy(bone.parent!.getWorldQuaternion(q3).invert().multiply(q1))
   bone.updateWorldMatrix(false, true)
 }
+/** How fast the posed body may turn to face somewhere new (rad/s). */
+const TURN_SPEED = 8
 /** How fast a floor clamp's heading may turn (rad/s). */
 const HEADING_TURN = 9
 /** The body's forward, for segments that point straight down and so have no heading of their own. */
@@ -626,6 +628,12 @@ export class PartnerPoses {
   crawlPhase = 0
   /** Made with the rig, in the left hand. */
   syringe: THREE.Group | null = null
+  /**
+   * Where the teammate they revive lies (their feet: PlayerState.p of player `rt`), when the game knows it:
+   * the kneel then faces them and reaches to them. Without it, it faces along the reviver's look and judges
+   * the reach from how far down they look.
+   */
+  reviveAt: THREE.Vector3 | null = null
   private rig: Rig | null = null
   private actor: EnemyActor | null = null
   private readonly from = newFrame()
@@ -658,7 +666,7 @@ export class PartnerPoses {
   private clock = 0
   /** The rise is only standing up out of the revive kneel. */
   private fromKneel = false
-  /** How far ahead the syringe goes and how far the kneel leans in, set as they kneel. */
+  /** How far ahead the syringe goes and how far the kneel leans in (eased toward the teammate's distance). */
   private handReach = REACH
   private lunge = 0
   private pitch = 0
@@ -801,13 +809,10 @@ export class PartnerPoses {
         this.keys = this.fromKneel ? [from, key(PARTNER_POSE_SECONDS.kneel, frames.stand)]
           : [from, key(0.28, frames.roll), key(0.52, frames.knee), key(0.76, frames.kneelUp), key(0.98, frames.push), key(PARTNER_POSE_SECONDS.rise, frames.stand)]
         break
-      case 'revive': {
-        const pitch = this.pitch
-        this.handReach = THREE.MathUtils.clamp(pitch < -0.2 ? REVIVE_EYE / Math.tan(-pitch) : REACH, REACH, REACH_MOST)
-        this.lunge = THREE.MathUtils.clamp(this.handReach - LEAN_FROM, 0, LEAN)
+      case 'revive':
+        this.handReach = this.reviveDistance()
         this.keys = [from, key(PARTNER_POSE_SECONDS.kneel, frames.kneel)]
         break
-      }
       case 'down':
         this.keys = [from, key(0.6, frames.down)]
         break
@@ -815,6 +820,13 @@ export class PartnerPoses {
         this.keys = [from, key(PARTNER_POSE_SECONDS.slump, frames.dead)]
         break
     }
+  }
+
+  /** How far ahead of the kneel the teammate is: measured when the game says where, judged from the look if not. */
+  private reviveDistance() {
+    const at = this.reviveAt, feet = this.actor!.root.position
+    const distance = at ? Math.sqrt((at.x - feet.x) ** 2 + (at.z - feet.z) ** 2) : this.pitch < -0.2 ? REVIVE_EYE / Math.tan(-this.pitch) : REACH
+    return THREE.MathUtils.clamp(distance, REACH, REACH_MOST)
   }
 
   private handBack() {
@@ -828,9 +840,15 @@ export class PartnerPoses {
   private pose(dt: number, rig: Rig, actor: EnemyActor, state: PartnerPoseState, facing: number) {
     const phase = this.phase, t = this.time
     const feet = actor.root.position, ground = feet.y
-    // ---- heading: a lying body turns slowly; the chest and arm cover the rest of the aim.
-    const turn = phase === 'down' ? 2.2 : phase === 'rise' ? (t > 0.45 ? 10 : 1.5) : phase === 'revive' ? 14 : 0
-    if (turn) this.heading += wrap(facing - this.heading) * (1 - Math.exp(-dt * turn))
+    // ---- heading: a lying body turns slowly; the chest and arm cover the rest of the aim. Reviving faces the teammate.
+    // (Standing up from a revive turns back quickly: the actor takes over along the look 0.25 s later.)
+    const turn = phase === 'down' ? 2.2 : phase === 'rise' ? (this.fromKneel ? 20 : t > 0.45 ? 10 : 1.5) : phase === 'revive' ? 14 : 0
+    const toward = phase === 'revive' && this.reviveAt ? Math.atan2(this.reviveAt.x - feet.x, this.reviveAt.z - feet.z) : facing
+    if (turn) this.heading += THREE.MathUtils.clamp(wrap(toward - this.heading) * (1 - Math.exp(-dt * turn)), -TURN_SPEED * dt, TURN_SPEED * dt)
+    if (phase === 'revive') {
+      this.handReach += (this.reviveDistance() - this.handReach) * (1 - Math.exp(-dt / 0.15))
+      this.lunge = THREE.MathUtils.clamp(this.handReach - LEAN_FROM, 0, LEAN)
+    }
     actor.root.rotation.set(0, this.heading, 0, 'YXZ')
     FORWARD.set(Math.sin(this.heading), 0, Math.cos(this.heading))
     // ---- layer weights
