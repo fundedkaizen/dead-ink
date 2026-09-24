@@ -64,10 +64,12 @@ export function movementMix(round: number) {
 
 /**
  * Points. VERIFIED (gamerguides.com Black Ops II zombies guide; callofduty.fandom.com Points page):
- * a non-lethal hit is 10; a kill is 60, a headshot kill 100, a knife kill 130; each board repaired 10.
- * Here a kill's value replaces its lethal hit's 10 rather than adding to it.
+ * a non-lethal hit is 10; a kill is 60 in the torso, 50 in a limb, 100 with a headshot, 130 with the
+ * knife and 50 with an explosive (a grenade, a rocket, any blast); each board repaired 10. Call of
+ * Duty's neck kill (70) has no zone here, so it pays as the torso. A kill's value replaces its lethal
+ * hit's 10 rather than adding to it.
  */
-export const POINTS = { hit: 10, kill: 60, headshotKill: 100, knifeKill: 130, board: 10 } as const
+export const POINTS = { hit: 10, kill: 60, limbKill: 50, headshotKill: 100, knifeKill: 130, explosiveKill: 50, board: 10 } as const
 export const STARTING_POINTS = 500
 
 /**

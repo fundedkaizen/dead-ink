@@ -55,8 +55,8 @@ const status = window.__deadInkCheck = { done: false, results }
   check(cleared, 'the bot cleared round 1', `kills ${m.state.kills}, alive ${m.director.aliveCount}, shots ${shots}`)
   check(m.state.kills === 6, 'round 1 had exactly 6 zombies (solo)', `${m.state.kills}`)
   check(m.state.points > startPoints, 'killing zombies earns points', `${startPoints} -> ${m.state.points}`)
-  // Points follow the rule exactly: 10 per non-lethal hit, 60 / 100 per kill.
-  check((m.state.points - startPoints) >= 6 * 60, 'at least 60 points per kill', `${m.state.points - startPoints}`)
+  // Points follow the rule exactly: 10 per non-lethal hit, 50 (a limb) to 100 (a headshot) per kill.
+  check((m.state.points - startPoints) >= 6 * 50, 'at least 50 points per kill', `${m.state.points - startPoints}`)
   check(m.state.headshots >= 1, 'the bot landed headshots', `${m.state.headshots}`)
   check(/Round 1 survived/.test(document.querySelector('.dead-ink-banner')?.textContent || ''), 'the end of round 1 is announced')
   const round2 = await until(() => m.state.round === 2, 14000)

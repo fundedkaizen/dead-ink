@@ -10,9 +10,13 @@ import { POINTS, PRICES, wallAmmoPrice } from './rules'
  * Pure functions, checked in Node.
  */
 
-/** Points for one hit, Call of Duty style: 10 for a hit that does not kill, more for the kill. */
-export function pointsForHit(hit: { lethal: boolean; zone: HitZone; knife?: boolean }, doublePoints = false) {
-  const base = !hit.lethal ? POINTS.hit : hit.knife ? POINTS.knifeKill : hit.zone === 'head' ? POINTS.headshotKill : POINTS.kill
+/**
+ * Points for one hit, Call of Duty style: 10 for a hit that does not kill, more for the kill, by what
+ * made it: the knife, a blast (which has no zone), or where the bullet struck.
+ */
+export function pointsForHit(hit: { lethal: boolean; zone?: HitZone; knife?: boolean; explosive?: boolean }, doublePoints = false) {
+  const base = !hit.lethal ? POINTS.hit : hit.knife ? POINTS.knifeKill : hit.explosive ? POINTS.explosiveKill
+    : hit.zone === 'head' ? POINTS.headshotKill : hit.zone === 'arm' || hit.zone === 'leg' ? POINTS.limbKill : POINTS.kill
   return doublePoints ? base * 2 : base
 }
 

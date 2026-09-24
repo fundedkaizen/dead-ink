@@ -113,6 +113,8 @@ export type Enemy = {
   scanCooldown: number
   scanYaw: number
   defensiveTimer: number
+  /** The player this guard is after (co-op: the one it saw, or who shot it; the host, or a solo player, is 0). */
+  target: number
 }
 
 const tuple = (point: THREE.Vector3): Vec3 => [point.x, point.y, point.z]
@@ -120,7 +122,7 @@ const vector = (value: unknown) => Array.isArray(value) && value.length === 3 &&
 const number = (value: unknown, fallback = 0) => typeof value === 'number' && Number.isFinite(value) ? value : fallback
 const NUMBERS = ['repath', 'stuck', 'senseTimer', 'lostFor', 'shotTimer', 'shots', 'magazine', 'reloadTimer', 'calloutTimer', 'communicationTimer', 'wait',
   'patrolStop', 'visitedWaypoints', 'distanceWalked', 'footstepDistance', 'pathFailures', 'tacticTimer', 'burst', 'aimTime', 'blockedFor', 'contactMemory', 'suppress', 'settledFor', 'hitPause', 'moveSpeed', 'searchIndex',
-  'scanTimer', 'scanDuration', 'scanCooldown', 'scanYaw', 'defensiveTimer'] as const
+  'scanTimer', 'scanDuration', 'scanCooldown', 'scanYaw', 'defensiveTimer', 'target'] as const
 
 export class EnemyDirector {
   readonly enemies: Enemy[] = []
@@ -130,7 +132,10 @@ export class EnemyDirector {
   private plans = new Map<Enemy, { target: THREE.Vector3; job: Generator<void, THREE.Vector3[]> }>()
   navigationFrameMs = 0
   navigationMaxFrameMs = 0
+  /** The local player (whose ears the near-miss sounds are for). */
   private lastPlayer: PlayerSense | null = null
+  /** Everyone the guards can see and shoot this frame: the local player first, then co-op teammates. */
+  private players: PlayerSense[] = []
   private reserveDestination: THREE.Vector3 | null = null
   private elapsed = 0
   readonly bulletTrails: BulletTrails
@@ -163,7 +168,7 @@ export class EnemyDirector {
         reserveRoute: false, alarmResponse: false, alarmExit: null, post: null, visitedWaypoints: 0, distanceWalked: 0, footstepDistance: 0, pathFailures: 0,
         tactic: 'hold', tacticTimer: 0, tacticPoint: null, burst: 0, aimTime: 0, blockedFor: 0, contactMemory: 0, suppress: 0, settledFor: 0, hitPause: 0, moveSpeed: 0,
         searchPoints: [], searchIndex: 0, woundArm: false, woundLeg: false, deathClip: 'dieBody', speaker: i % 4, noticedBodies: [],
-        scanTimer: 0, scanDuration: 0, scanCooldown: 0, scanYaw: 0, defensiveTimer: 0,
+        scanTimer: 0, scanDuration: 0, scanCooldown: 0, scanYaw: 0, defensiveTimer: 0, target: 0,
       }
       if (spec.patrolMode === 'perimeter') {
         enemy.wait = 2 + this.random(enemy) * 2
@@ -235,6 +240,7 @@ export class EnemyDirector {
       if (ally === source || ['dead', 'reserve', 'combat'].includes(ally.state) || ally.position.distanceTo(source.position) > radius) continue
       if (!this.lastPlayer?.radioEnabled && !this.context.world.visible(source.position.clone().add(eyeOffset), ally.position.clone().add(eyeOffset), ignore)) continue
       ally.lastKnown = source.lastKnown.clone()
+      ally.target = source.target
       ally.suspicion = Math.max(ally.suspicion, 0.4)
       ally.lostFor = 0
       this.enter(ally, 'investigate')
@@ -250,6 +256,28 @@ export class EnemyDirector {
     if (!insideVisionCone(origin, enemy.yaw, player.eye, range, enemy.state === 'combat' ? 70 : 55)) return false
     return this.context.world.visible(origin, player.eye, ignore) ||
       this.context.world.visible(origin, player.feet.clone().add(new THREE.Vector3(0, 0.95, 0)), ignore)
+  }
+
+  /**
+   * Who this guard can see now, if anyone: alone, the player; in co-op the nearest one in sight, keeping
+   * its current target unless another is clearly closer.
+   */
+  private sight(enemy: Enemy) {
+    const players = this.players
+    if (players.length === 1) return this.sees(enemy, players[0]) ? players[0] : null
+    let best: PlayerSense | null = null, score = Infinity
+    for (const player of players) {
+      if (!player.alive) continue
+      const distance = enemy.position.distanceTo(player.feet) * ((player.id ?? 0) === enemy.target ? 0.7 : 1)
+      if (distance >= score || !this.sees(enemy, player)) continue
+      best = player; score = distance
+    }
+    return best
+  }
+
+  /** The player a guard is after: its target while that player is still here, otherwise the local player. */
+  private targetOf(enemy: Enemy) {
+    return this.players.find(player => (player.id ?? 0) === enemy.target) ?? this.players[0] ?? this.lastPlayer!
   }
 
   private speed(enemy: Enemy, base: number) { return enemy.woundLeg ? base * 0.6 : base }
@@ -337,18 +365,21 @@ export class EnemyDirector {
     this.context.emit({ kind: 'enemy-reload', position: enemy.position.clone(), radius: 5, weapon: enemy.spec.weapon })
   }
 
-  update(dt: number, player: PlayerSense) {
+  /** `player` is the local player; `others` are co-op teammates the guards can see and shoot too (see sight()). */
+  update(dt: number, player: PlayerSense, others: readonly PlayerSense[] = []) {
     if (!this.loaded || this.disposed || dt <= 0) return
     dt = Math.min(dt, 0.05)
     this.elapsed += dt
     this.lastPlayer = player
+    this.players = others.length ? [player, ...others] : [player]
     // Even a difficult radio investigation must not monopolize a rendered frame.
     this.advancePlans()
     this.bulletTrails.update(dt)
     for (const enemy of this.enemies) {
       if (enemy.state === 'reserve') continue
       if (enemy.state === 'dead') { enemy.actor.update(dt, 'dead', false); continue }
-      if (!player.alive) enemy.canSee = false
+      const target = this.targetOf(enemy)
+      if (!target.alive) enemy.canSee = false
       enemy.timer += dt
       enemy.repath -= dt
       enemy.contactMemory = Math.max(0, enemy.contactMemory - dt)
@@ -371,10 +402,14 @@ export class EnemyDirector {
       enemy.senseTimer -= dt
       if (enemy.senseTimer <= 0) {
         enemy.senseTimer = enemy.state === 'combat' ? COMBAT.senseCombat : COMBAT.senseIdle
-        enemy.canSee = this.sees(enemy, player)
+        const seen = this.sight(enemy)
+        enemy.canSee = !!seen
         // Only an actual sight query supplies a position; cached visibility never tracks a hidden player.
-        if (enemy.canSee) { enemy.lastKnown = player.feet.clone(); enemy.contactMemory = COMBAT.contactMemory }
-        else this.noticeBody(enemy)
+        if (seen) {
+          // Turning onto another player takes a fresh aim.
+          if ((seen.id ?? 0) !== enemy.target) { enemy.target = seen.id ?? 0; enemy.aimTime = 0 }
+          enemy.lastKnown = seen.feet.clone(); enemy.contactMemory = COMBAT.contactMemory
+        } else this.noticeBody(enemy)
       }
       if (enemy.canSee) {
         if (enemy.scanTimer > 0 && this.posture(enemy) === 'crouch') enemy.actor.setPosture?.('crouch', false)
@@ -399,7 +434,7 @@ export class EnemyDirector {
         enemy.hitPause = Math.max(0, enemy.hitPause - dt)
         enemy.settledFor = 0
       } else if (enemy.state === 'combat') {
-        moving = this.combat(enemy, player, dt)
+        moving = this.combat(enemy, this.targetOf(enemy), dt)
       } else if (enemy.state === 'suspicious') {
         if (enemy.scanTimer > 0 && this.posture(enemy) !== 'prone' && this.posture(enemy) !== 'kneel') {
           const progress = 1 - enemy.scanTimer / enemy.scanDuration
@@ -743,16 +778,19 @@ export class EnemyDirector {
     enemy.yaw += clamp(difference, -speed * dt, speed * dt)
   }
 
-  /** Avoid a new overlap; an already overlapping guard may walk out of the overlap. */
-  private separated(enemy: Enemy, next: THREE.Vector3, player?: THREE.Vector3) {
+  /** Avoid a new overlap, with another guard or any player; an already overlapping guard may walk out of the overlap. */
+  private separated(enemy: Enemy, next: THREE.Vector3) {
     for (const other of this.enemies) {
       if (other === enemy || other.state === 'dead' || other.state === 'reserve' || Math.abs(next.y - other.position.y) > 1.5) continue
       const distance = Math.hypot(next.x - other.position.x, next.z - other.position.z)
       if (distance < 0.62 && distance < Math.hypot(enemy.position.x - other.position.x, enemy.position.z - other.position.z) - 0.0001) return false
     }
-    if (!player || Math.abs(next.y - player.y) >= 1.5) return true
-    const distance = Math.hypot(next.x - player.x, next.z - player.z)
-    return distance >= 0.62 || distance >= Math.hypot(enemy.position.x - player.x, enemy.position.z - player.z)
+    for (const { feet } of this.players) {
+      if (Math.abs(next.y - feet.y) >= 1.5) continue
+      const distance = Math.hypot(next.x - feet.x, next.z - feet.z)
+      if (distance < 0.62 && distance < Math.hypot(enemy.position.x - feet.x, enemy.position.z - feet.z)) return false
+    }
+    return true
   }
 
   private move(enemy: Enemy, destination: THREE.Vector3, speed: number, dt: number) {
@@ -762,7 +800,7 @@ export class EnemyDirector {
     if (enemy.spec.role === 'sniper' && (enemy.spec.patrolMode !== 'perimeter' || enemy.state !== 'patrol')) return false
     if (!this.stand(enemy)) return false
     const recovered = this.navigation.recoverDoorOverlap(enemy.position)
-    if (recovered && this.separated(enemy, recovered, this.lastPlayer?.feet)) {
+    if (recovered && this.separated(enemy, recovered)) {
       enemy.position.copy(recovered)
       enemy.path = []; enemy.pathTarget = null; enemy.repath = 0; enemy.stuck = 0
     }
@@ -791,7 +829,7 @@ export class EnemyDirector {
     if (Math.abs(angle) > 0.08) return false
     enemy.yaw += angle
     const next = this.navigation.step(enemy.position, target, speed * dt)
-    if (next && this.separated(enemy, next, this.lastPlayer?.feet)) {
+    if (next && this.separated(enemy, next)) {
       const distance = enemy.position.distanceTo(next)
       enemy.distanceWalked += distance
       enemy.moveSpeed = distance / dt
@@ -820,7 +858,7 @@ export class EnemyDirector {
       for (const [lateral, forward] of [[side * 0.85, 0], [-side * 0.85, 0], [side * 0.65, -0.8], [-side * 0.65, -0.8], [0, -1.2]]) {
         const bypass = enemy.position.clone().add(new THREE.Vector3(perpendicular.z * lateral + perpendicular.x * forward, 0, -perpendicular.x * lateral + perpendicular.z * forward))
         const alternative = this.navigation.floor(bypass, false)
-        if (alternative && this.navigation.segment(enemy.position, alternative, false) && this.separated(enemy, alternative, this.lastPlayer?.feet)) {
+        if (alternative && this.navigation.segment(enemy.position, alternative, false) && this.separated(enemy, alternative)) {
           enemy.path.unshift(alternative)
           enemy.stuck = 0
           break
@@ -921,7 +959,9 @@ export class EnemyDirector {
     const reportRange = (enemy.spec.role === 'sniper' || enemy.spec.weapon === 'sniper'
       ? COMBAT.sniperEngagedRange : COMBAT.engagedRange) + 20
     this.context.emit({ kind: `enemy-shot-${enemy.spec.weapon}`, position: muzzle.clone(), radius: reportRange })
-    const near = !hitPlayer && bulletNearMiss(muzzle, end, player.eye)
+    // The flyby is for the local player's ears, whoever the round was aimed at (co-op: a teammate).
+    const listener = this.lastPlayer ?? player
+    const near = !(hitPlayer && listener === player) && bulletNearMiss(muzzle, end, listener.eye)
     const shotDirection = direction.clone()
     const impact = !hitPlayer && surface ? () => {
       this.context.emit({ kind: 'impact', position: end.clone(), radius: 18 })
@@ -937,9 +977,10 @@ export class EnemyDirector {
         this.context.emit({ kind: 'enemy-bullet-whiz', position: pass.point, source: muzzle.clone(), intensity: pass.intensity, radius: 5 })
       }
     } } : undefined, impact)
+    this.context.onFire?.(this.enemies.indexOf(enemy), muzzle, end, enemy.spec.weapon)
     if (hitPlayer) this.context.damagePlayer(weapon.damage, enemy.position.clone(), {
       ...bodyHit, point: end.clone(), direction: direction.clone(), weapon: enemy.spec.weapon,
-    })
+    }, player.id ?? 0)
     return true
   }
 
@@ -1083,7 +1124,8 @@ export class EnemyDirector {
     return clamp((distance - 0.8 + 1e-8) / 1.73, 0, 1)
   }
 
-  hit(shot: Shot, maxDistance: number) {
+  /** A player's round. `shooter` is who fired it (co-op: a teammate); by default the local player. */
+  hit(shot: Shot, maxDistance: number, shooter: PlayerSense | null = this.lastPlayer) {
     const { nearest, best, normalized } = this.nearestHit(shot.origin, shot.direction, Math.min(maxDistance, shot.range))
     if (!nearest || !best) return false
     const falloff = shot.weapon === 'shotgun' ? shotgunDamageMultiplier(best.distance) : 1
@@ -1097,7 +1139,9 @@ export class EnemyDirector {
     const reaction: HitReaction = { zone: best.zone, point: best.point, direction: normalized, lethal, bone: best.bone, weapon: shot.weapon, targetId: nearest.spec.id }
     nearest.scanTimer = 0
     nearest.actor.root.userData.alertScan = undefined
-    nearest.actor.react(reactionClipName(reaction, fromBehind), lethal, normalized, lethal && shot.weapon === 'shotgun' ? this.shotgunTravel(nearest, normalized) : 1)
+    reaction.clip = reactionClipName(reaction, fromBehind)
+    reaction.travel = lethal && shot.weapon === 'shotgun' ? this.shotgunTravel(nearest, normalized) : 1
+    nearest.actor.react(reaction.clip, lethal, normalized, reaction.travel)
     if (!lethal) { nearest.hitPause = nearest.actor.reactionRemaining || 0.6; nearest.settledFor = 0; nearest.moveSpeed = 0 }
     if (lethal) nearest.deathClip = nearest.actor.deathClip
     this.context.onHit?.(reaction)
@@ -1119,8 +1163,8 @@ export class EnemyDirector {
         if (!this.context.world.visible(this.eye(ally), nearest.position.clone().add(new THREE.Vector3(0, 0.9, 0)), ignore)) continue
         const eye = this.eye(ally)
         const sawShooter = insideVisionCone(eye, ally.yaw, shot.origin, ally.spec.role === 'sniper' ? COMBAT.sniperEngagedRange : COMBAT.engagedRange) && this.context.world.visible(eye, shot.origin, ignore)
-        ally.lastKnown = sawShooter ? shot.origin.clone().setY(this.lastPlayer?.feet.y ?? ally.position.y) : nearest.position.clone()
-        if (sawShooter) ally.contactMemory = COMBAT.contactMemory
+        ally.lastKnown = sawShooter ? shot.origin.clone().setY(shooter?.feet.y ?? ally.position.y) : nearest.position.clone()
+        if (sawShooter) { ally.contactMemory = COMBAT.contactMemory; ally.target = shooter?.id ?? 0 }
         ally.suspicion = Math.max(ally.suspicion, 0.8)
         ally.lostFor = 0
         this.enter(ally, 'investigate')
@@ -1129,11 +1173,12 @@ export class EnemyDirector {
     } else {
       if (best.zone === 'arm') nearest.woundArm = true
       if (best.zone === 'leg') nearest.woundLeg = true
-      nearest.lastKnown = shot.origin.clone().setY(this.lastPlayer?.feet.y ?? nearest.position.y)
+      nearest.lastKnown = shot.origin.clone().setY(shooter?.feet.y ?? nearest.position.y)
       nearest.suspicion = 1
       nearest.lostFor = 0
+      nearest.target = shooter?.id ?? 0
       // A hit supplies the disturbance location; confirmation still needs the actual cone and LOS.
-      const seesShooter = this.lastPlayer ? this.sees(nearest, this.lastPlayer) : false
+      const seesShooter = shooter ? this.sees(nearest, shooter) : false
       this.enter(nearest, seesShooter ? 'combat' : 'investigate')
       if (nearest.state === 'combat') { nearest.shotTimer = Math.max(nearest.shotTimer, COMBAT.aimDelay); nearest.tacticTimer = COMBAT.openingHold }
       else nearest.suppress = 1.4
@@ -1211,6 +1256,7 @@ export class EnemyDirector {
     this.navigationFrameMs = this.navigationMaxFrameMs = 0
     this.clearTraces()
     this.lastPlayer = null
+    this.players = []
     for (const saved of snapshot) {
       const enemy = this.enemies.find(candidate => candidate.spec.id === saved.id)
       if (!enemy) continue
