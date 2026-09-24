@@ -179,7 +179,8 @@ export class MissionHUD {
     this.pause.inert = false
     this.pause.style.removeProperty('opacity')
   }
-  setDeath(sequence: PlayerDeathSequence) {
+  /** Draw a death: the fall's own clock, or a mode's own timing with the same four readings (Dead Ink's game over). */
+  setDeath(sequence: Pick<PlayerDeathSequence, 'menuVisible' | 'menuOpacity' | 'visionLoss' | 'reducedMotion'>) {
     document.body.dataset.death = sequence.menuVisible ? 'menu' : 'falling'
     this.death.hidden = false
     this.death.classList.toggle('reduced-motion', sequence.reducedMotion)
