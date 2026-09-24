@@ -107,6 +107,8 @@ const LATE_WALL_WEAPONS: { name: 'magnum' | 'lmg'; near: [number, number, number
 const DOLL_PLACE: [number, number, number] = [26, 0.7, -10]
 
 const PACKED_TRACER = 0xd4332a
+/** The Ink Ray's bolt, as a teammate sees it go by: its own green. */
+const RAY_TRACER = 0x46e05a
 
 /** Co-op: how close and how long a revive takes, how long you can wait on the floor, how often we send. */
 const COOP = { reviveReach: 2.2, reviveSeconds: 3, revivePoints: 100, bleedSeconds: 45, sendRate: 15 } as const
@@ -1457,6 +1459,14 @@ export class ZombiesRuntime {
           if (mate?.state) mate.state.dn = 0
         } else { this.getUp(); this.hud.notify(`${m.by ?? 'A teammate'} got you back up.`, 2.5) }
         break
+      case 'fire': {
+        // A teammate's shot: its tracer (green for the Ink Ray, red once upgraded) and its report where they stand.
+        const o = toVector(m.o), e = toVector(m.e), ray = m.w === 'raygun'
+        this.bulletTrails.emit(o, e, ray ? 'pistol' : m.w as WeaponName, undefined, undefined, m.pk ? PACKED_TRACER : ray ? RAY_TRACER : undefined)
+        this.audio.play({ kind: ray ? 'shot-raygun' : `shot-${m.w}`, position: o, radius: 55, packed: m.pk })
+        if (this.coop.role === 'host' && m.from !== undefined) this.coop.send({ t: 'fire', o: m.o, e: m.e, w: m.w, pk: m.pk }, { skip: m.from })
+        break
+      }
       case 'soul': {
         const well = this.wells[m.i]
         if (well) { const from = toVector(m.p); this.soulStreams?.emit(from, well); this.emit({ kind: 'soul', position: from, radius: 30 }) }
@@ -1499,7 +1509,6 @@ export class ZombiesRuntime {
       this.coop.send({ t: 'hit', pt: vec(each.reaction.point), dealt: each.dealt, id: each.zombie.id, head: head ? 1 : 0, lethal: each.lethal ? 1 : 0 }, { to: from })
       if (each.lethal) { kills++; if (head) heads++; this.partnerKills++; this.killed(each.zombie.position, each.zombie, null, head, from) }
     }
-    if (!m.pellet) this.bulletTrails.emit(origin, origin.clone().addScaledVector(direction, Math.min(surface?.distance ?? m.range, 60)), m.weapon)
     if (points) this.coop.send({ t: 'award', n: this.timers.doublePoints ? points * 2 : points, k: kills, h: heads }, { to: from })
   }
 
@@ -2167,6 +2176,12 @@ export class ZombiesRuntime {
     this.impactPoint = null
     const scale = ZOMBIE_DAMAGE_SCALE * (this.perks.has('doubleLine') ? PERK_EFFECT.damage : 1)
     const held = this.weapons.current
+    // Teammates see the tracer and hear the gun (a guest's goes through the host to the others).
+    if (this.paired && !shot.pelletIndex) {
+      const end = shot.origin.clone().addScaledVector(shot.direction, Math.min(distance, 60))
+      this.coop.send({ t: 'fire', o: vec(shot.origin), e: vec(end), w: held?.special === 'rayGun' ? 'raygun' : shot.weapon ?? held?.name ?? 'pistol',
+        pk: held?.packed ? held.packLevel ?? 1 : 0 })
+    }
     if (held?.special === 'rayGun') {
       // A bolt, not a bullet: it flies, and bursts where it lands.
       this.bolts.fire(shot.origin, shot.direction, !!held.packed)

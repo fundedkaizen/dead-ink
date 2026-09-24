@@ -79,6 +79,8 @@ export type CoopMessage =
   | { t: 'grab'; k: PowerupKind; p: [number, number, number]; by: number }
   | { t: 'boom'; p: [number, number, number]; r: number }
   | { t: 'soul'; p: [number, number, number]; i: number }
+  /** A teammate fired: the tracer from `o` to `e`, the gun (`raygun` for the Ink Ray) and its Pack-a-Punch level, to see and hear. */
+  | { t: 'fire'; o: [number, number, number]; e: [number, number, number]; w: string; pk?: number }
   | { t: 'gameover' }
   | { t: 'start' }
   // guest -> host
