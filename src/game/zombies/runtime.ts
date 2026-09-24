@@ -513,7 +513,8 @@ export class ZombiesRuntime {
     if (powerSpot) { taken.push(powerSpot.stand); this.powerSwitch = new PowerSwitch(powerSpot); this.scene.add(this.powerSwitch.root) }
     else console.warn('Dead Ink: no wall for the power switch')
     graph.flow([new THREE.Vector3(...BENCH_PLACE)])
-    const [benchSpot] = findWallSpots(graph, this.player.world, this.random, { count: 1, near: 0, far: 30, spacing: 7, avoid: taken, size: BuildSite.BENCH })
+    // Near its place if a wall there fits it, else further out: without a bench the shield cannot be built.
+    const [benchSpot] = [30, 60, 120].map(far => findWallSpots(graph, this.player.world, this.random, { count: 1, near: 0, far, spacing: 7, avoid: taken, size: BuildSite.BENCH })[0]).filter(Boolean)
     if (benchSpot) { taken.push(benchSpot.stand); const bench = new BuildSite('shield', benchSpot, true); this.sites.set('shield', bench); this.scene.add(bench.root) }
     else console.warn('Dead Ink: no wall for the shield bench')
     if (this.pack) { const site = new BuildSite('pack', this.pack.spot, false); this.sites.set('pack', site); this.scene.add(site.root) }

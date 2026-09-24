@@ -189,6 +189,8 @@ export class BuildSite {
   readonly point: THREE.Vector3
   readonly placed = new Set<PartId>()
   private slots = new Map<PartId, { ghost: THREE.Object3D; solid: THREE.Object3D }>()
+  /** A machine's chalk outline and its name on the wall: gone once the machine stands there. */
+  private marks: THREE.Object3D[] = []
   private pop = 0
 
   constructor(readonly build: BuildId, readonly spot: WallSpot, bench: boolean) {
@@ -209,8 +211,9 @@ export class BuildSite {
       const chalk = new Draft(`Build outline · ${BUILDS[build].label}`)
       chalk.line([[-1, 0.02, -0.6], [1, 0.02, -0.6], [1, 0.02, 0.6], [-1, 0.02, 0.6]], 'detail', true)
       chalk.finish()
-      this.root.add(chalk)
-      this.root.add(wallText(BUILDS[build].label.toUpperCase(), [0, 1.5, -0.47], 0.22))
+      const label = wallText(BUILDS[build].label.toUpperCase(), [0, 1.5, -0.47], 0.22)
+      this.marks.push(chalk, label)
+      this.root.add(chalk, label)
     }
     const parts = BUILDS[build].parts
     parts.forEach((id, i) => {
@@ -243,11 +246,15 @@ export class BuildSite {
   }
 
   /** Hide the parts once the finished thing takes their place (the power switch, the machine). */
-  hideParts() { for (const { ghost, solid } of this.slots.values()) { ghost.visible = false; solid.visible = false } }
+  hideParts() {
+    for (const { ghost, solid } of this.slots.values()) { ghost.visible = false; solid.visible = false }
+    for (const mark of this.marks) mark.visible = false
+  }
 
   reset() {
     this.placed.clear()
     for (const { ghost, solid } of this.slots.values()) { ghost.visible = true; solid.visible = false; solid.scale.setScalar(0.8) }
+    for (const mark of this.marks) mark.visible = true
   }
 
   update(dt: number) {
