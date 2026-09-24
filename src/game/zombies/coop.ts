@@ -3,6 +3,7 @@ import { EnemyActor } from '../actors'
 import { HOSTAGE_INK } from '../hostage-actor'
 import { createMissionGun } from '../weapon-models'
 import { disposeGun } from '../../lab/weapons/models'
+import { PartnerPoses } from './partner-poses'
 import type { WeaponName } from '../types'
 import type { ZombieSnap } from './director'
 import type { PowerupKind } from './rules'
@@ -219,6 +220,8 @@ export class PartnerAvatar {
   private weapon: WeaponName | null = null
   private gun: ReturnType<typeof createMissionGun> | null = null
   private loading: Promise<void> | null = null
+  /** Going down, last stand, crawling, getting up, reviving, bled out (partner-poses.ts). */
+  readonly poses = new PartnerPoses()
 
   constructor(private scene: THREE.Scene, private color: number = HOSTAGE_INK) {}
 
@@ -254,13 +257,8 @@ export class PartnerAvatar {
     this.yaw += Math.atan2(Math.sin(face - this.yaw), Math.cos(face - this.yaw)) * (1 - Math.exp(-dt * 14))
     if (state.w !== this.weapon) this.swapGun(state.w)
     actor.root.position.copy(this.feet)
-    if (state.dn) {
-      // Down: flat on the ground, propped on an elbow.
-      actor.root.rotation.set(-1.25, this.yaw, 0.2, 'YXZ')
-      actor.root.position.y += 0.25
-      actor.update(dt, 'combat', false)
-      return
-    }
+    // Down, getting up, reviving or bled out: partner-poses.ts owns the stickman until they stand again.
+    if (this.poses.update(dt, actor, state, this.yaw, this.gun)) return
     actor.root.rotation.set(0, this.yaw, 0, 'YXZ')
     const aim = this.feet.clone().add(new THREE.Vector3(-Math.sin(state.yaw) * Math.cos(state.pitch), 1.5 + Math.sin(state.pitch), -Math.cos(state.yaw) * Math.cos(state.pitch)).multiplyScalar(1).setLength(10)).setY(this.feet.y + 1.5 + Math.sin(state.pitch) * 10)
     actor.update(dt, state.mv ? 'patrol' : 'combat', !!state.mv, state.mv ? undefined : aim, state.mv ? 3.2 : 0)
@@ -279,6 +277,7 @@ export class PartnerAvatar {
   }
 
   dispose() {
+    this.poses.dispose()
     if (this.gun) disposeGun(this.gun)
     this.actor?.root.removeFromParent()
     this.actor?.dispose()
