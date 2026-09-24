@@ -12,10 +12,13 @@ import type { CollisionWorld } from '../../player/collision'
  * the hall's outer walls. The wire is on the parapet, not the roof, so no graph spot changes.
  */
 export const ROOF_WIRE = {
-  /** Its collider, from the top of the parapet: a jump from the roof clears the parapet by 0.2 m at best. */
-  height: 0.62,
-  /** The coil: how far out it swells from its axis, and how far apart its loops are. */
-  radius: 0.28, pitch: 0.26,
+  /**
+   * Its collider, from the top of the parapet, up to the barbed strand along the stakes. A sprint jump into the
+   * parapet rides up its edge and lifts the feet up to 0.73 m over it (dead-ink-perimeter-checks tries).
+   */
+  height: 1.1,
+  /** The coil: how far it swells out across the wall and up, and how far apart its loops are. */
+  across: 0.3, rise: 0.45, pitch: 0.26,
 } as const
 
 /** Wire the mess hall roof and close its ladder (see ROOF_WIRE); returns the undo. */
@@ -49,29 +52,30 @@ export function wireRoof(world: CollisionWorld, scene: THREE.Object3D) {
   }
 }
 
-/** A concertina coil resting on a wall top from (ax, az) to (bx, bz), barbed, on a stake every few metres. */
+/** A concertina coil resting on a wall top from (ax, az) to (bx, bz), barbed, on stakes with a barbed strand along their tops. */
 function coil(g: Draft, ax: number, az: number, bx: number, bz: number) {
   const length = Math.hypot(bx - ax, bz - az), ux = (bx - ax) / length, uz = (bz - az) / length
-  const { radius, pitch } = ROOF_WIRE, loops = Math.round(length / pitch), sides = 10
+  const { across: wide, rise, pitch, height } = ROOF_WIRE, loops = Math.round(length / pitch), sides = 12
   const at = (s: number, across: number, up: number): Point => [ax + ux * s - uz * across, up, az + uz * s + ux * across]
   for (let loop = 0; loop < loops; loop++) {
     // No two loops quite the same size, as a coil stretched along a wall sags and bulges.
-    const r = radius * (0.9 + 0.1 * Math.sin(loop * 2.3) + 0.05 * Math.sin(loop * 0.7))
+    const k = 0.9 + 0.1 * Math.sin(loop * 2.3) + 0.05 * Math.sin(loop * 0.7)
     const points: Point[] = []
     for (let i = 0; i <= sides; i++) {
       const s = (loop + i / sides) * length / loops, angle = i / sides * Math.PI * 2 - Math.PI / 2
-      points.push(at(s, Math.cos(angle) * r, radius + Math.sin(angle) * r))
+      points.push(at(s, Math.cos(angle) * wide * k, rise + Math.sin(angle) * rise * k))
     }
     g.line(points, 'detail')
     // Barbs on the crown and the outer side of each loop.
     const s = (loop + 0.5) * length / loops
-    for (const [across, up] of [[0, radius + r], [r, radius]]) {
+    for (const [across, up] of [[0, rise * (1 + k)], [wide * k, rise]]) {
       g.line([at(s - 0.04, across - 0.03, up - 0.03), at(s + 0.04, across + 0.03, up + 0.03)], 'mesh')
       g.line([at(s - 0.04, across + 0.03, up + 0.03), at(s + 0.04, across - 0.03, up - 0.03)], 'mesh')
     }
   }
-  for (let i = 0, stakes = Math.max(1, Math.round(length / 3)); i <= stakes; i++) {
-    const s = i / stakes * length
-    g.line([at(s, 0, 0), at(s, 0, radius * 2 + 0.06)], 'detail')
-  }
+  const stakes = Math.max(1, Math.round(length / 3))
+  for (let i = 0; i <= stakes; i++) g.line([at(i / stakes * length, 0, 0), at(i / stakes * length, 0, height)], 'detail')
+  // The strand along the stake tops, barbed every 0.3 m: the collider's top edge, drawn.
+  g.line([at(0, 0, height), at(length, 0, height)], 'detail')
+  for (let s = 0.15; s < length; s += 0.3) g.line([at(s - 0.04, -0.03, height - 0.03), at(s + 0.04, 0.03, height + 0.03)], 'mesh')
 }
