@@ -36,7 +36,7 @@ const status = window.__minimapCheck = { done: false, results }
   const size = Math.round(rect.width), perMetre = rect.width / 2 / 35
   const wide = innerWidth > 900 && innerHeight > 700
   check(wide ? size === 180 : size < 180 && size >= 110, `it is ${wide ? '180' : 'smaller than 180'} px across here`, `${size} px at ${innerWidth}x${innerHeight}`)
-  check(rect.left < 30 && rect.top < 30, 'in the top-left corner', `${rect.left},${rect.top}`)
+  check(rect.right > innerWidth - 30 && rect.top < 30, 'in the top-right corner', `${rect.right},${rect.top}`)
   status.size = size
   status.buildMs = Math.round(mm.buildMs)
 

@@ -44,7 +44,9 @@ export class DeadInkAudio extends MissionAudio {
       'shot-rocket', 'rocket-boom', 'round-burst']
     if (event.kind === 'door' && this.context && this.active && !this.muted) this.slam(event)
     // The Magnum: the usual report with a chest punch, a hard crack and a rolling echo under it.
-    if (event.kind === 'shot-magnum' && context && this.master && this.active && !this.muted && !this.disposed && !this.dying) this.magnum()
+    // Only your own Magnum (fired at your position): a teammate's comes from where they stand, without the chest punch.
+    const own = !event.position || event.position.distanceTo(this.listenerPosition) < 2
+    if (event.kind === 'shot-magnum' && own && context && this.master && this.active && !this.muted && !this.disposed && !this.dying) this.magnum()
     // Upgraded guns, as in Call of Duty: the gun's own report with a bright electric zap on top.
     if (event.packed && event.kind.startsWith('shot-') && event.kind !== 'shot-raygun' && context && this.master && this.active && !this.muted && !this.disposed && !this.dying) this.zap(event)
     if (!handled.includes(event.kind)) { super.play(FOOTSTEP_VOLUME[event.kind] ? { ...event, volume: FOOTSTEP_VOLUME[event.kind] } : event); return }
