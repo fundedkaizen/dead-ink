@@ -15,6 +15,7 @@ import { SEALED, ZoneGates } from '../src/game/zombies/zones'
 import { setDoorOpen, updateDoors } from '../src/world/doors'
 import { seeded, type Random } from '../src/game/shared/random'
 import { addDressing } from '../src/game/zombies/dressing'
+import { Barriers } from '../src/game/zombies/windows'
 import { buildNavScene } from './nav-scene'
 
 // The player's body and moves (src/player/body.ts, src/player/actions.ts).
@@ -265,14 +266,16 @@ export function sweepWorld(graphFile = 'public/nav/compound.json', dressed = tru
   const hash = geometryHash(nav.scene)
   for (const door of nav.doors) if (SEALED.some(seal => seal.door === door.name)) { setDoorOpen(door, false, true); door.userData.missionLocked = true }
   nav.world.refresh()
-  // The junk the runtime scatters, its big props solid to players and zombies alike, and not in the baked
-  // graph. The runtime also keeps it off its stations, which the sweep does not place.
-  if (dressed) addDressing(nav.scene, nav.world, seeded(0xDEAD1), [])
   const graph = NavGraph.fromData(JSON.parse(readFileSync(graphFile, 'utf8')) as NavData)
   const zones = new ZoneGates(nav.scene, nav.world, graph)
+  // As the runtime goes on: the mess hall's road-side windows boarded up (the road only comes in through
+  // them), then the junk it scatters, its big props solid to players and zombies alike and not in the baked
+  // graph. The runtime also keeps the junk off its stations, which the sweep does not place.
+  const barriers = new Barriers(nav.scene, nav.world, graph)
+  if (dressed) addDressing(nav.scene, nav.world, seeded(0xDEAD1), [])
   const doors = nav.doors.filter(door => !door.userData.missionLocked)
   const navigation = new EnemyNavigation(nav.world, doors, () => {})
-  return { ...nav, doors, graph, zones, navigation, hash, ways: traversals(nav.scene, nav.world) }
+  return { ...nav, doors, graph, zones, barriers, navigation, hash, ways: traversals(nav.scene, nav.world) }
 }
 export type SweepWorld = ReturnType<typeof sweepWorld>
 
@@ -339,6 +342,7 @@ export async function sweepDirector(w: SweepWorld, pool = 3) {
   const hits: string[] = []
   const director = new ZombieDirector({ scene: w.scene, world: w.world, doors: w.doors, graph: w.graph, emit: () => {}, damagePlayer: id => { hits.push(id) } })
   await director.init(pool)
+  director.windows = w.barriers.list
   return { director, hits }
 }
 export type SweepDirector = Awaited<ReturnType<typeof sweepDirector>>
@@ -362,6 +366,7 @@ export function simulate(w: SweepWorld, sim: SweepDirector, place: Standing, ran
   gaits: ZombieGait[] = ['run', 'sprint', 'run'], fps = 60): SimResult {
   const { director, hits } = sim, graph = w.graph
   director.clear()
+  w.barriers.reset()
   hits.length = 0
   const feet = new THREE.Vector3(place.x, place.y + 0.002, place.z), eye = feet.clone().setY(feet.y + 1.65)
   const target: ZombieTarget = { id: 'p1', feet, alive: true }
@@ -369,9 +374,12 @@ export function simulate(w: SweepWorld, sim: SweepDirector, place: Standing, ran
   type Tracked = { zombie: Zombie; walk: number; travelled: number; last: THREE.Vector3; still: number; trail: { t: number; p: THREE.Vector3; d: number }[] }
   const zombies: Tracked[] = []
   for (const gait of gaits) {
-    const spot = pickSpawn(graph, w.world, { near: 14, far: 42, eyes: [] }, random)
+    // As the runtime's spawnZombie: some from the road, outside a boarded window of the mess hall.
+    const entry = w.barriers.pickSpawn(random)
+    const spot = entry?.rise ?? pickSpawn(graph, w.world, { near: 14, far: 42, eyes: [] }, random)
     if (!spot) continue
-    const zombie = director.spawn(spot, 1e6, gait, Math.atan2(feet.x - spot.x, feet.z - spot.z), true)
+    const zombie = director.spawn(spot, 1e6, gait, entry ? entry.barrier.facing : Math.atan2(feet.x - spot.x, feet.z - spot.z), true)
+    if (zombie && entry) director.sendToWindow(zombie, entry.barrier)
     if (zombie) zombies.push({ zombie, walk: graph.distance(graph.nearest(zombie.position)), travelled: 0, last: zombie.position.clone(), still: 0, trail: [] })
   }
   if (!zombies.length) return { verdict: 'unreachable', seconds: 0, budget: 0, walk: Infinity, relocated: 0, idle: 0, detour: 0, note: 'nowhere to rise that leads here' }

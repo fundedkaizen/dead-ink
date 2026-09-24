@@ -40,7 +40,7 @@ export class DeadInkAudio extends MissionAudio {
     const context = this.context
     const handled = ['zombie-groan', 'zombie-scream', 'zombie-snarl', 'zombie-swipe', 'zombie-rise', 'powerup-drop', 'powerup-grab', 'nuke', 'round-start', 'round-end',
       'perk-drink', 'perk-jingle', 'pack-work', 'pack-ready', 'boss-roar', 'boss-growl', 'boss-slam', 'box-leave', 'box-open', 'box-spin', 'box-offer', 'ink-burst', 'grenade-blast', 'grenade-throw',
-      'headshot-pop', 'gore-rip', 'gib', 'gas-burst', 'blot-gurgle', 'storm', 'doll-clap', 'heartbeat', 'shot-raygun', 'soul', 'soul-in']
+      'headshot-pop', 'gore-rip', 'gib', 'gas-burst', 'blot-gurgle', 'storm', 'doll-clap', 'heartbeat', 'shot-raygun', 'soul', 'soul-in', 'board-tear', 'board-hammer']
     if (event.kind === 'door' && this.context && this.active && !this.muted) this.slam(event)
     // The Magnum: the usual report with a chest punch, a hard crack and a rolling echo under it.
     if (event.kind === 'shot-magnum' && context && this.master && this.active && !this.muted && !this.disposed && !this.dying) this.magnum()
@@ -97,6 +97,9 @@ export class DeadInkAudio extends MissionAudio {
       // A soul tearing loose and flying off; its arrival: a gulp in the ink and a small bright note.
       case 'soul': this.whoosh(event); this.wail(event); break
       case 'soul-in': this.pop(event, 0.7); this.arpeggio(event, [784, 1174.7], 0.06, 'triangle', 0.12, 0.6); break
+      // Boarded windows: a plank ripped off its nails, and one hammered back.
+      case 'board-tear': this.crack(event); break
+      case 'board-hammer': this.hammer(event); break
     }
   }
 
@@ -156,6 +159,65 @@ export class DeadInkAudio extends MissionAudio {
       gain.gain.setValueAtTime(0.0001, t); gain.gain.exponentialRampToValueAtTime(ratio === 1 ? 0.2 : 0.09, t + 0.003); gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.11)
       tone.connect(gain)
       this.track(tone, [gain, ...(panner ? [panner] : [])], 'incidental'); tone.start(t); tone.stop(t + 0.12)
+    }
+  }
+
+  /** A plank torn off: the nails' squeal, a sharp crack, splinters, and the plank's own hollow knock. */
+  private crack(event: SoundEvent) {
+    const context = this.context!, t = context.currentTime
+    const { gain: squeal, panner: squealPanner } = this.output(event)
+    const nail = context.createOscillator(), band = context.createBiquadFilter()
+    nail.type = 'sawtooth'
+    nail.frequency.setValueAtTime(1500 + Math.random() * 400, t); nail.frequency.exponentialRampToValueAtTime(900, t + 0.09)
+    band.type = 'bandpass'; band.frequency.value = 1700; band.Q.value = 6
+    squeal.gain.setValueAtTime(0.0001, t); squeal.gain.exponentialRampToValueAtTime(0.08, t + 0.02); squeal.gain.exponentialRampToValueAtTime(0.0001, t + 0.1)
+    nail.connect(band).connect(squeal)
+    this.track(nail, [band, squeal, ...(squealPanner ? [squealPanner] : [])], 'incidental'); nail.start(t); nail.stop(t + 0.11)
+    const at = t + 0.07
+    const { gain, panner } = this.output(event)
+    const snap = context.createBufferSource(), high = context.createBiquadFilter()
+    snap.buffer = this.noise; snap.playbackRate.value = 1.4
+    high.type = 'highpass'; high.frequency.value = 1400
+    gain.gain.setValueAtTime(0.0001, at); gain.gain.exponentialRampToValueAtTime(0.8, at + 0.002); gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.07)
+    snap.connect(high).connect(gain)
+    this.track(snap, [high, gain, ...(panner ? [panner] : [])]); snap.start(at); snap.stop(at + 0.08)
+    for (let i = 0; i < 6; i++) {
+      const tick = at + 0.01 + Math.random() * 0.14
+      const { gain: splinter, panner: splinterPanner } = this.output(event)
+      const chip = context.createBufferSource(), chipBand = context.createBiquadFilter()
+      chip.buffer = this.noise; chip.playbackRate.value = 2.4
+      chipBand.type = 'bandpass'; chipBand.frequency.value = 2200 + Math.random() * 2600; chipBand.Q.value = 5
+      splinter.gain.setValueAtTime(0.0001, tick); splinter.gain.exponentialRampToValueAtTime(0.22, tick + 0.002); splinter.gain.exponentialRampToValueAtTime(0.0001, tick + 0.025)
+      chip.connect(chipBand).connect(splinter)
+      this.track(chip, [chipBand, splinter, ...(splinterPanner ? [splinterPanner] : [])], 'incidental'); chip.start(tick); chip.stop(tick + 0.03)
+    }
+    const { gain: body, panner: bodyPanner } = this.output(event)
+    const knock = context.createOscillator()
+    knock.type = 'triangle'; knock.frequency.setValueAtTime(240, at); knock.frequency.exponentialRampToValueAtTime(110, at + 0.12)
+    body.gain.setValueAtTime(0.0001, at); body.gain.exponentialRampToValueAtTime(0.45, at + 0.006); body.gain.exponentialRampToValueAtTime(0.0001, at + 0.16)
+    knock.connect(body)
+    this.track(knock, [body, ...(bodyPanner ? [bodyPanner] : [])]); knock.start(at); knock.stop(at + 0.17)
+  }
+
+  /** A plank hammered back: two blows, each a click of the head and the thud of wood taking the nail. */
+  private hammer(event: SoundEvent) {
+    const context = this.context!, t = context.currentTime
+    for (const [delay, level] of [[0.12, 0.7], [0.27, 0.85]] as const) {
+      const at = t + delay
+      const { gain: click, panner: clickPanner } = this.output(event)
+      const head = context.createBufferSource(), high = context.createBiquadFilter()
+      head.buffer = this.noise; head.playbackRate.value = 2
+      high.type = 'highpass'; high.frequency.value = 2500
+      click.gain.setValueAtTime(0.0001, at); click.gain.exponentialRampToValueAtTime(0.45 * level, at + 0.001); click.gain.exponentialRampToValueAtTime(0.0001, at + 0.03)
+      head.connect(high).connect(click)
+      this.track(head, [high, click, ...(clickPanner ? [clickPanner] : [])], 'incidental'); head.start(at); head.stop(at + 0.035)
+      const { gain: thud, panner: thudPanner } = this.output(event)
+      const wood = context.createOscillator(), ring = context.createBiquadFilter()
+      wood.type = 'triangle'; wood.frequency.setValueAtTime(310, at); wood.frequency.exponentialRampToValueAtTime(140, at + 0.09)
+      ring.type = 'bandpass'; ring.frequency.value = 480; ring.Q.value = 3
+      thud.gain.setValueAtTime(0.0001, at); thud.gain.exponentialRampToValueAtTime(0.7 * level, at + 0.004); thud.gain.exponentialRampToValueAtTime(0.0001, at + 0.13)
+      wood.connect(ring).connect(thud)
+      this.track(wood, [ring, thud, ...(thudPanner ? [thudPanner] : [])]); wood.start(at); wood.stop(at + 0.14)
     }
   }
 

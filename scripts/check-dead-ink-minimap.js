@@ -144,16 +144,19 @@ const status = window.__minimapCheck = { done: false, results }
   await sleep(250)
   check(!icon('power'), 'and it is gone once the power is on')
 
-  // ---- A co-op partner: a blue arrow where they stand --------------------------------------------
+  // ---- A co-op teammate: an arrow in their colour where they stand -----------------------------------
   await stand(-30, -25, 0)
   const mate = new V(cam.position.x + 8, 0, cam.position.z - 6)
-  m.coop.paired = true
-  m.partnerState = { p: [mate.x, 0, mate.z], yaw: 1.2, pitch: 0, w: 'pistol', mv: 0, dn: 0, pts: 1500, kills: 3, name: 'Tester' }
-  m.partner.feet.copy(mate)
+  m.coop.peers.add(1)
+  const teammate = m.mate(1)
+  teammate.state = { id: 1, p: [mate.x, 0, mate.z], yaw: 1.2, pitch: 0, w: 'pistol', mv: 0, dn: 0, pts: 1500, kills: 3, name: 'Tester' }
+  teammate.avatar.feet.copy(mate)
   await sleep(250)
+  // The avatar eases toward its state each frame; hold it where the map should show it.
+  teammate.avatar.feet.copy(mate)
   const gotMate = icon('mate'), wantMate = expected(mate)
-  check(gotMate && Math.abs(gotMate.x - wantMate.x) < 1.5 && Math.abs(gotMate.y - wantMate.y) < 1.5, 'the partner is on the map where they stand', JSON.stringify(gotMate))
-  check(ring(gotMate.x, gotMate.y, 2, '#2878d0') >= 3 || near(colour(gotMate.x, gotMate.y), '#2878d0'), 'as a blue arrow')
+  check(gotMate && Math.abs(gotMate.x - wantMate.x) < 1.5 && Math.abs(gotMate.y - wantMate.y) < 1.5, 'the teammate is on the map where they stand', JSON.stringify(gotMate))
+  check(ring(gotMate.x, gotMate.y, 2, teammate.css) >= 3 || near(colour(gotMate.x, gotMate.y), teammate.css), 'as an arrow in their colour', teammate.css)
 
   // ---- Nothing in the HUD overlaps the map -----------------------------------------------------------
   m.zombieHud.perks(['thickInk', 'quickDip', 'doubleLine', 'secondDraft'])
@@ -180,7 +183,7 @@ const status = window.__minimapCheck = { done: false, results }
   }
   const round = document.querySelector('.dead-ink-round').getBoundingClientRect()
   check(round.top >= mapBox.bottom && round.left < mapBox.right, 'the round tally sits under the map', `${round.top} vs ${mapBox.bottom}`)
-  m.coop.paired = false; m.partnerState = null
+  m.coop.peers.delete(1); m.dropMate(1)
   m.timers = {}
 
   // ---- Redraws: at most 30 a second, and cheap ----------------------------------------------------

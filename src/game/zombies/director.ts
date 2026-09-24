@@ -13,6 +13,7 @@ import { setDoorOpen } from '../../world/doors'
 import { BOSS, PLAYER_HEALTH } from './rules'
 import { InkGore, restoreParts, setPartLost } from './gore'
 import { BLOT, GasClouds, bloatCentre, bloatDripPoint, setBloat } from './gas'
+import { WINDOW } from './windows'
 
 /**
  * Dead Ink's zombies. They reuse the game's stickman (rig, walk and run animations, death falls,
@@ -176,7 +177,64 @@ export type Zombie = {
   /** Parts lost to gore (the legs are `crawler`), and whether a blast blew it apart. */
   lost: { head: boolean; L: boolean; R: boolean }
   gibbed: boolean
+  /** Coming in through a boarded window (windows.ts), until it is inside. */
+  window: WindowJob | null
 }
+
+/**
+ * A boarded window zombies come in through (windows.ts builds them and owns the planks). The director
+ * reads where to stand and how to get through, and calls tear() / smash() as the planks come off.
+ */
+export type WindowSlot = {
+  readonly index: number
+  /** The middle of the opening in the wall's centre plane; unit vectors into the room and along the wall (a zombie facing in has it on its left). */
+  readonly centre: THREE.Vector3
+  readonly inward: THREE.Vector3
+  readonly tangent: THREE.Vector3
+  /** Half the opening's width, the heights of its sill and its top, and of the floor inside. */
+  readonly halfWidth: number
+  readonly sill: number
+  readonly top: number
+  readonly floorIn: number
+  /** On the ground at the foot of the step; up the step to `stand`, where it tears; where the others wait. */
+  readonly foot: THREE.Vector3
+  readonly steps: readonly THREE.Vector3[]
+  readonly stand: THREE.Vector3
+  readonly queue: readonly THREE.Vector3[]
+  /** On its feet inside, through the window. */
+  readonly landing: THREE.Vector3
+  /** Facing into the room. */
+  readonly facing: number
+  /** Planks still up; every plank ever ripped off here. */
+  readonly boards: number
+  readonly ripped: number
+  /** The middle of the plank that comes off next. */
+  nextBoard(out: THREE.Vector3): THREE.Vector3
+  /** Rip one plank off (false when none are left); rip them all. */
+  tear(): boolean
+  smash(): void
+  /** The zombie at the window (or on its way up to it), those waiting, and the one climbing through. */
+  occupant: Zombie | null
+  waiting: Zombie[]
+  vaulting: Zombie | null
+}
+type WindowJob = {
+  slot: WindowSlot
+  stage: 'walk' | 'queue' | 'step' | 'tear' | 'vault'
+  /** Seconds on this window in all; seconds at it, tearing; progress through the tear cycle or the climb through (0 to 1). */
+  age: number
+  atWindow: number
+  phase: number
+  /** The arm ripping the next plank (1 right, -1 left); the window's `ripped` last seen (the guest's yank timing). */
+  arm: 1 | -1
+  seen: number
+}
+/** Snapshot flag bits for a zombie tearing at a window, or climbing through one; the window's index + 1 above them. */
+const WINDOW_FLAG = { tear: 512, vault: 1024, shift: 11 } as const
+/** Where in its tear cycle the plank comes away (the yank). */
+const TEAR_YANK = 0.62
+/** Hips above the feet in a zombie's hunched stance, for the climb through. */
+const VAULT_HIPS = 0.84
 
 type Carriage = { lean: number; nod: number; tilt: number; droopL: number; droopR: number; limp: number; phase: number }
 
@@ -278,6 +336,8 @@ export class ZombieDirector {
   readonly gas: GasClouds
   /** Dice for gore; checks swap in their own. */
   random: () => number = Math.random
+  /** The boarded windows zombies may be sent to (windows.ts), in co-op order. */
+  windows: readonly WindowSlot[] = []
 
   constructor(private context: ZombieContext) {
     this.navigation = new EnemyNavigation(context.world, context.doors, context.emit)
@@ -301,6 +361,7 @@ export class ZombieDirector {
         rise: 0, crowded: 0, climb: null, voice: 0, carriage: randomCarriage('walk'), flinch: 0, flinchBack: 0, flinchSide: 0,
         boss: false, slam: 0, slamTimer: 0, direct: false, directTimer: 0, sideBias: 0, sideTimer: 0,
         crawler: false, crawlFall: 0, crawled: 0, pitch: 0, lift: 0.82, blot: false, drip: 0, lost: { head: false, L: false, R: false }, gibbed: false,
+        window: null,
       })
     }
   }
@@ -346,6 +407,7 @@ export class ZombieDirector {
     zombie.crawler = false; zombie.crawlFall = 0; zombie.crawled = 0; zombie.pitch = 0; zombie.lift = 0.82
     zombie.lost.head = zombie.lost.L = zombie.lost.R = false; zombie.gibbed = false
     zombie.blot = blot && !boss; zombie.drip = 0.5
+    zombie.window = null
     if (zombie.blot) {
       // Weighed down by its belly: a heavy lean, a limp, both arms hanging low.
       const c = zombie.carriage
@@ -370,6 +432,7 @@ export class ZombieDirector {
   relocate(zombie: Zombie, position: THREE.Vector3) {
     const floor = this.navigation.floor(position)
     if (!floor || zombie.state !== 'chase') return false
+    if (zombie.window) this.leaveWindow(zombie)
     zombie.position.copy(floor)
     zombie.actor.root.position.copy(floor)
     zombie.stuck = 0; zombie.unreachable = 0; zombie.stranded = false
@@ -425,6 +488,7 @@ export class ZombieDirector {
         this.gore.drip(bloatDripPoint(zombie.actor, scratch.t), zombie.position.y)
       }
       if (zombie.climb) { this.climbStep(zombie, dt); continue }
+      if (zombie.window && this.windowStep(zombie, target, dt)) continue
       let moving = false
       zombie.stagger = Math.max(0, zombie.stagger - dt)
       zombie.recover = Math.max(0, zombie.recover - dt)
@@ -516,7 +580,7 @@ export class ZombieDirector {
     this.zombies.forEach((z, i) => {
       if (z.state === 'idle') return
       const flags = (z.crawler ? 1 : 0) | (z.blot ? 2 : 0) | (z.boss ? 4 : 0) | (z.lost.head ? 8 : 0) | (z.lost.L ? 16 : 0) | (z.lost.R ? 32 : 0)
-        | (z.gibbed ? 64 : 0) | (z.climb ? 128 : 0) | (z.slam > 0 ? 256 : 0)
+        | (z.gibbed ? 64 : 0) | (z.climb ? 128 : 0) | (z.slam > 0 ? 256 : 0) | windowFlags(z)
       // Climbing out of the ground is posed from where it stands, so the guest needs that spot, not the body's.
       const p = z.climb ? z.actor.root.position : z.position
       rows.push([i, z.state === 'dead' ? 2 : 1, round2(p.x), round2(p.y), round2(p.z), round2(z.yaw), GAITS.indexOf(z.gait),
@@ -575,6 +639,8 @@ export class ZombieDirector {
         this.context.emit({ kind: zombie.boss ? 'boss-growl' : zombie.blot ? 'blot-gurgle' : sprint ? 'zombie-scream' : 'zombie-groan',
           position: zombie.position.clone().setY(zombie.position.y + (zombie.crawler ? 0.4 : 1.6)), radius: zombie.boss ? 70 : 32 })
       }
+      if (flags & (WINDOW_FLAG.tear | WINDOW_FLAG.vault) && this.puppetWindow(zombie, flags, dt)) continue
+      if (zombie.window) zombie.window = null
       if (rise > 0) { const before = zombie.rise; zombie.rise = rise; this.rise(zombie, null, 0, before > rise ? before : rise); continue }
       zombie.rise = 0
       if (zombie.crawler) {
@@ -1523,6 +1589,7 @@ export class ZombieDirector {
   }
 
   private kill(zombie: Zombie) {
+    if (zombie.window) this.dropFromWindow(zombie)
     if (zombie.climb) {
       // Shot off a ladder or a ledge: the body drops to whatever is below.
       const below = this.context.world.floor(zombie.position.clone(), 0.2, 40)
@@ -1583,7 +1650,7 @@ export class ZombieDirector {
         if (roll() < GORE_ODDS.lethalArm) this.loseArm(zombie, roll() < 0.5 ? 'L' : 'R', direction)
         return
       }
-      if (!zombie.crawler && zombie.rise <= 0 && !zombie.climb && roll() < GORE_ODDS.blastCrawl) this.makeCrawler(zombie, direction)
+      if (!zombie.crawler && zombie.rise <= 0 && !zombie.climb && !zombie.window && roll() < GORE_ODDS.blastCrawl) this.makeCrawler(zombie, direction)
       else if (roll() < GORE_ODDS.blastArm) this.loseArm(zombie, roll() < 0.5 ? 'L' : 'R', direction)
       return
     }
@@ -1591,7 +1658,7 @@ export class ZombieDirector {
     if (zombie.boss) return
     if (zone === 'arm' && heavy && roll() < (lethal ? Math.max(heavy, GORE_ODDS.lethalArm) : heavy)) this.loseArm(zombie, side, direction)
     const leg = weapon ? GORE_ODDS.leg[weapon] : undefined
-    if (!lethal && zone === 'leg' && leg && !zombie.crawler && zombie.rise <= 0 && !zombie.climb && roll() < leg) this.makeCrawler(zombie, direction)
+    if (!lethal && zone === 'leg' && leg && !zombie.crawler && zombie.rise <= 0 && !zombie.climb && !zombie.window && roll() < leg) this.makeCrawler(zombie, direction)
   }
 
   /** The legs go: they fly off, and the zombie drops onto its front and crawls on. */
@@ -1688,7 +1755,8 @@ export class ZombieDirector {
   clear() {
     this.plans.clear()
     this.restoreLinks(true)
-    for (const zombie of this.zombies) { zombie.state = 'idle'; zombie.actor.root.visible = false }
+    for (const zombie of this.zombies) { zombie.state = 'idle'; zombie.actor.root.visible = false; zombie.window = null }
+    for (const slot of this.windows) { slot.occupant = null; slot.waiting.length = 0; slot.vaulting = null }
     this.gore.clear()
     this.gas.clear()
   }
@@ -1701,6 +1769,332 @@ export class ZombieDirector {
     for (const zombie of this.zombies) { zombie.actor.root.removeFromParent(); zombie.actor.dispose() }
     this.zombies.length = 0
   }
+
+  // ---------------------------------------------------------------- boarded windows (windows.ts)
+
+  /**
+   * Send a zombie (just climbed out of the ground on the road) to a window: straight to the step when nobody
+   * is at it, otherwise to wait its turn beside it.
+   */
+  sendToWindow(zombie: Zombie, slot: WindowSlot) {
+    if (zombie.window) this.leaveWindow(zombie)
+    zombie.window = { slot, stage: 'walk', age: 0, atWindow: 0, phase: 0, arm: 1, seen: slot.ripped }
+    if (!slot.occupant) slot.occupant = zombie
+    else slot.waiting.push(zombie)
+  }
+
+  /** Done with its window (through it, dead, or gone after a player): the next in line moves up. */
+  private leaveWindow(zombie: Zombie) {
+    const slot = zombie.window?.slot
+    zombie.window = null
+    if (!slot) return
+    const waiting = slot.waiting.indexOf(zombie)
+    if (waiting >= 0) slot.waiting.splice(waiting, 1)
+    if (slot.vaulting === zombie) slot.vaulting = null
+    if (slot.occupant === zombie) slot.occupant = slot.waiting.shift() ?? null
+  }
+
+  /**
+   * One frame of a zombie coming in through a window: it walks up to the step (or waits its turn beside it),
+   * climbs it, rips the planks off one at a time, swiping at anyone who stands close inside, and climbs
+   * through. False when the normal chase should take over this frame (it gave the window up for a player out
+   * on the road with it). Once through, it lets go of the window and chases from inside.
+   */
+  private windowStep(zombie: Zombie, target: ZombieTarget | null, dt: number) {
+    const job = zombie.window!, slot = job.slot
+    job.age += dt
+    zombie.stagger = Math.max(0, zombie.stagger - dt)
+    zombie.recover = Math.max(0, zombie.recover - dt)
+    zombie.flinch = Math.max(0, zombie.flinch - dt)
+    const waiting = job.stage === 'walk' || job.stage === 'queue'
+    if (waiting && target && !insideWindow(slot, target.feet) && target.feet.distanceTo(zombie.position) < WINDOW.notice) { this.leaveWindow(zombie); return false }
+    // However it was held up, no zombie stays at a window for good.
+    if (job.age > WINDOW.stuck && job.stage !== 'vault') { slot.smash(); this.landInside(zombie); return true }
+    if (waiting) {
+      const next = slot.occupant === zombie
+      const goal = next ? slot.foot : slot.queue[Math.min(Math.max(0, slot.waiting.indexOf(zombie)), slot.queue.length - 1)]
+      const moving = this.walkTo(zombie, goal, dt)
+      if (!moving && next) {
+        // At the foot of the step: up it the way it gets up a ledge.
+        job.stage = 'step'
+        this.climbWindowStep(zombie, slot)
+        return true
+      }
+      job.stage = moving ? 'walk' : 'queue'
+      if (!moving) this.face(zombie, slot.stand, dt, 4)
+      this.windowStance(zombie, moving, dt)
+      return true
+    }
+    if (job.stage === 'step') {
+      // The step is climbed (zombie.climb carried it up): at the window.
+      job.stage = 'tear'; job.atWindow = 0; job.phase = 0
+      zombie.position.copy(slot.stand)
+    }
+    if (job.stage === 'tear') {
+      job.atWindow += dt
+      this.face(zombie, ws.a.copy(zombie.position).add(slot.inward), dt, 6)
+      const attack = attackOf(zombie)
+      if (zombie.swing > 0) {
+        // A swipe through the window at whoever stands at it inside.
+        zombie.swing -= dt
+        if (!zombie.swingLanded && attack.swing - zombie.swing >= attack.windup) {
+          zombie.swingLanded = true
+          if (target?.alive && this.reachThrough(zombie, slot, target.feet))
+            this.context.damagePlayer(target.id, attack.damage, zombie.position.clone().setY(zombie.position.y + 1.3))
+          this.context.emit({ kind: 'zombie-swipe', position: zombie.position.clone(), radius: 10 })
+        }
+        if (zombie.swing <= 0) zombie.recover = attack.recover
+      } else if (target?.alive && zombie.recover <= 0 && zombie.stagger <= 0 && this.reachThrough(zombie, slot, target.feet)) {
+        zombie.swing = attack.swing; zombie.swingLanded = false
+        this.context.emit({ kind: 'zombie-snarl', position: zombie.position.clone().setY(zombie.position.y + 1.6), radius: 14 })
+      } else if (zombie.stagger <= 0 && slot.boards > 0) {
+        const before = job.phase
+        job.phase += dt / WINDOW.tearSeconds
+        // The plank comes away on the yank.
+        if (before < TEAR_YANK && job.phase >= TEAR_YANK) { slot.tear(); job.seen = slot.ripped }
+        if (job.phase >= 1) { job.phase -= 1; job.arm = job.arm > 0 ? -1 : 1 }
+      }
+      // Held at the window too long (someone keeps nailing planks back): it smashes the rest and comes in anyway.
+      if (job.atWindow > WINDOW.giveUp && slot.boards > 0) slot.smash()
+      if (slot.boards > 0 || zombie.swing > 0) { this.tearPose(zombie, slot, job, dt); return true }
+      job.stage = 'vault'; job.phase = 0; slot.vaulting = zombie
+    }
+    // Through the window: onto the sill, over, and down inside.
+    job.phase = Math.min(1, job.phase + dt / WINDOW.vaultSeconds)
+    vaultPoint(slot, job.phase, zombie.position)
+    zombie.yaw = slot.facing
+    this.vaultPose(zombie, slot, job.phase, dt)
+    if (job.phase >= 1) this.landInside(zombie)
+    return true
+  }
+
+  /** Straight toward `goal` at its own pace, on the ground (the way was found clear when the window was built). False once there. */
+  private walkTo(zombie: Zombie, goal: THREE.Vector3, dt: number) {
+    const dx = goal.x - zombie.position.x, dz = goal.z - zombie.position.z, flat = Math.hypot(dx, dz)
+    if (flat < 0.06) return false
+    this.face(zombie, goal, dt, zombie.gait === 'walk' || zombie.blot ? 4 : 7)
+    const step = Math.min(flat, speedOf(zombie) * dt)
+    zombie.position.x += dx / flat * step
+    zombie.position.z += dz / flat * step
+    const floor = this.context.world.floor(ws.b.set(zombie.position.x, zombie.position.y + 0.6, zombie.position.z), 0, 1.3)
+    zombie.position.y = Number.isFinite(floor) ? floor : goal.y
+    zombie.footstep += step
+    if (zombie.footstep > 0.9) { zombie.footstep = 0; this.context.emit({ kind: 'enemy-footstep', position: zombie.position.clone(), radius: 6 }) }
+    return true
+  }
+
+  /** Up the step to the window on a fixed path, as up a ledge: never through a crate's corner. */
+  private climbWindowStep(zombie: Zombie, slot: WindowSlot) {
+    const path = [zombie.position.clone()]
+    for (const point of slot.steps) {
+      const last = path[path.length - 1]
+      if (point.y - last.y > 0.3 && Math.hypot(point.x - last.x, point.z - last.z) > 0.4) path.push(last.clone().lerp(point, 0.45).setY(point.y))
+      path.push(point.clone())
+    }
+    zombie.climb = { points: path, index: 1, key: `window-${slot.index}`, travelled: 0, wall: slot.inward.clone() }
+    zombie.route.length = 0
+  }
+
+  /** Walking up to a window, or waiting a turn at it: its usual walk or stance. */
+  private windowStance(zombie: Zombie, moving: boolean, dt: number) {
+    const { actor } = zombie
+    zombie.moving = moving
+    actor.root.position.copy(zombie.position)
+    actor.root.rotation.set(0, zombie.yaw, moving ? zombie.carriage.limp * Math.sin(this.time * 5.2 + zombie.carriage.phase) : 0, 'YXZ')
+    actor.update(dt, 'patrol', moving, undefined, moving ? speedOf(zombie) : 0)
+    actor.gun.visible = false
+    this.carry(zombie, moving)
+    reachArms(zombie, moving ? this.time : -1)
+  }
+
+  /**
+   * A swipe from a zombie at a window lands on a player inside only through the opening: the line from its
+   * chest to theirs must cross the wall inside the hole, nothing may stand between the hole and them, and they
+   * must be within its reach.
+   */
+  private reachThrough(zombie: Zombie, slot: WindowSlot, feet: THREE.Vector3) {
+    const attack = attackOf(zombie)
+    if (Math.hypot(feet.x - zombie.position.x, feet.z - zombie.position.z) > attack.reach || Math.abs(feet.y - zombie.position.y) > 1.5) return false
+    const n = slot.inward, from = ws.c.copy(zombie.position).setY(zombie.position.y + 1.15), to = ws.d.copy(feet).setY(feet.y + 1.2)
+    const a = (from.x - slot.centre.x) * n.x + (from.z - slot.centre.z) * n.z, b = (to.x - slot.centre.x) * n.x + (to.z - slot.centre.z) * n.z
+    if (a >= 0 || b <= 0.1) return false
+    const cross = ws.e.copy(from).lerp(to, a / (a - b))
+    const side = (cross.x - slot.centre.x) * slot.tangent.x + (cross.z - slot.centre.z) * slot.tangent.z
+    if (Math.abs(side) > slot.halfWidth - 0.05 || cross.y < slot.sill + 0.05 || cross.y > slot.top - 0.05) return false
+    return this.context.world.visible(cross.addScaledVector(n, 0.12), to, zombie.actor.root)
+  }
+
+  /** Through and on its feet inside: the chase takes over from here, fresh. */
+  private landInside(zombie: Zombie) {
+    const slot = zombie.window!.slot
+    zombie.position.copy(slot.landing)
+    zombie.yaw = slot.facing
+    zombie.actor.root.position.copy(zombie.position)
+    zombie.actor.root.rotation.set(0, zombie.yaw, 0)
+    zombie.climb = null; zombie.moving = false
+    zombie.route.length = 0; zombie.routeTimer = 0; zombie.routeNode = -1; zombie.routeFrom = -1; zombie.blocked = -1; zombie.avoidTimer = 0
+    zombie.stuck = 0; zombie.edgeFail = 0; zombie.probeFail = -1; zombie.probeFails = 0
+    zombie.bestDistance = Infinity; zombie.noProgress = 0; zombie.unreachable = 0; zombie.stranded = false
+    zombie.direct = false; zombie.directTimer = 0
+    this.plans.delete(zombie)
+    this.leaveWindow(zombie)
+  }
+
+  /** Killed on its way in: the body drops on whichever side of the wall it was, and the window is free. */
+  private dropFromWindow(zombie: Zombie) {
+    const job = zombie.window!
+    if (job.stage === 'vault') {
+      zombie.position.copy(job.phase < 0.5 ? job.slot.stand : job.slot.landing)
+      zombie.actor.root.position.copy(zombie.position)
+    }
+    this.leaveWindow(zombie)
+  }
+
+  /**
+   * Tearing at the planks: one hand braced on the frame, the other reaching in through the hole for the next
+   * plank, gripping it (a shake against the nails) and ripping it out past its shoulder as its weight goes
+   * back, the arms taking turns. A swipe through the window, or a flinch, shows instead.
+   */
+  private tearPose(zombie: Zombie, slot: WindowSlot, job: WindowJob, dt: number) {
+    const { actor } = zombie, bones = actor.rig.bones
+    zombie.moving = false
+    actor.root.position.copy(zombie.position)
+    actor.root.rotation.set(0, zombie.yaw, 0)
+    actor.update(dt, 'patrol', false, undefined, 0)
+    actor.gun.visible = false
+    this.carry(zombie, false)
+    if (zombie.swing > 0 || zombie.stagger > 0 || slot.boards <= 0) { reachArms(zombie); return }
+    const u = job.phase
+    const reach = THREE.MathUtils.smoothstep(u, 0.04, 0.38), yank = THREE.MathUtils.smoothstep(u, TEAR_YANK - 0.1, TEAR_YANK + 0.04)
+    const settle = THREE.MathUtils.smoothstep(u, 0.76, 1)
+    // Into the window for the plank, then its weight thrown back with the yank.
+    actor.root.position.addScaledVector(slot.inward, 0.2 * reach * (1 - yank) - 0.1 * yank * (1 - settle))
+    bend(actor.rig.bones.spine, 0.2 * reach * (1 - yank) - 0.25 * yank * (1 - settle), 0, 0)
+    actor.root.updateMatrixWorld(true)
+    const forward = ws.f.set(Math.sin(zombie.yaw), 0, Math.cos(zombie.yaw)), left = ws.l.set(Math.cos(zombie.yaw), 0, -Math.sin(zombie.yaw))
+    const key: 'L' | 'R' = zombie.lost.R ? 'L' : zombie.lost.L ? 'R' : job.arm > 0 ? 'R' : 'L', sign = key === 'L' ? 1 : -1
+    if (!zombie.lost[key]) {
+      const upper = bones[`upper_arm.${key}`], shoulder = upper.getWorldPosition(ws.a)
+      const rest = ws.b.copy(shoulder).addScaledVector(forward, 0.42).setY(shoulder.y - 0.12)
+      const grab = slot.nextBoard(ws.c).addScaledVector(left, sign * 0.28)
+      const pulled = ws.d.copy(shoulder).addScaledVector(forward, -0.1).addScaledVector(left, sign * 0.22).setY(shoulder.y - 0.3)
+      const hand = ws.t.copy(rest).lerp(grab, reach)
+      if (u > 0.38 && u < TEAR_YANK - 0.08) hand.addScaledVector(slot.inward, Math.sin(u * 95) * 0.025)
+      hand.lerp(pulled, yank).lerp(rest, settle)
+      solveArm(upper, bones[`forearm.${key}`], bones[`hand.${key}`], hand, ws.p.copy(left).multiplyScalar(sign * 0.8).addScaledVector(UP, -0.45), forward)
+    }
+    const other: 'L' | 'R' = key === 'L' ? 'R' : 'L'
+    if (!zombie.lost[other]) {
+      // The other hand braced on the frame beside the hole, a little below its shoulder.
+      const upper = bones[`upper_arm.${other}`], shoulder = upper.getWorldPosition(ws.a)
+      const brace = ws.t.copy(slot.centre).addScaledVector(slot.inward, -0.1).addScaledVector(left, -sign * (slot.halfWidth - 0.02))
+      brace.y = THREE.MathUtils.clamp(shoulder.y - 0.15, slot.sill + 0.2, slot.top - 0.15)
+      solveArm(upper, bones[`forearm.${other}`], bones[`hand.${other}`], brace, ws.p.copy(left).multiplyScalar(-sign * 0.8).addScaledVector(UP, -0.3), forward)
+    }
+  }
+
+  /**
+   * Climbing through at `u` (0 on the step, 1 on its feet inside): hands on the sill, a knee up onto it,
+   * pitched over and through the hole head first, hands down to the floor inside to break the drop, and up.
+   * Posed from the rest pose each frame (as the climb out of the ground is), from `u` and the window alone, so
+   * a co-op guest draws the same climb.
+   */
+  private vaultPose(zombie: Zombie, slot: WindowSlot, u: number, dt: number) {
+    const { actor } = zombie, bones = actor.rig.bones, rest = actor.rig.rest
+    zombie.moving = false
+    actor.update(dt, 'patrol', false, undefined, 0)
+    actor.gun.visible = false
+    const e = (from: number, to: number) => THREE.MathUtils.smoothstep(u, from, to)
+    const n = slot.inward, left = slot.tangent
+    const pitch = 0.2 + 1.0 * e(0.02, 0.3) + 0.2 * e(0.3, 0.55) - 1.4 * e(0.64, 0.97)
+    actor.rig.resetPose()
+    actor.root.rotation.set(pitch, zombie.yaw, 0, 'YXZ')
+    actor.root.position.copy(ws.h.copy(zombie.position).setY(zombie.position.y + VAULT_HIPS)).sub(ws.a.copy(rest.hips.pos).applyEuler(actor.root.rotation))
+    // The back rounds as it goes over; the head stays up, looking where it is going.
+    const over = e(0.1, 0.4) * (1 - e(0.7, 1))
+    bend(bones.spine, 0.18 * over, 0, 0)
+    bend(bones.chest, 0.1 * over, 0, 0)
+    bend(bones.neck, -0.4 * over, 0, 0)
+    bend(bones.head, -0.5 * over + zombie.carriage.nod * e(0.8, 1), 0, zombie.carriage.tilt * e(0.8, 1))
+    actor.root.updateMatrixWorld(true)
+    for (const [key, sign] of [['R', -1], ['L', 1]] as const) {
+      if (zombie.lost[key]) continue
+      const upper = bones[`upper_arm.${key}`]
+      // On the sill, reaching down inside, flat on the floor as it comes down, then free.
+      const hand = ws.t.copy(slot.centre).addScaledVector(n, 0.03).addScaledVector(left, sign * 0.3).setY(slot.sill + 0.05)
+      hand.lerp(ws.p.copy(slot.centre).addScaledVector(n, 0.7).addScaledVector(left, sign * 0.3).setY(slot.floorIn + 0.5), e(0.34, 0.62))
+      hand.lerp(ws.p.copy(slot.landing).addScaledVector(n, 0.4).addScaledVector(left, sign * 0.26).setY(slot.floorIn + 0.04), e(0.62, 0.8))
+      const shoulder = upper.getWorldPosition(ws.a)
+      hand.lerp(ws.p.copy(shoulder).addScaledVector(n, 0.42).setY(shoulder.y - 0.15), e(0.84, 1))
+      solveArm(upper, bones[`forearm.${key}`], bones[`hand.${key}`], hand, ws.q.copy(left).multiplyScalar(sign * 0.7).addScaledVector(UP, 0.35).addScaledVector(n, -0.3), n)
+    }
+    for (const [key, sign] of [['R', -1], ['L', 1]] as const) {
+      // Feet on the step, trailing over the sill behind a knee on it, then down under it inside.
+      const foot = ws.t.copy(slot.stand).addScaledVector(left, sign * 0.12)
+      foot.lerp(ws.p.copy(slot.centre).addScaledVector(n, -0.45).addScaledVector(left, sign * 0.12).setY(slot.sill + 0.1), e(0.15, 0.38))
+      foot.lerp(ws.p.copy(slot.centre).addScaledVector(n, 0.2).addScaledVector(left, sign * 0.12).setY(slot.sill + 0.3), e(0.55, 0.76))
+      foot.lerp(ws.p.copy(slot.landing).addScaledVector(left, sign * 0.12).setY(slot.floorIn + 0.02), e(0.76, 0.96))
+      solveLeg(bones[`thigh.${key}`], bones[`shin.${key}`], foot, ws.q.copy(n).addScaledVector(UP, -0.3 * e(0.15, 0.6) * (1 - e(0.8, 1))).normalize(), 1)
+    }
+  }
+
+  /** Co-op, the guest: a zombie tearing at a window or climbing through one, drawn from the host's flags and where it is. */
+  private puppetWindow(zombie: Zombie, flags: number, dt: number) {
+    const slot = this.windows[((flags >> WINDOW_FLAG.shift) & 7) - 1]
+    if (!slot) return false
+    const job = zombie.window ??= { slot, stage: 'tear', age: 0, atWindow: 0, phase: 0, arm: 1, seen: slot.ripped }
+    job.slot = slot
+    if (flags & WINDOW_FLAG.vault) {
+      job.stage = 'vault'
+      zombie.yaw = slot.facing
+      this.vaultPose(zombie, slot, vaultProgress(slot, zombie.position), dt)
+      return true
+    }
+    job.stage = 'tear'
+    // The host ripped a plank off (its count just came down): yank now, so the plank leaves the hand.
+    if (slot.ripped !== job.seen) { job.seen = slot.ripped; job.phase = TEAR_YANK; job.arm = job.arm > 0 ? -1 : 1 }
+    else job.phase = (job.phase + dt / WINDOW.tearSeconds) % 1
+    this.tearPose(zombie, slot, job, dt)
+    return true
+  }
+}
+
+/** Scratch for the window code, apart from the rest so nothing it holds is overwritten under it. */
+const ws = { a: new THREE.Vector3(), b: new THREE.Vector3(), c: new THREE.Vector3(), d: new THREE.Vector3(), e: new THREE.Vector3(),
+  f: new THREE.Vector3(), l: new THREE.Vector3(), h: new THREE.Vector3(), p: new THREE.Vector3(), q: new THREE.Vector3(), t: new THREE.Vector3() }
+
+/** On the room's side of a window's wall. */
+function insideWindow(slot: WindowSlot, point: THREE.Vector3) {
+  return (point.x - slot.centre.x) * slot.inward.x + (point.z - slot.centre.z) * slot.inward.z > 0.05
+}
+
+/** A zombie's window bits for the co-op snapshot: tearing, or climbing through, and which window. */
+function windowFlags(zombie: Zombie) {
+  const job = zombie.window
+  if (!job || (job.stage !== 'tear' && job.stage !== 'vault')) return 0
+  return (job.stage === 'tear' ? WINDOW_FLAG.tear : WINDOW_FLAG.vault) | (job.slot.index + 1) << WINDOW_FLAG.shift
+}
+
+/**
+ * Where a body climbing through `slot` is at `u` (its feet, as if it stood under its hips): on the step at 0,
+ * on the floor inside at 1. It moves steadily inward, so a co-op guest reads `u` back from the position.
+ */
+export function vaultPoint(slot: WindowSlot, u: number, out: THREE.Vector3) {
+  out.lerpVectors(slot.stand, slot.landing, u)
+  const e = (from: number, to: number) => THREE.MathUtils.smoothstep(u, from, to)
+  // Hips up over the sill, level through the hole, then dropping to the floor.
+  let hips = THREE.MathUtils.lerp(slot.stand.y + VAULT_HIPS, slot.sill + 0.32, e(0, 0.3))
+  hips = THREE.MathUtils.lerp(hips, slot.sill + 0.26, e(0.3, 0.62))
+  const fall = THREE.MathUtils.clamp((u - 0.62) / 0.38, 0, 1)
+  out.y = THREE.MathUtils.lerp(hips, slot.floorIn + VAULT_HIPS, fall * fall) - VAULT_HIPS
+  return out
+}
+
+/** How far through `slot` a body at `position` is: vaultPoint read backwards, for the co-op guest. */
+export function vaultProgress(slot: WindowSlot, position: THREE.Vector3) {
+  const total = (slot.landing.x - slot.stand.x) * slot.inward.x + (slot.landing.z - slot.stand.z) * slot.inward.z
+  const along = (position.x - slot.stand.x) * slot.inward.x + (position.z - slot.stand.z) * slot.inward.z
+  return THREE.MathUtils.clamp(total > 1e-6 ? along / total : 1, 0, 1)
 }
 
 // ---------------------------------------------------------------- the zombie look
