@@ -174,6 +174,12 @@ export class PerkMachine {
  * a gear, a sign with shifting colours and a row of lights over it. Put a gun in: the press hammers it,
  * sparks fly, steam vents, light pours out; then it offers the gun back for a few seconds.
  */
+/**
+ * The Pack-a-Punch press head's rams: across (x), their depth under the crossbeam (z), where the head's top is
+ * above its origin, the collar under the beam, and where they end inside the beam (all in the machine's frame).
+ */
+const RAM = { x: 0.45, z: -0.2, headTop: 0.2, collar: 2.88, top: 3.1 } as const
+
 export class PackAPunch {
   readonly root = new THREE.Group()
   readonly point: THREE.Vector3
@@ -182,6 +188,8 @@ export class PackAPunch {
   /** The gun inside, as it will come out. */
   held: import('../types').WeaponItem | null = null
   private press = new THREE.Group()
+  /** The two rams from the press head up into the crossbeam's collars, stretched to fit every frame. */
+  private rams: THREE.Object3D[] = []
   private gear = new THREE.Group()
   private motes = new LightMotes(260, 0.08)
   private steam = new LightMotes(90, 0.3)
@@ -226,6 +234,8 @@ export class PackAPunch {
       frame.beam([side * 0.98, 0.6, -front + 0.05], [side * 0.98, 3.1, -front + 0.05], 0.09, 'paper', 'detail')
     }
     frame.box(2.3, 0.32, 0.55, 0, 3.1, -0.3, 'paper', 'edge')
+    // Collars under the crossbeam where the press head's rams run in.
+    for (const x of [-RAM.x, RAM.x]) frame.solid(new THREE.CylinderGeometry(0.085, 0.085, 0.12, 16), [x, RAM.collar, RAM.z], 'paper', 'detail')
     for (let x = -1.05; x <= 1.06; x += 0.3) frame.box(0.04, 0.04, 0.02, x, 3.1, -0.02, 'concrete', 'detail')
     // The sign board sits on the crossbeam, its top at 3.83 m.
     frame.box(2.5, 0.56, 0.1, 0, 3.545, -0.36, 'paper', 'edge')
@@ -235,13 +245,23 @@ export class PackAPunch {
     const head = new Draft('Pack-a-Punch press head')
     head.box(1.35, 0.4, 0.72, 0, 0, 0, 'paper', 'edge')
     head.box(1.2, 0.08, 0.6, 0, -0.24, 0, 'concrete', 'detail')
-    for (const x of [-0.45, 0.45]) head.solid(new THREE.CylinderGeometry(0.05, 0.05, 1.0, 14), [x, 0.68, -0.05], 'concrete', 'detail')
     head.line([[-0.62, 0.12, 0.365], [0.62, 0.12, 0.365]], 'detail')
     head.line([[-0.62, -0.08, 0.365], [0.62, -0.08, 0.365]], 'detail')
     head.finish()
     this.press.add(head)
     this.press.position.set(0, PackAPunch.REST, 0.12)
     this.root.add(this.press)
+    // The rams: from the head's top up into the crossbeam, running in and out with every blow and never
+    // standing above the beam or in front of the sign.
+    for (const x of [-RAM.x, RAM.x]) {
+      const ram = new Draft('Pack-a-Punch ram')
+      ram.solid(new THREE.CylinderGeometry(0.05, 0.05, 1, 14), [0, 0.5, 0], 'concrete', 'detail')
+      ram.finish()
+      ram.position.set(x, 0, RAM.z)
+      this.rams.push(ram)
+      this.root.add(ram)
+    }
+    this.fitRams()
     // A gear on the side of the press, turning while it works.
     const gear = new Draft('Pack-a-Punch gear')
     gear.solid(new THREE.TorusGeometry(0.22, 0.045, 10, 28), [0, 0, 0], 'paper', 'detail', [0, Math.PI / 2, 0])
@@ -329,8 +349,15 @@ export class PackAPunch {
       } else this.motes.update(dt, 10, p => p.set((Math.random() - 0.5) * 1.3, 1.15, 0.2 + (Math.random() - 0.5) * 0.4), colour, 0.35)
       this.steam.update(dt, 0, p => p.set(0, 0, 0), 0xd8d8d8, 0.9)
     }
+    this.fitRams()
     this.sparks.update(dt)
     return result
+  }
+
+  /** Stretch the rams from the press head's top to the crossbeam, wherever the head is. */
+  private fitRams() {
+    const bottom = this.press.position.y + RAM.headTop
+    for (const ram of this.rams) { ram.position.y = bottom; ram.scale.y = Math.max(0.01, RAM.top - bottom) }
   }
 
   dispose() {

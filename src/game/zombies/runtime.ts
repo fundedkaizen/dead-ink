@@ -160,7 +160,7 @@ export const DEAD_INK_COPY: MenuCopy = {
   restartWarning: 'This game ends and a new one starts at round 1.',
   missionPage: false,
   modeLink: { label: 'Hostage mission', href: './' },
-  controls: [['Knife', 'V'], ['Grenade', 'Q or G'], ['Ink Doll', 'T'], ['Switch weapon', 'Wheel']],
+  controls: [['Knife', 'V'], ['Grenade', 'Q or G'], ['Ink Doll', 'E'], ['Switch weapon', 'Wheel']],
   pages: [ARMORY_PAGE], home: deadInkHome, mode: 'zombies', gameOver: DEAD_INK_GAME_OVER,
 }
 
@@ -402,6 +402,7 @@ export class ZombiesRuntime {
     player.actions.onAction = target => {
       this.weapons.cancel(); this.aiming = false; this.interactionTime = Math.max(this.interactionTime, 0.25)
       if (target.kind === 'door' || target.kind === 'ladder') this.emit({ kind: target.kind, position: target.point, radius: target.kind === 'door' ? 8 : 5 })
+      if (target.kind === 'zipline') this.audio.play({ kind: 'zipline', duration: this.player.actions.rideSeconds })
     }
     this.bindInput()
     this.initialized = this.initialize()
@@ -685,9 +686,10 @@ export class ZombiesRuntime {
     if (event.ctrlKey || event.metaKey || event.altKey || (event.repeat && !zoomKey) || !this.player.enabled || this.player.immersive) return
     if (event.target instanceof HTMLElement && event.target.closest('button,input,select,textarea,summary,[contenteditable="true"]')) return
     if (!this.isActive()) return
-    // Q zooms a scoped sniper; otherwise it throws a grenade (so does G).
+    // Q zooms a scoped sniper; otherwise it throws a grenade (so does G). E zooms a scoped sniper in;
+    // otherwise it throws an Ink Doll (so does T, which the pad uses).
     const scoped = this.aiming && this.weapons.current?.name === 'sniper'
-    if (event.code === 'KeyT') {
+    if (event.code === 'KeyT' || (event.code === 'KeyE' && !scoped)) {
       if (!event.repeat && this.throwDoll()) { event.preventDefault(); this.invalidate() }
       return
     }
@@ -1637,7 +1639,7 @@ export class ZombiesRuntime {
   private useDollWall(buy: DollBuy) {
     if (!this.isActive() || !this.canReach(buy.point, buy.root) || this.dollCount >= DECOY.carry || !this.spend(DECOY.price)) return false
     this.dollCount = DECOY.carry
-    this.hud.notify('Ink Dolls: throw one with T and every zombie goes for it.', 3)
+    this.hud.notify('Ink Dolls: throw one with E and every zombie goes for it.', 3)
     this.emit({ kind: 'pickup', position: this.player.body.position.clone(), radius: 2 })
     this.invalidate()
     return true
@@ -2435,7 +2437,8 @@ export class ZombiesRuntime {
     if (this.strandTimer > 0 || !this.director || !this.graph) return
     this.strandTimer = 0.5
     for (const zombie of this.director.zombies) {
-      if (zombie.state !== 'chase' || !zombie.stranded) continue
+      // Never the Brute: it vanishing behind your back and turning up elsewhere reads as a glitch.
+      if (zombie.state !== 'chase' || !zombie.stranded || zombie.boss) continue
       if (this.seen(zombie.position.clone().setY(zombie.position.y + 1.2), zombie.actor.root)) continue
       const spot = pickSpawn(this.graph, this.player.world, { near: 12, far: 32, eyes: this.eyes() }, this.random)
       if (spot) this.director.relocate(zombie, spot)
