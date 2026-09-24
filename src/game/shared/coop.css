@@ -1,0 +1,54 @@
+/* Co-op for both modes (shared/coop.ts): teammates' name tags, world markers, the lobby on the menu, the last stand's bar. */
+/* The partner's name over their head, through walls; pinned to the edge with an arrow when off screen. */
+.coop-tag { position: absolute; left: 0; top: 0; pointer-events: none; display: grid; justify-items: center; gap: 1px; margin: -34px 0 0 -60px; width: 120px;
+  font: 700 13px/1.1 var(--notes, "Chalkboard SE", "Comic Sans MS", cursive); color: var(--tag, #2878d0);
+  text-shadow: 1px 1px 0 #fff, -1px 1px 0 #fff, 1px -1px 0 #fff, -1px -1px 0 #fff; }
+.coop-tag[hidden] { display: none; }
+.coop-tag i { width: 0; height: 0; border: 7px solid transparent; border-top: 9px solid var(--tag, #2878d0); border-bottom: 0; filter: drop-shadow(0 0 1px #fff); }
+.coop-tag.edge i { border: 7px solid transparent; border-left: 11px solid var(--tag, #2878d0); border-right: 0; }
+.coop-tag.down { color: #d4332a; }
+/* An objective marker (the power switch): small and quiet, through walls; pinned to the edge with an arrow. */
+.world-marker { position: absolute; left: 0; top: 0; pointer-events: none; display: grid; justify-items: center; margin: -14px 0 0 -12px; width: 24px; opacity: 0.8; }
+.world-marker[hidden] { display: none; }
+.world-marker svg { width: 22px; height: 22px; fill: #e8b64a; stroke: var(--ink, #111); stroke-width: 1.8; stroke-linejoin: round; filter: drop-shadow(0 0 1.5px #fff); }
+.world-marker i { width: 0; height: 0; border: 5px solid transparent; border-top: 7px solid var(--ink, #111); border-bottom: 0; margin-top: 1px; }
+.world-marker.edge i { position: absolute; left: 27px; top: 6px; border: 5px solid transparent; border-left: 8px solid var(--ink, #111); border-right: 0; transform-origin: -15px 5px; }
+/* The co-op box on the menu (the Co-op page). */
+.coop-panel { margin: 12px 0 0; padding: 10px 0 0; border-top: 2px solid var(--ink, #111); display: grid; gap: 6px; font: 14px/1.35 var(--notes, sans-serif); color: var(--ink, #111); }
+.coop-panel h3 { margin: 0; font: 700 12px/1 var(--notes, sans-serif); text-transform: uppercase; letter-spacing: 0.08em; }
+.coop-panel p { margin: 0; }
+.coop-panel input { font: inherit; padding: 4px 6px; border: 1.5px solid var(--ink, #111); border-radius: 3px; background: #fff; color: var(--ink, #111); }
+.coop-name { display: flex; align-items: center; gap: 8px; }
+.coop-name input { width: 140px; }
+.coop-link { display: flex; gap: 6px; }
+.coop-link input { flex: 1 1 auto; min-width: 0; }
+/* The lobby: who is here, each in their player colour, the host first. */
+.coop-players { display: grid; gap: 4px; }
+.coop-players ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; }
+.coop-players li { padding: 3px 8px; border: 1.5px solid var(--tag, #111); border-left-width: 6px; border-radius: 3px 5px 2px 4px; background: #fbfaf5; }
+.coop-players li.joining { border-style: dashed; border-color: var(--ink, #111); opacity: 0.7; }
+/* A guest once the host has started: the Jump in button calls for the click the page needs. */
+.coop-panel.started .coop-wait { display: none; }
+.coop-panel.started .coop-start { animation: coop-jump 0.7s ease-in-out infinite alternate; }
+@keyframes coop-jump { from { transform: scale(1); } to { transform: scale(1.07); } }
+@media (prefers-reduced-motion: reduce) { .coop-panel.started .coop-start { animation: none; } }
+body[data-mission="true"] .walk-card .coop-panel button { min-height: 32px; padding: 4px 12px; border: 2px solid var(--ink, #111); background: #fbfaf5; color: var(--ink, #111); font: 700 13px/1 var(--notes, sans-serif); border-radius: 3px; cursor: pointer; }
+body[data-mission="true"] .walk-card .coop-panel button:hover { background: var(--ink, #111); color: #fbfaf5; }
+body[data-mission="true"] .walk-card .coop-panel button.coop-start { width: 100%; min-height: 54px; margin-top: 6px; font-size: 18px; background: var(--ink, #111); color: #fbfaf5; box-shadow: 4px 4px 0 #d4332a; }
+body[data-mission="true"] .walk-card .coop-panel button.coop-start:hover { background: #2b2b2b; }
+.walk-card[data-page="coop"] .coop-panel { margin: 0; padding: 0; border-top: 0; }
+.coop-error { color: #d4332a; }
+/* The last stand: one bar under the crosshair (reviving, being revived, bleeding out); the downed teammate's red cross. */
+.coop-stand { position: absolute; left: 50%; top: calc(50% + 44px); transform: translateX(-50%); display: grid; justify-items: center; gap: 5px;
+  pointer-events: none; font: 700 15px/1.2 var(--notes, "Chalkboard SE", "Comic Sans MS", cursive); color: var(--ink, #111);
+  text-shadow: 1px 1px 0 #fff, -1px 1px 0 #fff, 1px -1px 0 #fff, -1px -1px 0 #fff; }
+.coop-stand[hidden] { display: none; }
+.coop-stand div { width: 200px; height: 10px; border: 2px solid var(--ink, #111); border-radius: 3px 5px 2px 4px; background: #fbfaf5; overflow: hidden; }
+.coop-stand i { display: block; height: 100%; transform-origin: left center; background: #2f6fd0; }
+.coop-stand[data-tone="bleed"] i { background: #c8322b; }
+.world-marker.coop-revive { opacity: 1; animation: coop-revive-marker 0.9s ease-in-out infinite alternate; }
+.world-marker.coop-revive svg { stroke-width: 1.2; }
+@keyframes coop-revive-marker { from { opacity: 0.6; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .world-marker.coop-revive { animation: none; } }
+/* The hostage rescue's co-op HUD layer, over the mission HUD. */
+.coop-hud { position: absolute; inset: 0; pointer-events: none; }
