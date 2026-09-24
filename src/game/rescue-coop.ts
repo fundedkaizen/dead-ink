@@ -479,7 +479,7 @@ export class RescueCoop {
   playing(playing: boolean) {
     if (!playing || this.link.role !== 'host' || this.begun) return
     this.begun = true
-    this.link.send({ t: 'start' })
+    this.link.send({ t: 'start', by: this.name })
   }
 
   /** The escape begins: the host takes every guest along. */
@@ -589,7 +589,7 @@ export class RescueCoop {
         break
       case 'start':
         this.lobby?.started()
-        r.hud.notify(`${this.mateName(0)} started the mission.`, 3)
+        r.hud.notify(`${m.by || this.mateName(0)} started the mission.`, 3)
         break
       case 'escape':
         if (!r.escape.active) { r.state.jeep = 'escaping'; r.beginEscape() }

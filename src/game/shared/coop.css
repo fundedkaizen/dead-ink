@@ -50,5 +50,3 @@ body[data-mission="true"] .walk-card .coop-panel button.coop-start:hover { backg
 .world-marker.coop-revive svg { stroke-width: 1.2; }
 @keyframes coop-revive-marker { from { opacity: 0.6; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .world-marker.coop-revive { animation: none; } }
-/* The hostage rescue's co-op HUD layer, over the mission HUD. */
-.coop-hud { position: absolute; inset: 0; pointer-events: none; }

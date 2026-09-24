@@ -3,35 +3,17 @@
 // controller (rescue-coop.ts) on a stand-in runtime: downs, revives, bleeding out, failure, shots and uses.
 import assert from 'node:assert/strict'
 import * as THREE from 'three'
-import { EnemyDirector } from '../src/game/ai'
-import type { EnemyActor } from '../src/game/actors'
 import { CollisionWorld } from '../src/player/collision'
 import { initialMission } from '../src/game/mission'
 import { SecuritySystem } from '../src/game/security'
 import { GuardPuppets } from '../src/game/guard-puppets'
 import { GUARD_STATES, LastStand, RESCUE_COOP, ReviveHold, applyMirror, canRevive, decodeHurt, doorBits, encodeHurt, escapeReady, escortLeaders,
   everyoneDown, guardRows, mirrorMission, type RescueMessage } from '../src/game/rescue-coop-rules'
-import type { PlayerSense, SoundEvent, WeaponSnapshot } from '../src/game/types'
+import type { PlayerSense, SoundEvent } from '../src/game/types'
 import type { PlayerState } from '../src/game/shared/coop'
+import { type FakeActor, guards as arenaGuards, installFakeDom, stage, v } from './rescue-coop-stage'
 
-const v = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z)
 const near = (a: THREE.Vector3, b: THREE.Vector3, tolerance = 0.02) => a.distanceTo(b) <= tolerance
-
-/** A stand-in stickman that remembers what it was asked to play. */
-type FakeActor = EnemyActor & { calls: { update: unknown[][]; posture: string[]; shots: number; reacts: unknown[][]; restores: unknown[][] } }
-const fakeActor = async () => {
-  const root = new THREE.Group()
-  const calls = { update: [] as unknown[][], posture: [] as string[], shots: 0, reacts: [] as unknown[][], restores: [] as unknown[][] }
-  let posture = 'stand'
-  return { root, calls, reactionRemaining: 0, animationTime: 0, deathClip: 'dieBody',
-    get posture() { return posture },
-    setPosture(next: string) { posture = next; calls.posture.push(next) },
-    update(...args: unknown[]) { calls.update.push(args) },
-    shoot() { calls.shots++ },
-    react(...args: unknown[]) { calls.reacts.push(args); if (args[1]) (this as { deathClip: string }).deathClip = String(args[0]) },
-    restore(...args: unknown[]) { calls.restores.push(args) },
-    dispose() {}, muzzle: () => root.position.clone().add(v(0, 1.4, 0.3)) } as unknown as FakeActor
-}
 
 function arena() {
   const scene = new THREE.Scene()
@@ -40,12 +22,11 @@ function arena() {
   return { scene, world: new CollisionWorld(scene) }
 }
 
-async function guards(positions: [number, number, number][], facing = 0) {
-  const { scene, world } = arena(), events: SoundEvent[] = [], hurt: { amount: number; id: number | undefined }[] = []
-  const ai = new EnemyDirector({ scene, world, doors: [], specs: positions.map((position, i) => ({ id: `g${i}`, name: `Guard ${i}`, position, patrol: [], weapon: 'ak', facing })),
-    emit: event => events.push(event), damagePlayer: (amount, _source, _hit, id) => hurt.push({ amount, id }), dropWeapon() {} }, fakeActor)
-  await ai.init()
-  return { ai, world, events, hurt, dispose() { ai.dispose(); world.dispose() } }
+/** Guards that record what they emit, and whom their rounds hurt. */
+async function guards(positions: [number, number, number][]) {
+  const events: SoundEvent[] = [], hurt: { amount: number; id: number | undefined }[] = []
+  const f = await arenaGuards(positions, { emit: event => events.push(event), damagePlayer: (amount, _source, _hit, id) => hurt.push({ amount, id }) })
+  return { ...f, events, hurt }
 }
 
 const player = (id: number, x: number, z: number): PlayerSense => ({ feet: v(x, 0, z), eye: v(x, 1.65, z), velocity: v(), alive: true, radioEnabled: true, id })
@@ -251,55 +232,7 @@ const player = (id: number, x: number, z: number): PlayerSense => ({ feet: v(x, 
 }
 
 // ---------------------------------------------------------------- the co-op controller on a stand-in runtime
-type Sent = { m: RescueMessage; route?: { to?: number; skip?: number } }
-function fakeElement(): Record<string, unknown> {
-  const element: Record<string, unknown> = { children: [], dataset: {}, hidden: false, textContent: '', className: '', innerHTML: '',
-    style: { setProperty() {}, removeProperty() {}, transform: '' }, classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
-    setAttribute() {}, removeAttribute() {}, append(...nodes: unknown[]) { (element.children as unknown[]).push(...nodes) }, remove() {},
-    querySelector: () => null, querySelectorAll: () => [], addEventListener() {} }
-  return element
-}
-Object.assign(globalThis, {
-  document: { createElement: () => fakeElement(), querySelector: () => null, body: fakeElement(), hidden: false },
-  location: { href: 'http://localhost:5187/', search: '', protocol: 'http:', host: 'localhost:5187' },
-  localStorage: { getItem: () => null, setItem() {} },
-  window: { innerWidth: 1280, innerHeight: 720 },
-})
-const { RescueCoop } = await import('../src/game/rescue-coop')
-const { PartnerAvatar } = await import('../src/game/shared/coop')
-// No stickman model in Node: the teammates' avatars stay empty.
-PartnerAvatar.prototype.load = () => Promise.resolve()
-
-function stage(role: 'host' | 'guest', id = role === 'host' ? 0 : 1) {
-  const sent: Sent[] = [], notes: string[] = [], effects: { station: string; by: number }[] = []
-  let weapons: WeaponSnapshot = { slots: [{ id: 'ak-1', name: 'ak', magazine: 30, reserve: 90 }, { id: 'pistol-1', name: 'pistol', magazine: 5, reserve: 12 }, null, null],
-    selected: 0, pickups: [{ id: 'maintenance-smg', name: 'smg', magazine: 24, reserve: 48, position: [0, 0, 0] }], nextId: 3 }
-  const camera = new THREE.PerspectiveCamera()
-  const state = initialMission()
-  const r = {
-    state, ready: true, initialized: Promise.resolve(), interactionTime: 0, hitFlash: 0, failures: 0,
-    ai: { enemies: [] as unknown[], hear() {}, nearMiss() {}, hit: (): boolean => false, aimDistance: () => Infinity, bulletTrails: { emit() {}, update() {} } },
-    player: { playing: true, enabled: true, immersive: false, useHeld: false, movementLocked: false, crawling: false,
-      body: { position: v(), velocity: v(), teleport(point: THREE.Vector3) { this.position.copy(point) } },
-      actions: { doors: [] as THREE.Group[], disabled: false, syncCamera() {} },
-      world: { floor: () => 0, fits: () => true, raySurface: () => null, visible: () => true } },
-    weapons: { get current() { return weapons.slots[weapons.selected] }, snapshot: () => structuredClone(weapons), restore: (snapshot: WeaponSnapshot) => { weapons = structuredClone(snapshot) },
-      addPickup() {}, removePickup: () => true },
-    escort: { motion: [], follow() {} }, security: { sync() {} }, blood: { emitHit() {} }, impacts: { emit() {} }, bulletTrails: { emit() {} },
-    hud: { notify: (text: string) => { notes.push(text) } }, audio: { play() {}, confirmHit() {} }, escape: { active: false },
-    world: { spawn: [0, 0, 0], stations: [{ id: 'hostage-1', kind: 'hostage', point: v(110.5, -3, -21) }, { id: 'rescue-jeep', kind: 'jeep', point: v(154.65, 1.05, 9.95) }] },
-    emit() {}, cancelInput() {}, beginEscape() {}, syncWorld() {}, invalidate() {}, gateOpening: () => false, retry() {}, restart() {}, damage() {},
-    stationEffects: (station: { id: string }, by: number) => { effects.push({ station: station.id, by }) },
-    fail() { if (this.state.phase !== 'active') return; this.state.phase = 'dead'; this.failures++; coop.failed() },
-  }
-  const coop = new RescueCoop(r as never, new THREE.Scene(), camera, fakeElement() as never)
-  Object.assign(coop.link, { role, id })
-  coop.link.peers.add(role === 'host' ? 1 : 0)
-  coop.link.send = (m: RescueMessage, route?: { to?: number; skip?: number }) => { sent.push({ m, route }) }
-  const message = (m: RescueMessage, from?: number) => (coop as unknown as { message: (m: unknown) => void }).message({ ...m, from })
-  const me = (over: Partial<PlayerState> = {}): PlayerState => ({ id: 1, p: [1, 0, 0], yaw: 0, pitch: 0, w: 'pistol', mv: 0, dn: 0, pts: 0, kills: 0, name: 'Guest', ...over })
-  return { r, coop, sent, notes, effects, message, me, weapons: () => weapons }
-}
+installFakeDom()
 {
   // Host: what the guards see of a guest, and the mission lost when everyone is down.
   const s = stage('host')

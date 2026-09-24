@@ -50,7 +50,8 @@ export type RescueMessage =
   | { t: 'taken'; id: string }
   /** You used a field dressing (the host keeps which are used). */
   | { t: 'heal' }
-  | { t: 'start' }
+  /** The host began the mission (`by`: the host's name). */
+  | { t: 'start'; by?: string }
   | { t: 'escape' }
   | { t: 'fail' }
   | { t: 'reset'; kind: 'retry' | 'restart' }
