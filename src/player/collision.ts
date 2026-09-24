@@ -12,6 +12,8 @@ type Collider = {
   query?: number
   blocksSight: boolean
   blocksShots: boolean
+  /** A wire panel (a fence, a gate): its horizontal normal. A player is stopped by wire but never stands on it. */
+  across?: THREE.Vector3
 }
 
 export type SurfaceHit = {
@@ -138,6 +140,8 @@ export class CollisionWorld {
   private capsule = new Capsule()
   private bounds = new THREE.Box3()
   private offset = new THREE.Vector3()
+  private slip = new THREE.Vector3()
+  private slipCentre = new THREE.Vector3()
   private ray = new THREE.Raycaster()
   private groundRay = new THREE.Ray()
   private normal = new THREE.Vector3()
@@ -197,14 +201,16 @@ export class CollisionWorld {
         mesh.matrixWorld.copy(object.matrixWorld)
         mesh.userData.panelOwner = object
         this.proxies.push(mesh)
-        this.add(mesh, false, panel.blocksSight !== false, panel.blocksShots !== false)
+        // Wire (sight passes it): its horizontal normal, for a player coming down on its top to slip off.
+        const across = panel.blocksSight === false ? new THREE.Vector3(az - bz, 0, bx - ax).transformDirection(object.matrixWorld).setY(0).normalize() : undefined
+        this.add(mesh, false, panel.blocksSight !== false, panel.blocksShots !== false, across)
       }
     })
   }
 
-  private add(mesh: THREE.Mesh, dynamic: boolean, blocksSight = true, blocksShots = true) {
+  private add(mesh: THREE.Mesh, dynamic: boolean, blocksSight = true, blocksShots = true, across?: THREE.Vector3) {
     mesh.geometry.computeBoundingBox()
-    this.colliders.push({ mesh, dynamic, blocksSight, blocksShots,
+    this.colliders.push({ mesh, dynamic, blocksSight, blocksShots, across,
       bounds: mesh.geometry.boundingBox!.clone().applyMatrix4(mesh.matrixWorld),
       inverse: mesh.matrixWorld.clone().invert() })
   }
@@ -297,7 +303,12 @@ export class CollisionWorld {
     return !!hit && hit.depth > 0.008
   }
 
-  resolve(capsule: Capsule, velocity: THREE.Vector3) {
+  /**
+   * Push the capsule out of everything it overlaps; true when something under it holds it up. With `slipOffWire`
+   * (the player's body) wire is a wall only: a body coming down on a fence or gate top slips off it on the side
+   * it is on, as nobody balances on wire (a player walked the fence tops out of Dead Ink's compound).
+   */
+  resolve(capsule: Capsule, velocity: THREE.Vector3, slipOffWire = false) {
     let grounded = false
     for (let pass = 0; pass < 3; pass++) {
       let touched = false
@@ -306,7 +317,10 @@ export class CollisionWorld {
         const hit = this.collision(collider, capsule)
         if (!hit) continue
         touched = true
-        if (hit.normal.y > 0.55) grounded = true
+        if (slipOffWire && collider.across && hit.normal.y > 0.01) {
+          const side = this.slip.copy(capsule.start).sub(collider.bounds.getCenter(this.slipCentre)).dot(collider.across) < 0 ? -1 : 1
+          hit.normal.copy(collider.across).multiplyScalar(side)
+        } else if (hit.normal.y > 0.55) grounded = true
         capsule.translate(this.offset.copy(hit.normal).multiplyScalar(hit.depth + 0.00001))
         const intoSurface = velocity.dot(hit.normal)
         if (intoSurface < 0) velocity.addScaledVector(hit.normal, -intoSurface)
@@ -316,8 +330,8 @@ export class CollisionWorld {
     return grounded
   }
 
-  /** Small support footprint handles stair treads and the edges of platforms. */
-  floor(position: THREE.Vector3, above: number, below: number, radius = 0) {
+  /** Small support footprint handles stair treads and the edges of platforms. `solidOnly`: not wire tops (see resolve). */
+  floor(position: THREE.Vector3, above: number, below: number, radius = 0, solidOnly = false) {
     let height = -Infinity
     const top = position.y + above, bottom = top - (above + below), samples = radius ? 5 : 1
     for (let sample = 0; sample < samples; sample++) {
@@ -332,7 +346,7 @@ export class CollisionWorld {
       for (let pass = 0; pass < 2; pass++) for (const collider of pass ? local : this.wide) {
         // A vertical ray meets a box exactly when its column does.
         const { min, max } = collider.bounds
-        if (max.y < bottom || min.y > top || x < min.x || x > max.x || z < min.z || z > max.z) continue
+        if (max.y < bottom || min.y > top || x < min.x || x > max.x || z < min.z || z > max.z || (solidOnly && collider.across)) continue
         this.groundRay.copy(this.ray.ray).applyMatrix4(collider.inverse)
         this.faceCount = 0
         this.collect(this.tree(collider), this.groundRay)

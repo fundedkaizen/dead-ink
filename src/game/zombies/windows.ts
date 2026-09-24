@@ -8,6 +8,7 @@ import type { SoundEvent } from '../types'
 import type { WindowSlot, Zombie } from './director'
 import type { NavGraph } from './navgraph'
 import { POINTS } from './rules'
+import { wireRoof } from './roof-wire'
 
 /**
  * Call of Duty's barriers. The mess hall's windows on the road side, outside the compound, are boarded up
@@ -192,6 +193,7 @@ export class Barriers {
   readonly root = new THREE.Group()
   private colliders = new THREE.Group()
   private gaps: number[] = []
+  private unwire: () => void
   private paper: THREE.InstancedMesh
   private shell: THREE.InstancedMesh
   private nails: THREE.InstancedMesh
@@ -252,6 +254,8 @@ export class Barriers {
       const [a, b] = size.x > size.z ? [{ x: box.min.x, z: mid.z }, { x: box.max.x, z: mid.z }] : [{ x: mid.x, z: box.min.z }, { x: mid.x, z: box.max.z }]
       this.gaps.push(graph.closeGap(a, b))
     }
+    // And players stay off the road: razor wire along the roof over it, the roof ladder closed (roof-wire.ts).
+    this.unwire = wireRoof(world, scene)
     // Where each window's zombies climb out of the ground and wait, where a body fits and walks straight to the step.
     for (const barrier of this.list) this.placeApproach(barrier)
     const count = this.list.length * WINDOW.boards
@@ -383,6 +387,7 @@ export class Barriers {
     this.world.removeObject(this.colliders)
     for (const gap of this.gaps) this.graph.openGap(gap)
     this.gaps = []
+    this.unwire()
     this.root.removeFromParent()
     this.root.traverse(object => { if (object instanceof THREE.Mesh) object.geometry.dispose() })
     for (const mesh of [this.paper, this.shell, this.nails]) (mesh.material as THREE.Material).dispose()

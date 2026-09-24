@@ -127,6 +127,8 @@ export class PlayerActions {
       consider({ object: door, point, kind: 'door', label: door.userData.open ? 'Close' : 'Open', descending: false })
     }
     for (const ladder of this.ladders) for (const descending of [false, true]) {
+      // Closed off by a mode (Dead Ink's mess hall roof ladder, which comes down outside the compound).
+      if (ladder.userData.closed) continue
       const endpoint = this.ladderPoint(ladder, descending)
       if (Math.abs(this.body.position.y - endpoint.y) > 1 ||
         Math.hypot(this.body.position.x - endpoint.x, this.body.position.z - endpoint.z) > 2.3) continue
