@@ -115,6 +115,10 @@ body[data-reduced-motion="true"] .dead-ink-powerup.ending { animation: none; opa
 .dead-ink-boss[hidden] { display: none; }
 .dead-ink-boss-bar { width: 100%; height: 12px; border: 2px solid var(--ink); border-radius: 3px 5px 3px 4px; background: #ffffffd8; overflow: hidden; }
 .dead-ink-boss-bar > div { height: 100%; background: #d4332a; transition: width 0.15s; }
+/* Enraged: the bar throbs a brighter red (steady with Reduced Motion). */
+.dead-ink-boss.enraged .dead-ink-boss-bar > div { animation: dead-ink-boss-rage 0.7s ease-in-out infinite alternate; }
+@keyframes dead-ink-boss-rage { to { background: #ff2b16; } }
+body[data-reduced-motion="true"] .dead-ink-boss.enraged .dead-ink-boss-bar > div { animation: none; background: #ff2b16; }
 
 /* The Nuke: a flash to the negative, fading back. */
 body[data-dead-ink-nuke="true"] #world { animation: dead-ink-nuke 0.7s ease-out; }

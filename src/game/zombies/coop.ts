@@ -42,6 +42,8 @@ export type PlayerState = {
   /** Reviving a teammate: how far it has run, 0 to 1 (0 or missing when not reviving), and whom. */
   rv?: number
   rt?: number
+  /** Off the ground (a jump): the Brute's slam wave passes under them. */
+  air?: 1
 }
 
 /** The host's buildables, traps and quest, as the guest needs them (sent with every tick). */
@@ -67,11 +69,13 @@ export type WorldState = {
 export type CoopMessage =
   // host -> guest
   | { t: 'sync'; gates: string[]; power: boolean; box: number; seed: number; difficulty: string }
-  | { t: 'tick'; z: ZombieSnap[]; r: number; ph: 'break' | 'active'; players: PlayerState[]; storm: boolean; pw: 0 | 1; pk: 0 | 1; w?: WorldState }
+  // `bd`: the Brute's chunks in flight, [id, origin x y z, launch velocity x y z, age] (brute.ts).
+  | { t: 'tick'; z: ZombieSnap[]; r: number; ph: 'break' | 'active'; players: PlayerState[]; storm: boolean; pw: 0 | 1; pk: 0 | 1; w?: WorldState; bd?: number[][] }
   | { t: 'shield' }
   | { t: 'award'; n: number; k?: number; h?: number }
   | { t: 'hit'; pt: [number, number, number]; dealt: number; id: string; head: 0 | 1; lethal: 0 | 1 }
-  | { t: 'hurt'; n: number; s?: [number, number, number] }
+  // `k`: a shove to add to their speed (the Brute's blows throw a player), m/s.
+  | { t: 'hurt'; n: number; s?: [number, number, number]; k?: [number, number, number] }
   | { t: 'announce'; text: string; s: number; tone?: string }
   | { t: 'sting'; name: 'roundStart' | 'boxSpin' | 'song' }
   | { t: 'gate'; id: string }

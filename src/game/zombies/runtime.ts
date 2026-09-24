@@ -22,11 +22,12 @@ import { DamageIndicator } from '../shared/damage-indicator'
 import { Hotbar } from '../shared/hotbar'
 import { seeded, weighted, type Random } from '../shared/random'
 import { ZombieDirector, type Zombie, type ZombieGait, type ZombieTarget } from './director'
+import { bruteDue, roundAlive } from './brute'
 import { NavGraph, geometryHash, type NavData } from './navgraph'
 import { pickSpawn } from './spawn'
 import { findWallSpots, type WallSpot } from './placement'
 import { newGame, returnSpawns, stepRounds, type RoundState } from './rounds'
-import { BOSS, DIFFICULTY, MAX_ALIVE, PLAYER_HEALTH, POWERUPS, PRICES, STARTING_POINTS, STORM, ZOMBIE_DAMAGE_SCALE, isBossRound, isStormRound, movementMix, zombieHealth, type Difficulty, type PowerupKind } from './rules'
+import { BOSS, DIFFICULTY, MAX_ALIVE, PLAYER_HEALTH, POWERUPS, PRICES, STARTING_POINTS, STORM, ZOMBIE_DAMAGE_SCALE, isStormRound, movementMix, zombieHealth, type Difficulty, type PowerupKind } from './rules'
 import { BOX_WEIGHTS, WALL_WEAPONS, ZOMBIE_SLOTS, freshWeapon, pointsForHit, rollBox, spareAmmo, startingPistol, wallOffer, RESERVE_MAGAZINES } from './economy'
 import { MysteryBox, WallBuy } from './stations'
 import { ZombieHud } from './hud'
@@ -463,13 +464,15 @@ export class ZombiesRuntime {
       if (graph.geometry && graph.geometry !== hash) console.warn(`Dead Ink: navigation graph was baked for geometry ${graph.geometry}, map is ${hash}. Rebake with scripts/build-navgraph.ts.`)
       this.graph = graph
       this.director = new ZombieDirector({ scene: this.scene, world: this.player.world, doors: doors.filter(door => !door.userData.missionLocked), graph, emit: event => this.emit(event),
-        damagePlayer: (id, amount, source) => {
+        damagePlayer: (id, amount, source, knock) => {
           const n = Math.round(amount * DIFFICULTY[this.difficulty].damage)
           // Targets are p1 for the host, p2 to p4 for guests 1 to 3.
           const player = Number(id.slice(1)) - 1
-          if (player === 0) this.damage(n, 'zombie', source)
-          else if (player > 0) this.coop.send({ t: 'hurt', n, s: source ? vec(source) : undefined }, { to: player })
+          if (player === 0) this.damage(n, 'zombie', source, knock)
+          else if (player > 0) this.coop.send({ t: 'hurt', n, s: source ? vec(source) : undefined, k: knock ? vec(knock) : undefined }, { to: player })
         },
+        // Whom the Brute's attacks can hurt, even while an Ink Doll has the zombies' attention.
+        players: () => this.playerTargets(),
         onHit: hit => { this.impactPoint = hit.point.clone(); this.blood.emitHit(hit); this.audio.confirmHit(hit) },
         onRise: position => { this.riseMarks.emit(position); this.emit({ kind: 'zombie-rise', position, radius: 30 }) },
         onSlam: (position, radius) => { this.shockwaves.emit(position, radius); this.riseMarks.emit(position) } })
@@ -1093,10 +1096,12 @@ export class ZombiesRuntime {
     const spot = node >= 0 ? graph.point(node).addScaledVector(pack.spot.normal, 3) : null
     const floorSpot = spot && director.navigation.floor(spot) ? spot : pickSpawn(graph, this.player.world, { near: 10, far: 30, eyes: [] }, this.random)
     const feet = this.player.body.position
-    const health = Math.round(BOSS.health(this.rounds.round) * QUEST.editorHealth * DIFFICULTY[this.difficulty].health)
+    const health = Math.round(BOSS.health(this.rounds.round, 1 + this.matesHere().length) * QUEST.editorHealth * DIFFICULTY[this.difficulty].health)
     const editor = floorSpot && director.spawn(floorSpot, health, 'run', Math.atan2(feet.x - floorSpot.x, feet.z - floorSpot.z), true, true)
     if (!editor) { this.editorTimer = 1; return }
     this.editor = editor
+    // The Brute's moves; the name on its health bar (for the guests too).
+    if (editor.brute) editor.brute.editor = true
     this.riseMarks.emit(editor.position); this.riseMarks.emit(editor.position.clone().add(new THREE.Vector3(-0.7, 0, 0.5)))
     this.shout('The Editor', 3.5)
     this.emit({ kind: 'boss-roar', position: editor.position.clone().setY(editor.position.y + 3), radius: 250 })
@@ -1165,7 +1170,8 @@ export class ZombiesRuntime {
     const body = this.player.body
     return { id: this.coop.id, p: vec(body.position), yaw: Math.round(e.y * 100) / 100, pitch: Math.round(e.x * 100) / 100, w: this.weapons.current?.name ?? null,
       mv: Math.hypot(body.velocity.x, body.velocity.z) > 0.6 ? 1 : 0, dn: this.down, pts: this.state.points, kills: this.state.kills, name: this.playerName,
-      rv: this.reviving > 0 ? Math.round(this.reviving / this.reviveTime() * 100) / 100 : 0, rt: this.reviving > 0 ? this.revivingId : undefined }
+      rv: this.reviving > 0 ? Math.round(this.reviving / this.reviveTime() * 100) / 100 : 0, rt: this.reviving > 0 ? this.revivingId : undefined,
+      air: this.player.body.grounded ? undefined : 1 }
   }
 
   /** The host tells a guest (or all of them) how the world stands: open gates, the power, the box's place. */
@@ -1241,8 +1247,9 @@ export class ZombiesRuntime {
     if (!paired || (this.sendTimer -= dt) > 0) return
     this.sendTimer = 1 / COOP.sendRate
     if (this.coop.role === 'host') {
+      const debris = this.director?.brutes.debris.rows() ?? []
       this.coop.send({ t: 'tick', z: this.director?.snapshot() ?? [], r: this.rounds.round, ph: this.rounds.phase, players: [this.myState(), ...this.matesHere().map(mate => mate.state)],
-        storm: this.storm, pw: this.power ? 1 : 0, pk: this.packBuilt ? 1 : 0, w: this.worldState() })
+        storm: this.storm, pw: this.power ? 1 : 0, pk: this.packBuilt ? 1 : 0, w: this.worldState(), ...(debris.length ? { bd: debris } : {}) })
     } else this.coop.send({ t: 'me', me: this.myState() })
   }
 
@@ -1386,9 +1393,11 @@ export class ZombiesRuntime {
         if (!!m.pw !== this.power) this.setPower(!!m.pw)
         if (m.pk && !this.packBuilt) this.completeBuild('pack')
         if (m.w) this.applyWorld(m.w)
+        if (m.bd) this.director?.brutes.debris.sync(m.bd)
         if (newRound) {
           if (this.down === 2) this.getUp(true)
           this.grenadeCount = Math.min(GRENADE.max, this.grenadeCount + GRENADE.perRound)
+          if (this.liveBoss(false)) this.bruteCarriesOver()
         }
         break
       }
@@ -1403,7 +1412,7 @@ export class ZombiesRuntime {
         if (!m.pt) break
         this.shotsHit += this.pullHit ? 0 : 1; this.pullHit = true
         break
-      case 'hurt': this.damage(m.n, 'zombie', m.s ? toVector(m.s) : undefined); break
+      case 'hurt': this.damage(m.n, 'zombie', m.s ? toVector(m.s) : undefined, m.k ? toVector(m.k) : undefined); break
       case 'announce': this.zombieHud.announce(m.text, m.s, m.tone); break
       case 'sting': this.music.sting(m.name); break
       case 'gate': {
@@ -1910,8 +1919,17 @@ export class ZombiesRuntime {
 
   /** The menu theme over menus, nothing in a round, the Brute's track while it lives, the requiem after death. */
   private updateMusic() {
-    this.music.setMode(this.state.phase === 'dead' ? 'dead' : !this.player.playing ? 'menu'
-      : (this.brute && this.brute.state === 'chase') || (this.editor && this.editor.state === 'chase') ? 'boss' : 'play')
+    this.music.setMode(this.state.phase === 'dead' ? 'dead' : !this.player.playing ? 'menu' : this.liveBoss() ? 'boss' : 'play')
+  }
+
+  /**
+   * The living boss whose health bar shows: the Editor before the Brute (`editor` false: the Brute alone). A
+   * guest has no Brute of its own: its bosses are the host's, drawn from the snapshot.
+   */
+  private liveBoss(editor = true): Zombie | null {
+    if (!this.isGuest) return editor && this.editor?.state === 'chase' ? this.editor : this.bruteHunting ? this.brute : null
+    const bosses = this.director?.zombies.filter(z => z.brute && z.state === 'chase') ?? []
+    return (editor ? bosses.find(z => z.brute!.editor) : undefined) ?? bosses.find(z => !z.brute!.editor) ?? null
   }
 
   /**
@@ -2337,7 +2355,8 @@ export class ZombiesRuntime {
     return true
   }
 
-  damage(amount: number, cause: 'zombie' | 'fall' | 'gas', source?: THREE.Vector3) {
+  /** `knock`: a shove added to your speed (the Brute's blows throw you), m/s. */
+  damage(amount: number, cause: 'zombie' | 'fall' | 'gas', source?: THREE.Vector3, knock?: THREE.Vector3) {
     if (this.invincible || this.reviveGrace > 0 || this.down || !this.isActive() || !(amount > 0)) return
     // The shield on your back takes what comes from behind, until it breaks.
     if (this.shield && source && cause === 'zombie') {
@@ -2360,6 +2379,8 @@ export class ZombiesRuntime {
     this.state.health = Math.max(0, this.state.health - amount)
     this.lastHurt = this.state.elapsed
     const dead = this.state.health === 0
+    // Thrown by the blow: off your feet, so the ground does not stop the shove at once.
+    if (knock && !dead && !this.player.actions.traversing) { this.player.body.velocity.add(knock); if (knock.y > 0) this.player.body.grounded = false }
     // Gas and traps burn steadily: no knock-back on every tick, just the hurt.
     if (!dead && !this.hud.reducedMotion && cause !== 'gas') {
       const point = this.player.body.position.clone().add(new THREE.Vector3(0, 1.17, 0))
@@ -2465,13 +2486,19 @@ export class ZombiesRuntime {
     this.setStorm(false)
   }
 
-  /** The Brute climbs out of the ground somewhere it can walk to you from, and roars. */
+  /** The Brute is alive and hunting (it carries over from round to round until it is killed). */
+  get bruteHunting() { return !!this.brute && this.brute.boss && this.brute.state === 'chase' }
+
+  /** A round starts with the Brute still about: a short line saying so (on each player's screen). */
+  private bruteCarriesOver() { this.hud.notify('The Brute is still hunting you.', 3.5) }
+
+  /** The Brute climbs out of the ground somewhere it can walk to you from, and roars. Never a second one. */
   private spawnBrute() {
     const director = this.director, graph = this.graph
-    if (!director || !graph) return
+    if (!director || !graph || this.bruteHunting) return
     const spot = pickSpawn(graph, this.player.world, { near: 16, far: 40, eyes: [] }, this.random)
     const feet = this.player.body.position
-    const health = Math.round(BOSS.health(this.rounds.round) * DIFFICULTY[this.difficulty].health)
+    const health = Math.round(BOSS.health(this.rounds.round, 1 + this.matesHere().length) * DIFFICULTY[this.difficulty].health)
     const brute = spot && director.spawn(spot, health, 'run', Math.atan2(feet.x - spot.x, feet.z - spot.z), true, true)
     // Nowhere to stand, or every body in use: try again in a moment.
     if (!brute) { this.bruteTimer = 1; return }
@@ -2528,10 +2555,8 @@ export class ZombiesRuntime {
     // A doll on the ground draws every zombie to it, the Brute too, until it goes off.
     const lures = this.dolls.resting()
     const allLures = [...lures.map(doll => doll.position), ...this.partnerLures.map(lure => lure.position)]
-    const target = (): ZombieTarget[] => allLures.length ? allLures.map((feet, i) => ({ id: `doll-${i}`, feet, alive: true }))
-      // After the game ends the horde still shambles about, closing in on where you fell (as in Call of Duty).
-      : [{ id: 'p1', feet: this.player.body.position, alive: (this.state.phase === 'active' && !this.down) || this.gameOverFlight.active },
-        ...(this.coop.role === 'host' && this.paired ? this.matesHere().filter(mate => mate.state.dn === 0).map(mate => ({ id: `p${mate.id + 1}`, feet: mate.avatar.feet, alive: true })) : [])]
+    const target = (): readonly ZombieTarget[] => allLures.length ? allLures.map((feet, i) => ({ id: `doll-${i}`, feet, alive: true }))
+      : this.playerTargets()
     if (active && this.director) {
       this.state.elapsed += dt
       const body = this.player.body
@@ -2562,12 +2587,25 @@ export class ZombiesRuntime {
     return this.renderRest(dt, active, deathPlaying) || this.coop.paired
   }
 
+  /**
+   * Every player the zombies may go for, the host first. Each says whether they are off the ground (the Brute's
+   * slam wave passes under a jump); a teammate's news reaches us late, so their jump gets that long to arrive.
+   */
+  private playerTargets(): ZombieTarget[] {
+    // After the game ends the horde still shambles about, closing in on where you fell (as in Call of Duty).
+    return [{ id: 'p1', feet: this.player.body.position, alive: (this.state.phase === 'active' && !this.down) || this.gameOverFlight.active,
+      air: !this.player.body.grounded },
+      ...(this.coop.role === 'host' && this.paired ? this.matesHere().filter(mate => mate.state.dn === 0)
+        .map(mate => ({ id: `p${mate.id + 1}`, feet: mate.avatar.feet, alive: true, air: !!mate.state.air, lag: BOSS.slam.lag })) : [])]
+  }
+
   /** The host (or a solo game): rounds, spawns and the zombies' own thinking. */
-  private hostStep(dt: number, target: () => ZombieTarget[]) {
+  private hostStep(dt: number, target: () => readonly ZombieTarget[]) {
     if (!this.director) return
     {
-      // Rounds: announce, feed zombies in, and hand back any that found nowhere to stand.
-      const events = stepRounds(this.rounds, dt, this.director.aliveCount, 1 + this.matesHere().length, DIFFICULTY[this.difficulty].spawnDelay * (this.storm ? STORM.spawnDelay : 1))
+      // Rounds: announce, feed zombies in, and hand back any that found nowhere to stand. A boss does not
+      // hold a round open: it carries on into the next ones until it is killed.
+      const events = stepRounds(this.rounds, dt, roundAlive(this.director.zombies), 1 + this.matesHere().length, DIFFICULTY[this.difficulty].spawnDelay * (this.storm ? STORM.spawnDelay : 1))
       this.state.round = this.rounds.round
       if (events.roundStarted) {
         this.dropper.newRound(); this.sting('roundStart')
@@ -2580,7 +2618,9 @@ export class ZombiesRuntime {
           this.shout(`Round ${events.roundStarted}: Ink Storm`, 3.5)
           this.emit({ kind: 'storm' })
         } else this.shout(`Round ${events.roundStarted}`)
-        if (isBossRound(events.roundStarted)) this.bruteTimer = BOSS.delay
+        // One Brute at a time: one still hunting you carries over, and no other comes.
+        if (bruteDue(events.roundStarted, this.bruteHunting)) this.bruteTimer = BOSS.delay
+        else if (this.bruteHunting) this.bruteCarriesOver()
         if (events.roundStarted > 1) this.grenadeCount = Math.min(GRENADE.max, this.grenadeCount + GRENADE.perRound)
         if (this.shieldBackRound && events.roundStarted >= this.shieldBackRound) {
           this.shieldBackRound = 0; this.shieldOnBench = true
@@ -2597,7 +2637,7 @@ export class ZombiesRuntime {
       }
       this.director.update(dt, target())
       // The last zombie of a round always comes at a sprint, as in every Call of Duty map.
-      if (this.rounds.phase === 'active' && this.rounds.toSpawn === 0 && this.director.aliveCount === 1) {
+      if (this.rounds.phase === 'active' && this.rounds.toSpawn === 0 && roundAlive(this.director.zombies) === 1) {
         const last = this.director.zombies.find(z => z.state === 'chase' && !z.boss)
         if (last && last.gait !== 'sprint') last.gait = 'sprint'
       }
@@ -2752,8 +2792,8 @@ export class ZombiesRuntime {
     this.indicator.update(running, this.camera.perspective.position, yaw)
     this.hotbar.update(this.weapons.slots, this.weapons.selectedSlot)
     this.zombieHud.update(running, this.state.round, this.state.points)
-    const boss = this.editor && this.editor.state === 'chase' ? this.editor : this.brute && this.brute.state === 'chase' ? this.brute : null
-    this.zombieHud.boss(boss ? boss.health / boss.maxHealth : null, boss === this.editor ? 'THE EDITOR' : 'THE BRUTE')
+    const boss = this.liveBoss()
+    this.zombieHud.boss(boss ? boss.health / boss.maxHealth : null, boss?.brute?.editor ? 'THE EDITOR' : 'THE BRUTE', !!boss?.brute?.enraged)
     this.zombieHud.grenades(this.grenadeCount, this.dollCount)
     // Mini map: you, the stations (this runtime's perk machines, box, Pack-a-Punch, power, gates), parts, teammates.
     this.minimap?.update(dt, this.player.body.position, yaw, this, this.parts, this.minimapMates(), this.player.playing)

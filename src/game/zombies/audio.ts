@@ -29,6 +29,9 @@ const JINGLES: Record<string, { notes: readonly number[]; step: number }> = {
   longStroke: { notes: [293.7, 370, 440, 587.3, 440, 370, 440, 587.3, 659.3, 587.3, 493.9, 440, 493.9, 587.3, 740, 587.3], step: 0.13 },
 }
 type Voice = { pitch: number; glide: number; length: number; rasp: number; drive: number; vowel: readonly [number, number]; level: number }
+/** The Brute's own sound events (brute.ts). */
+const BRUTE_SOUNDS: readonly string[] = ['brute-snort', 'brute-stomp', 'brute-bash', 'brute-crash', 'brute-rip', 'brute-throw', 'debris-crash',
+  'brute-clang', 'brute-mask-break', 'brute-enrage', 'brute-sink', 'brute-rumble', 'brute-emerge', 'ink-wave']
 
 export class DeadInkAudio extends MissionAudio {
   // Dead Ink has real music tracks (music.ts), so the generated phrase stays off.
@@ -41,7 +44,7 @@ export class DeadInkAudio extends MissionAudio {
     const handled = ['zombie-groan', 'zombie-scream', 'zombie-snarl', 'zombie-swipe', 'zombie-rise', 'powerup-drop', 'powerup-grab', 'nuke', 'round-start', 'round-end',
       'perk-drink', 'perk-jingle', 'pack-work', 'pack-ready', 'boss-roar', 'boss-growl', 'boss-slam', 'box-leave', 'box-open', 'box-spin', 'box-offer', 'ink-burst', 'grenade-blast', 'grenade-throw',
       'headshot-pop', 'gore-rip', 'gib', 'gas-burst', 'blot-gurgle', 'storm', 'doll-clap', 'heartbeat', 'shot-raygun', 'soul', 'soul-in', 'board-tear', 'board-hammer',
-      'shot-rocket', 'rocket-boom', 'round-burst']
+      'shot-rocket', 'rocket-boom', 'round-burst', ...BRUTE_SOUNDS]
     if (event.kind === 'door' && this.context && this.active && !this.muted) this.slam(event)
     // The Magnum: the usual report with a chest punch, a hard crack and a rolling echo under it.
     // Only your own Magnum (fired at your position): a teammate's comes from where they stand, without the chest punch.
@@ -108,6 +111,40 @@ export class DeadInkAudio extends MissionAudio {
       // Boarded windows: a plank ripped off its nails, and one hammered back.
       case 'board-tear': this.crack(event); break
       case 'board-hammer': this.hammer(event); break
+      default: if (BRUTE_SOUNDS.includes(event.kind)) this.brute(event)
+    }
+  }
+
+  /** When a bullet may next ring off the Brute's mask. */
+  private clangAt = 0
+
+  /**
+   * The Brute's moves (brute.ts), made from the sounds above: its charge (a snort and a scraping foot, the
+   * pounding steps, bodies bowled over, a wall), the chunk it tears up and throws, bullets ringing off its
+   * mask and the mask breaking, the enrage, sinking into the ink and bursting back out, the slam's wave.
+   */
+  private brute(event: SoundEvent) {
+    const r = Math.random
+    switch (event.kind) {
+      case 'brute-snort': this.voice(event, { pitch: 44 + r() * 6, glide: 1.35, length: 0.8, rasp: 0.95, drive: 12, vowel: VOWELS.oo, level: 0.9 }); this.dirt(event); break
+      case 'brute-stomp': this.thump(event, 0.9); break
+      case 'brute-bash': this.thump(event, 0.7); this.tear(event); break
+      case 'brute-crash': this.boom(event); this.blastCrack(event, 0.8, 0.14); this.dirt(event); break
+      case 'brute-rip': this.tear(event); this.dirt(event); break
+      case 'brute-throw': this.whoosh(event); this.thump(event, 0.35); break
+      case 'debris-crash': this.blastCrack(event, 0.7, 0.12); this.thump(event, 0.85); this.dirt(event); break
+      case 'brute-clang': {
+        // An automatic's stream on the mask: one ring at a time.
+        const now = this.context!.currentTime
+        if (now >= this.clangAt) { this.clangAt = now + 0.07; this.clash(event) }
+        break
+      }
+      case 'brute-mask-break': this.clash(event); this.blastCrack(event, 0.6, 0.1); this.tear(event); break
+      case 'brute-enrage': this.voice(event, { pitch: 36 + r() * 6, glide: 0.55, length: 2.6, rasp: 0.8, drive: 16, vowel: VOWELS.aa, level: 1 }); this.boom(event); break
+      case 'brute-sink': this.gurgle(event); this.voice(event, { pitch: 34 + r() * 6, glide: 0.5, length: 1.8, rasp: 0.6, drive: 12, vowel: VOWELS.oo, level: 0.9 }); break
+      case 'brute-rumble': this.gurgle(event); this.thump(event, 0.6); break
+      case 'brute-emerge': this.boom(event); this.dirt(event); this.tear(event); break
+      case 'ink-wave': this.whoosh(event); this.dirt(event); break
     }
   }
 

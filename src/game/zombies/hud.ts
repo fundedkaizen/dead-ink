@@ -205,13 +205,14 @@ export class ZombieHud {
     this.shieldEl.setAttribute('aria-label', `Shield ${shown}%`)
   }
 
-  /** The Brute's health across the top of the screen while it lives; null hides it. */
-  boss(fraction: number | null, label = 'THE BRUTE') {
+  /** The Brute's health across the top of the screen while it lives; null hides it. `enraged`: the bar throbs. */
+  boss(fraction: number | null, label = 'THE BRUTE', enraged = false) {
     if (label !== this.shownBossLabel) {
       this.shownBossLabel = label
       this.bossEl.querySelector('span')!.textContent = label
       this.shownBoss = -2
     }
+    if (enraged !== this.bossEl.classList.contains('enraged')) this.bossEl.classList.toggle('enraged', enraged)
     const shown = fraction === null ? -1 : Math.round(fraction * 200)
     if (shown === this.shownBoss) return
     this.shownBoss = shown

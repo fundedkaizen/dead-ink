@@ -113,15 +113,62 @@ export const ZOMBIE_DAMAGE_SCALE = 3.5
 
 /**
  * The Brute, Dead Ink's boss: every fifth round it climbs out of the ground partway into the round,
- * like Call of Duty's Brutus or Panzer Soldat. Our own design, tuned by play: slow and relentless, a
- * telegraphed swing that takes most of your health, and a ground slam that hits everything near it.
- * The round is not over until it is dead; killing it pays and drops a Max Ammo.
+ * like Call of Duty's Brutus or Panzer Soldat. Our own design, tuned by play, not taken from a source.
+ *
+ * It does not hold the round up: the round ends when its own zombies are dead, and the Brute carries on
+ * into the next rounds until it is killed, one at a time. It has the health of a boss (`health`: this many
+ * zombies' worth for the round it arrives in, more with more players), bullets do not stagger it, and
+ * every attack is telegraphed: a heavy swing, a ground slam whose ink wave you jump, a charge in a
+ * straight line, and a chunk of debris for a player out of reach. Below `enrage.below` of its health it
+ * enrages. Its iron mask takes head shots until it breaks off; then its head is a weak spot. Truly stuck,
+ * it burrows into the ink in plain view and comes up near a player. Killing it pays and drops a Max Ammo.
+ * Distances are metres, times seconds, damage before difficulty (a player has 100, 250 with Thick Ink).
  */
 export const BOSS = {
-  every: 5, delay: 8, points: 500, scale: 1.9, speed: 2.4,
-  health: (round: number) => 2000 + 600 * round,
-  attack: { range: 2.3, windup: 0.6, reach: 2.9, swing: 1.0, recover: 0.8, damage: 95 },
-  slam: { every: 10, windup: 1.0, radius: 6.5, damage: 90 },
+  every: 5, delay: 8, points: 500,
+  /** Its size against a man's; its walk, and enraged. A walking player (4.2) still gets away. */
+  scale: 1.5, speed: 2.9, enragedSpeed: 3.9,
+  /** Zombies' worth of health for its round, never under `least`; each player past the first adds `perPlayer`. */
+  zombies: 40, least: 15000, perPlayer: 0.6,
+  health: (round: number, players = 1): number => Math.round(Math.max(BOSS.least, zombieHealth(round) * BOSS.zombies)
+    * (1 + BOSS.perPlayer * (Math.min(4, Math.max(1, Math.floor(players))) - 1))),
+  /** The swing: starts within `range`, lands after `windup` if you are still within `reach`. */
+  attack: { range: 2.2, windup: 0.55, reach: 2.7, swing: 1.0, recover: 0.7, damage: 85, knock: 3 },
+  /**
+   * The slam: fists raised for `windup`, then down. Within `inner` the fists hurt at once (less further
+   * out); then an ink wave runs out along the ground at `speed` to `radius` and hurts anyone standing when
+   * it passes (`wave`, less toward its edge). Jump it. `lag`: how late a teammate's jump may be seen and
+   * still count, for the time their news takes to reach the host.
+   */
+  slam: { cooldown: 9, windup: 1.0, trigger: 5, inner: 2.4, damage: 70, radius: 11, speed: 9, wave: 45, waveEdge: 0.55, recover: 0.8, lag: 0.3 },
+  /**
+   * The charge: planted for `windup` (it turns to follow you until `lock` before the end, then its line is
+   * fixed), then a straight run at `speed` for up to `length`. Zombies in its way are thrown aside; a player
+   * it runs into takes `damage` and is thrown `knock` m/s. Into a wall, it is stunned for `crash`.
+   */
+  charge: { cooldown: 11, windup: 0.9, lock: 0.3, speed: 12, near: 7, far: 22, length: 24, width: 1.3, damage: 75, knock: 8, recover: 0.8, crash: 1.6 },
+  /**
+   * The throw, for a player out of reach (further than `near`, or up where it cannot follow): it tears a
+   * chunk out of the ground and throws it over `windup` (let go at `release` of it). A direct hit does
+   * `damage`, the splash within `splash` a share of it.
+   */
+  throw: { cooldown: 7, windup: 1.1, release: 0.8, near: 12, far: 34, damage: 60, splash: 1.8, splashShare: 0.45, gravity: 14 },
+  /** Enraged: cooldowns and wind-ups shortened by these; a roar of `roar` seconds as it turns. */
+  enrage: { below: 0.35, cooldowns: 0.6, windups: 0.8, roar: 1.4 },
+  /**
+   * The mask: health as a share of the Brute's. A head shot while it holds does its full damage to the mask
+   * and only a body shot's to the Brute; broken, the Brute reels for `stagger` and head shots do `weakSpot`
+   * times a head shot's damage.
+   */
+  mask: { share: 0.12, stagger: 1.2, weakSpot: 1.6 },
+  /**
+   * The burrow: stuck (no closer for `stuck` seconds, `enragedStuck` enraged, or no way to anyone for
+   * `lost`), it sinks into a pool of ink over `sink`, stays under for `under` while a pool bubbles where it
+   * will come up, `near` to `far` from a player, then climbs out. Not again for `cooldown`.
+   */
+  burrow: { stuck: 12, enragedStuck: 8, lost: 5, sink: 1.6, under: 2.4, near: 6, far: 12, cooldown: 25, depth: 6 },
+  /** At least this long between two of its special attacks, so they never chain unanswerably. */
+  gap: 1.2,
 } as const
 export const isBossRound = (round: number) => round > 0 && round % BOSS.every === 0
 

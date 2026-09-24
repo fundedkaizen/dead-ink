@@ -459,43 +459,46 @@ const run = (seconds: number, targets: ZombieTarget[], fps = 60) => {
   console.log(`containers climbed in ${reached.join(', ')}`)
 }
 
-// ---- 5f. The Brute -------------------------------------------------------------------------------
+// ---- 5f. The Brute (its moves, mask, enrage, burrow and co-op: scripts/dead-ink-brute-checks.ts) ----------
 {
   swipes.length = 0
   const yard = graph.point(graph.nearest(v(-30, 0, -25), 4))
   const brute = director.spawn(yard.clone(), BOSS.health(5), 'run', 0, false, true)!
   run(0.1, [])
-  assert.equal(brute.actor.root.scale.x, BOSS.scale, 'the Brute is twice a man\'s size')
-  assert(brute.actor.root.userData.spikes?.visible, 'and wears its crown of spikes')
+  assert.equal(brute.actor.root.scale.x, BOSS.scale, 'the Brute is bigger than a man')
+  assert(brute.brute && brute.actor.root.userData.brute?.mask.visible, 'and wears its iron mask')
   // Its head is up where it is, and a shot there is a headshot.
   const head = brute.actor.rig.bones.head.getWorldPosition(v())
-  assert(head.y > yard.y + 2.4, `its head is high (${(head.y - yard.y).toFixed(2)} m)`)
-  const from = head.clone().add(v(0, 0, 8))
-  const shot: Shot = { origin: from, direction: head.clone().add(v(0, 0.1, 0)).sub(from).normalize(), range: 60, damage: 30, weapon: 'ak' }
+  assert(head.y > yard.y + 1.7, `its head is above a man's, hunched as it is (${(head.y - yard.y).toFixed(2)} m)`)
+  // Its small head sits low between its shoulders: aim at the middle of it.
+  const face = brute.actor.rig.bones.head.localToWorld(v(0, 0.18, 0))
+  const from = face.clone().add(v(0, 0, 8))
+  const shot: Shot = { origin: from, direction: face.clone().sub(from).normalize(), range: 60, damage: 30, weapon: 'ak' }
   const hit = director.hit(shot, 60, ZOMBIE_DAMAGE_SCALE, true)!
   assert(hit && hit.reaction.zone === 'head', `a shot at its head is a headshot (${hit?.reaction.zone})`)
   assert(!hit.lethal && brute.health > 0, 'Insta-Kill does not one-shot the Brute')
-  // Its swipe takes most of your health.
+  // Its swing takes most of your health (its other attacks held back).
   const player: ZombieTarget = { id: 'p1', feet: yard.clone().add(v(0, 0, 1.8)), alive: true }
-  brute.slamTimer = 99
+  Object.assign(brute.brute!.cool, { slam: 99, charge: 99, throw: 99 })
   run(3, [player])
-  assert(swipes.length >= 1 && swipes.every(s => s.amount === BOSS.attack.damage), `the Brute swipes for ${BOSS.attack.damage} (${swipes.map(s => s.amount)})`)
+  assert(swipes.length >= 1 && swipes.every(s => s.amount === BOSS.attack.damage), `the Brute swings for ${BOSS.attack.damage} (${swipes.map(s => s.amount)})`)
   // The slam: hurts close by, less further out, nothing beyond its reach.
   swipes.length = 0
-  const near: ZombieTarget = { id: 'near', feet: yard.clone().add(v(2.5, 0, 0)), alive: true }
-  const far: ZombieTarget = { id: 'far', feet: yard.clone().add(v(12, 0, 0)), alive: true }
-  brute.slamTimer = 0; brute.swing = 0; brute.recover = 0
+  const near: ZombieTarget = { id: 'near', feet: yard.clone().add(v(2.35, 0, 0)), alive: true }
+  const far: ZombieTarget = { id: 'far', feet: yard.clone().add(v(14, 0, 0)), alive: true }
+  Object.assign(brute.brute!.cool, { slam: 0, gap: 0 }); brute.swing = 0; brute.recover = 0
   run(BOSS.slam.windup + 0.3, [near, far])
   const slam = swipes.find(s => s.id === 'near')
-  assert(slam && slam.amount > 0 && slam.amount < BOSS.slam.damage, `a slam 2.5 m away hurts (${slam?.amount})`)
-  assert(!swipes.some(s => s.id === 'far'), 'a slam does not reach 12 m')
+  assert(slam && slam.amount > 0 && slam.amount < BOSS.slam.damage, `a slam 2.35 m away hurts (${slam?.amount})`)
+  assert(!swipes.some(s => s.id === 'far'), 'a slam does not reach 14 m')
   // The Nuke leaves it standing.
   assert.equal(director.killAll(), 0, 'a Nuke does not kill the Brute')
   assert.equal(brute.state, 'chase')
   director.clear()
   // Its body, reused for an ordinary zombie, is ordinary again.
   const reused = director.spawn(yard.clone(), 150, 'walk', 0)!
-  assert(reused.actor.root.scale.x === 1 && !reused.actor.root.userData.spikes?.visible && !reused.boss, 'a reused Brute body is an ordinary zombie again')
+  assert(reused.actor.root.scale.x === 1 && !reused.actor.root.userData.brute?.mask.visible && !reused.boss && !reused.brute
+    && reused.actor.rig.bones['upper_arm.L'].scale.x === 1, 'a reused Brute body is an ordinary zombie again')
   director.clear()
 }
 
