@@ -283,6 +283,10 @@ export class ZombiesRuntime {
   /** Where the power switch is, until the power is on. */
   private powerMarker: WorldMarker
   private lastTick: Extract<CoopMessage, { t: 'tick' }> | null = null
+  /** Every door in the scene, in the same order on every player's machine (co-op sends them by index). */
+  private doors: THREE.Group[] = []
+  /** A door this guest just swung, until the host's next few ticks have heard: the tick must not swing it back. */
+  private doorHeld = new Map<THREE.Group, number>()
   private sendTimer = 0
   down: 0 | 1 | 2 = 0
   private bleed = 0
@@ -416,6 +420,7 @@ export class ZombiesRuntime {
       this.weapons.cancel(); this.aiming = false; this.interactionTime = Math.max(this.interactionTime, 0.25)
       if (target.kind === 'door' || target.kind === 'ladder') this.emit({ kind: target.kind, position: target.point, radius: target.kind === 'door' ? 8 : 5 })
       if (target.kind === 'zipline') this.audio.play({ kind: 'zipline', duration: this.player.actions.rideSeconds })
+      if (target.kind === 'door' && this.isGuest) this.pressDoor(target.object as THREE.Group)
     }
     this.bindInput()
     this.initialized = this.initialize()
@@ -461,6 +466,7 @@ export class ZombiesRuntime {
       // Fingerprint the map as it was baked, every door open; then shut the sealed exits.
       const hash = geometryHash(this.scene)
       for (const door of doors) if (SEALED.some(seal => seal.door === door.name)) { door.userData.missionLocked = true; setDoorOpen(door, false, true) }
+      this.doors = doors
       this.player.world.refresh()
       const response = await fetch(`${import.meta.env?.BASE_URL ?? '/'}nav/compound.json`)
       if (!response.ok) throw new Error(`navigation data: HTTP ${response.status}`)
@@ -1187,6 +1193,27 @@ export class ZombiesRuntime {
   /** Teammates who have told us where they are. */
   private matesHere() { return [...this.mates.values()].filter((mate): mate is Teammate & { state: PlayerState } => !!mate.state) }
 
+  /** Co-op, the guest: the host owns the doors (zombies push them open, players shut them); match it. */
+  private followDoors(states: string) {
+    const now = performance.now()
+    this.doors.forEach((door, i) => {
+      if (i >= states.length || door.userData.missionLocked) return
+      const held = this.doorHeld.get(door)
+      if (held !== undefined && now < held) return
+      this.doorHeld.delete(door)
+      const open = states[i] === '1'
+      if (!!door.userData.open !== open) setDoorOpen(door, open)
+    })
+  }
+
+  /** Co-op, the guest swung a door: it moves here at once, and the host moves it for everyone. */
+  private pressDoor(door: THREE.Group) {
+    const i = this.doors.indexOf(door)
+    if (i < 0) return
+    this.doorHeld.set(door, performance.now() + 600)
+    this.coop.send({ t: 'door', i, o: door.userData.open ? 1 : 0 })
+  }
+
   private myState(): PlayerState {
     const cam = this.camera.perspective
     const e = new THREE.Euler().setFromQuaternion(cam.quaternion, 'YXZ')
@@ -1271,7 +1298,7 @@ export class ZombiesRuntime {
     this.sendTimer = 1 / COOP.sendRate
     if (this.coop.role === 'host') {
       const debris = this.director?.brutes.debris.rows() ?? []
-      this.coop.send({ t: 'tick', fz: getSettings().coopPause ? 1 : 0, z: this.director?.snapshot() ?? [], r: this.rounds.round, ph: this.rounds.phase, players: [this.myState(), ...this.matesHere().map(mate => mate.state)],
+      this.coop.send({ t: 'tick', fz: getSettings().coopPause ? 1 : 0, dr: this.doors.map(door => door.userData.open ? 1 : 0).join(''), z: this.director?.snapshot() ?? [], r: this.rounds.round, ph: this.rounds.phase, players: [this.myState(), ...this.matesHere().map(mate => mate.state)],
         storm: this.storm, pw: this.power ? 1 : 0, pk: this.packBuilt ? 1 : 0, w: this.worldState(), ...(debris.length ? { bd: debris } : {}) })
     } else this.coop.send({ t: 'me', me: this.myState() })
   }
@@ -1410,6 +1437,7 @@ export class ZombiesRuntime {
       case 'tick': {
         const newRound = this.lastTick && m.r > this.lastTick.r
         this.lastTick = m
+        if (m.dr) this.followDoors(m.dr)
         // Everyone else, as the host sees them; anyone missing has left.
         for (const player of m.players) if (player.id !== this.coop.id) this.mate(player.id).state = player
         for (const id of [...this.mates.keys()]) if (!m.players.some(player => player.id === id)) this.dropMate(id)
@@ -1465,6 +1493,7 @@ export class ZombiesRuntime {
       case 'me': this.mate(from).state = { ...m.me, id: from }; break
       case 'shot': this.partnerShot(m, from); break
       case 'knife': this.partnerKnife(m, from); break
+      case 'door': { const door = this.doors[m.i]; if (door && !door.userData.missionLocked) setDoorOpen(door, m.o === 1); break }
       case 'blast': this.partnerBlast(toVector(m.p), m.r, m.dmg, from, m.k); break
       case 'use':
         if (m.what === 'gate') {
