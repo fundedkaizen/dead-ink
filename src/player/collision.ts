@@ -382,6 +382,16 @@ export class CollisionWorld {
     return true
   }
 
+  /** Whether the line from `from` to `to` passes through a wire panel (a fence, a gate), which sight and shots pass. */
+  crossesWire(from: THREE.Vector3, to: THREE.Vector3) {
+    this.ray.ray.origin.copy(from)
+    this.ray.ray.direction.copy(to).sub(from).normalize()
+    this.ray.near = 0
+    this.ray.far = from.distanceTo(to)
+    for (const collider of this.colliders) if (collider.across && this.reaches(collider) && this.blocksRay(collider)) return true
+    return false
+  }
+
   /** The ray is unbounded for Ray.intersectsBox; a 0.3 m muzzle probe must not visit everything along its line. */
   private reaches(collider: Collider) {
     return collider.bounds.distanceToPoint(this.ray.ray.origin) <= this.ray.far + 1e-4 && this.ray.ray.intersectsBox(collider.bounds)
