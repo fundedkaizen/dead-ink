@@ -234,7 +234,7 @@ test('Camera shake is a roll that never moves the aim and returns exactly to lev
   r.weapons.dispose(); r.world.dispose()
 })
 
-test('The charm keeps swinging at a sprint and swings on when you stop', () => {
+test('The charm swings on gently when you stop a sprint, never far enough to reach the gun', () => {
   const r = rig([{ id: 'a', name: 'ak', magazine: 30, reserve: 90 }])
   r.weapons.setCosmetics({ watch: null, charm: 'dice', camos: {}, knife: 'combat' })
   r.step(0.5)
@@ -245,7 +245,11 @@ test('The charm keeps swinging at a sprint and swings on when you stop', () => {
   for (let i = 0; i < 40; i++) { r.camera.position.z -= 7.6 / 60; r.step(1 / 60, { moving: 7.6 }) }
   r.step(1 / 60, { moving: 0 })
   r.step(3 / 60)
-  assert(hang() > 0.15, `swing after a sprint stop ${hang()}`)
+  // Moving mostly with the hand, it swings on a little (the owner found the full pendulum flung it through
+  // the gun), and never past its limit.
+  const swing = hang()
+  assert(swing > 0.05, `it still swings on after a sprint stop (${swing})`)
+  assert(swing <= 0.45 + 1e-6, `but never past its limit, clear of the gun (${swing})`)
   r.step(3)
   assert(hang() < 0.02, 'and settles')
   r.weapons.dispose(); r.world.dispose()

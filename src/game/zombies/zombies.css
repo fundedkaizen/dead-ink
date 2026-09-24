@@ -10,16 +10,16 @@
 .dead-ink-scores[hidden] { display: none; }
 .dead-ink-scores div { display: flex; justify-content: space-between; gap: 14px; padding: 2px 8px; background: #fbfaf5; border: 1.5px solid var(--ink, #111); border-radius: 3px 4px 2px 4px; }
 .dead-ink-scores div.me { border-width: 2.5px; }
-.dead-ink-scores div:not(.me) { color: #2878d0; border-color: #2878d0; }
+.dead-ink-scores div:not(.me) { color: var(--tag, #2878d0); border-color: var(--tag, #2878d0); }
 .dead-ink-scores div.down { opacity: 0.5; text-decoration: line-through; }
 .dead-ink-scores strong { font-variant-numeric: tabular-nums; }
 /* The partner's name over their head, through walls; pinned to the edge with an arrow when off screen. */
 .coop-tag { position: absolute; left: 0; top: 0; pointer-events: none; display: grid; justify-items: center; gap: 1px; margin: -34px 0 0 -60px; width: 120px;
-  font: 700 13px/1.1 var(--notes, "Chalkboard SE", "Comic Sans MS", cursive); color: #2878d0;
+  font: 700 13px/1.1 var(--notes, "Chalkboard SE", "Comic Sans MS", cursive); color: var(--tag, #2878d0);
   text-shadow: 1px 1px 0 #fff, -1px 1px 0 #fff, 1px -1px 0 #fff, -1px -1px 0 #fff; }
 .coop-tag[hidden] { display: none; }
-.coop-tag i { width: 0; height: 0; border: 7px solid transparent; border-top: 9px solid #2878d0; border-bottom: 0; filter: drop-shadow(0 0 1px #fff); }
-.coop-tag.edge i { border: 7px solid transparent; border-left: 11px solid #2878d0; border-right: 0; }
+.coop-tag i { width: 0; height: 0; border: 7px solid transparent; border-top: 9px solid var(--tag, #2878d0); border-bottom: 0; filter: drop-shadow(0 0 1px #fff); }
+.coop-tag.edge i { border: 7px solid transparent; border-left: 11px solid var(--tag, #2878d0); border-right: 0; }
 .coop-tag.down { color: #d4332a; }
 /* An objective marker (the power switch): small and quiet, through walls; pinned to the edge with an arrow. */
 .world-marker { position: absolute; left: 0; top: 0; pointer-events: none; display: grid; justify-items: center; margin: -14px 0 0 -12px; width: 24px; opacity: 0.8; }
@@ -36,6 +36,16 @@
 .coop-name input { width: 140px; }
 .coop-link { display: flex; gap: 6px; }
 .coop-link input { flex: 1 1 auto; min-width: 0; }
+/* The lobby: who is here, each in their player colour, the host first. */
+.coop-players { display: grid; gap: 4px; }
+.coop-players ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; }
+.coop-players li { padding: 3px 8px; border: 1.5px solid var(--tag, #111); border-left-width: 6px; border-radius: 3px 5px 2px 4px; background: #fbfaf5; }
+.coop-players li.joining { border-style: dashed; border-color: var(--ink, #111); opacity: 0.7; }
+/* A guest once the host has started: the Jump in button calls for the click the page needs. */
+.coop-panel.started .coop-wait { display: none; }
+.coop-panel.started .coop-start { animation: coop-jump 0.7s ease-in-out infinite alternate; }
+@keyframes coop-jump { from { transform: scale(1); } to { transform: scale(1.07); } }
+@media (prefers-reduced-motion: reduce) { .coop-panel.started .coop-start { animation: none; } }
 body[data-mission="true"] .walk-card .coop-panel button { min-height: 32px; padding: 4px 12px; border: 2px solid var(--ink, #111); background: #fbfaf5; color: var(--ink, #111); font: 700 13px/1 var(--notes, sans-serif); border-radius: 3px; cursor: pointer; }
 body[data-mission="true"] .walk-card .coop-panel button:hover { background: var(--ink, #111); color: #fbfaf5; }
 body[data-mission="true"] .walk-card .coop-panel button.coop-start { width: 100%; min-height: 54px; margin-top: 6px; font-size: 18px; background: var(--ink, #111); color: #fbfaf5; box-shadow: 4px 4px 0 #d4332a; }
