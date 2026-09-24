@@ -48,14 +48,14 @@ const status = window.__specialCheck = { done: false, results }
   m.powerups.spawn('maxAmmo', p.body.position.clone())
   check(await until(() => m.dollCount === 3, 4000), 'a Max Ammo refills the dolls', `${m.dollCount}`)
 
-  // An Ink Storm round: darker page, all sprinters, fewer of them, a Max Ammo at the end.
+  // An Ink Storm round: darker page, the storm's own pack (Inkwings and a few sprinters, flyers.ts), a Max Ammo at the end.
   m.rounds.round = 6; m.rounds.phase = 'break'; m.rounds.timer = 0.01
   check(await until(() => m.rounds.round === 7, 2000), 'round 7 starts')
   check(m.storm && document.body.dataset.deadInkStorm === 'true', 'round 7 is an Ink Storm with the light gone')
   check(m.rounds.toSpawn + m.director.aliveCount <= 17, 'a smaller pack than usual', `${m.rounds.toSpawn + m.director.aliveCount}`)
   await until(() => m.director.aliveCount > 0, 4000)
   const alive = m.director.zombies.filter(z => z.state === 'chase')
-  check(alive.length > 0 && alive.every(z => z.gait === 'sprint'), 'every one sprints')
+  check(alive.length > 0 && alive.every(z => z.gait === 'sprint'), 'every one comes fast: Inkwings and sprinters')
   // Clear it: the last kill leaves a Max Ammo, and the light comes back.
   m.rounds.toSpawn = 0
   const before = m.powerups.count

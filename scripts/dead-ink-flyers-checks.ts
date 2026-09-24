@@ -16,6 +16,9 @@ import { DECOY } from '../src/game/zombies/decoy'
 import { seeded, type Random } from '../src/game/shared/random'
 import type { Shot, SoundEvent } from '../src/game/types'
 
+// The flock's own dice (their circling, their flaps, where they come out again) seeded too, so every run is the same.
+Math.random = seeded(20260924)
+
 const started = performance.now()
 const v = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z)
 const f1 = (n: number) => n.toFixed(1)
@@ -103,6 +106,7 @@ const places: [string, THREE.Vector3][] = [
   ['down the cell block stairs', stand(117, -2.1, -14.7)],
   ['the cell block corridor', stand(117, -4.2, -24)],
   ['cell 01', stand(110.5, -4.2, -20.5)],
+  ['up the water tower', stand(10.9, 12.6, -30)],
 ]
 const zips = traversals(w.scene, w.world).zips
 assert(zips.length >= 1, 'the zip line is there')
@@ -463,6 +467,7 @@ type Fight = { damage: number; downs: number; seconds: number; dives: number; di
 function storm(round: number, dodge: number, thickInk: boolean, moving: boolean, seed: number): Fight {
   const gun = round >= 21 ? 3.2 : round >= 14 ? 2 : 1
   reset()
+  Math.random = seeded(seed + 7)
   const random = seeded(seed), anchor = yard.clone(), feet = yard.clone(), target = player(feet)
   const most = thickInk ? 250 : 100, eye = v(), step = v()
   let health = most, lastHurt = -10, downs = 0, damage = 0, magazine = 30, reload = 0, cooldown = 0, stepLeft = 0, dives = 0, t = 0

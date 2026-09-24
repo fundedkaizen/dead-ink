@@ -138,6 +138,9 @@ const TAIL_TIP = new THREE.Vector3(0, -0.29, -0.36)
 const EYES = new THREE.Vector3(0, 0.07, 0.235)
 /** Ways to slide along what blocked a move: level, up or down, then along each axis. */
 const SLIDES: readonly [number, number, number][] = [[1, 0, 1], [0, 1, 0], [1, 0, 0], [0, 0, 1]]
+/** Ways out when caught inside something: level first, then up and down. */
+const OUTS: readonly [number, number, number][] = [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0.71, 0, 0.71], [-0.71, 0, 0.71],
+  [0.71, 0, -0.71], [-0.71, 0, -0.71], [0, 1, 0], [0, -1, 0]]
 const wrap = (angle: number) => Math.atan2(Math.sin(angle), Math.cos(angle))
 const between = (range: readonly [number, number]) => range[0] + Math.random() * (range[1] - range[0])
 const r2 = (n: number) => Math.round(n * 100) / 100
@@ -440,7 +443,7 @@ export class Inkwings {
       if (world.raySurface(p, UP, 3)) { if (this.outFromUnder(f, chest)) return }
       else for (const rise of [2.4, 4.5, 7, 10]) {
         const high = chest.y + rise, over = this.over.set(chest.x, high, chest.z), top = this.top.set(p.x, Math.max(p.y, high), p.z)
-        if (top.y > p.y + 0.3 && world.raySurface(p, UP, top.y - p.y + 0.4)) break
+        if (top.y > p.y + 0.3 && (world.raySurface(p, UP, top.y - p.y + 0.4) || !this.passable(p, top, INKWING.radius))) break
         if (!this.passable(top, over, INKWING.radius)) continue
         f.goal.copy(p.y < high - 0.6 ? top : over)
         return
@@ -475,7 +478,10 @@ export class Inkwings {
     let node = graph.nearest(this.probe.set(p.x, ground, p.z), 2, 2.2)
     // Never a spot behind a wall from it (the nearest can be the other side of one): the nearest it can reach.
     const reachable = (spot: number) => this.passable(p, graph.point(spot, this.over).setY(this.over.y + INKWING.fly.body), INKWING.radius)
-    if (node >= 0 && !reachable(node)) node = graph.neighbours(node).find(spot => Number.isFinite(graph.distance(spot)) && reachable(spot)) ?? -1
+    const usable = (spot: number) => Number.isFinite(graph.distance(spot)) && reachable(spot)
+    if (node >= 0 && !reachable(node)) node = graph.neighbours(node).find(usable) ?? -1
+    // None close by it can get to (hard up against a wall): the nearest further off that it can.
+    if (node < 0) { node = graph.nearest(this.probe, 5, 4, usable); if (node >= 0 && !usable(node)) node = -1 }
     if (node < 0 || !Number.isFinite(graph.distance(node))) return
     let best = graph.point(node).setY(graph.height(node) + INKWING.fly.body)
     outer: for (let hop = 0; hop < 4; hop++) {
@@ -510,7 +516,7 @@ export class Inkwings {
     if (!this.passable(p, s.c.copy(p).addScaledVector(f.dir, length), INKWING.radius)) {
       length = this.passable(p, s.c.copy(p).addScaledVector(f.dir, toAim), INKWING.radius) ? toAim : 0
     }
-    if (length < INKWING.dive.min * 0.8) { this.endAttack(f, 0.6); return }
+    if (length < INKWING.dive.min * 0.8 || toAim > INKWING.dive.max + 2) { this.endAttack(f, 0.6); return }
     f.left = length
     f.bit = false
     f.velocity.copy(f.dir).multiplyScalar(INKWING.dive.speed)
@@ -634,7 +640,19 @@ export class Inkwings {
   private move(f: Inkwing, dt: number) {
     const p = f.zombie.position, v = f.velocity
     if (v.lengthSq() < 1e-8) { f.blocked = 0; return }
+    // Nothing flies it faster than a dive.
+    if (v.lengthSq() > INKWING.dive.speed ** 2) v.setLength(INKWING.dive.speed)
     const to = s.c
+    // Caught inside something (a door swung shut on it): out the nearest way that is clear.
+    if (!this.passable(p, p, INKWING.radius)) {
+      for (const out of [0.25, 0.5, 0.8]) for (const [x, y, z] of OUTS) {
+        to.set(p.x + x * out, p.y + y * out, p.z + z * out)
+        if (!this.passable(to, to, INKWING.radius)) continue
+        p.copy(to)
+        f.blocked = 0
+        return
+      }
+    }
     for (let i = -1; i < SLIDES.length; i++) {
       const [x, y, z] = i < 0 ? [1, 1, 1] : SLIDES[i]
       to.set(p.x + v.x * x * dt, p.y + v.y * y * dt, p.z + v.z * z * dt)
