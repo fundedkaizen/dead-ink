@@ -38,6 +38,9 @@ const RED = new THREE.Color(0x8c1c13)
 const DARK_RED = new THREE.Color(0x5c0e0a)
 const WHITE = new THREE.Color(0xffffff)
 const UP = new THREE.Vector3(0, 1, 0)
+/** Invisible boxes for the props big enough to walk into, collected while the dressing is built. */
+let blockers: THREE.Mesh[] | null = null
+const BLOCKER = new THREE.MeshBasicMaterial({ visible: false })
 const HAND = '"Ink Free", "Segoe Print", "Chalkboard SE", "Comic Sans MS", cursive'
 const STENCIL = '"Arial Black", Impact, "Helvetica Neue", sans-serif'
 
@@ -243,6 +246,18 @@ class Kit {
     this.solid(new THREE.BoxGeometry(w, h, d), [x, y, z], rotation, outline)
   }
 
+  /** An invisible box a player walks into (movement only: bullets and sight pass as before). */
+  block(w: number, h: number, d: number, x: number, y: number, z: number, rotation: Point = [0, 0, 0]) {
+    if (!blockers) return
+    const box = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), BLOCKER)
+    box.name = 'Dead Ink dressing · blocker'
+    box.userData.blocksSight = false
+    box.userData.blocksShots = false
+    new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(...rotation)), new THREE.Vector3(1, 1, 1))
+      .premultiply(this.matrix).decompose(box.position, box.quaternion, box.scale)
+    blockers.push(box)
+  }
+
   beam(a: Point, b: Point, width = 0.08, outline: Stroke | false = 'detail') {
     const start = new THREE.Vector3(...a), end = new THREE.Vector3(...b), delta = end.clone().sub(start)
     const geometry = new THREE.BoxGeometry(width, delta.length(), width)
@@ -304,6 +319,7 @@ function fallenBarrel(k: Kit, random: Random) {
   const r = 0.3, h = 0.9
   const barrel = k.child([0, r, 0], [0, 0, Math.PI / 2])
   barrel.solid(new THREE.CylinderGeometry(r, r, h, 20), [0, 0, 0], [0, 0, 0], false, true)
+  barrel.block(r * 2, h, r * 2, 0, 0, 0)
   for (const y of [-h / 2, h / 2]) barrel.circle([0, y, 0], r, 0, 2, 'edge')
   for (const y of [-h / 4, h / 4]) barrel.circle([0, y, 0], r + 0.006, 0, 2, 'detail')
   // A dent and a few scratches.
@@ -311,6 +327,7 @@ function fallenBarrel(k: Kit, random: Random) {
   if (random() < 0.5) {
     const standing = k.child([0.2 + random() * 0.4, 0.45, 0.75 + random() * 0.3])
     standing.solid(new THREE.CylinderGeometry(r, r, h, 20), [0, 0, 0], [0, 0, 0], false, true)
+    standing.block(r * 2, h, r * 2, 0, 0, 0)
     for (const y of [-h / 2, h / 2]) standing.circle([0, y, 0], r, 0, 2, 'edge')
     for (const y of [-h / 4, h / 4]) standing.circle([0, y, 0], r + 0.006, 0, 2, 'detail')
   }
@@ -320,6 +337,7 @@ function fallenBarrel(k: Kit, random: Random) {
 function crate(k: Kit, size: number, x: number, z: number, rotation: Point) {
   const c = k.child([x, size / 2, z], rotation), s = size / 2 + 0.004
   c.box(size, size, size, 0, 0, 0)
+  c.block(size, size, size, 0, 0, 0)
   for (const [a, b] of [[0, 2], [2, 0]] as const) for (const side of [-1, 1]) {
     // Slats and a brace on each vertical face.
     const face = (u: number, v: number): Point => { const p: Point = [0, v, 0]; p[a] = u; p[b] = side * s; return p }
@@ -352,6 +370,8 @@ function tyres(k: Kit, random: Random) {
   for (let i = 0; i < count; i++) {
     k.solid(new THREE.TorusGeometry(0.3, 0.11, 8, 20), [(random() - 0.5) * 0.15, 0.11 + i * 0.22, (random() - 0.5) * 0.15], [Math.PI / 2, 0, 0], false, true)
   }
+  // A single tyre is stepped over; a stack is not.
+  if (count > 1) k.block(0.8, count * 0.22, 0.8, 0, count * 0.11, 0)
   if (random() < 0.6) k.solid(new THREE.TorusGeometry(0.3, 0.11, 8, 20), [0.75, 0.38, 0.1], [0.2, 0, 0.3], false, true)
 }
 
@@ -364,6 +384,7 @@ function sandbags(k: Kit, random: Random, length = 2.4) {
   const n = Math.round(length / 0.56)
   for (let i = 0; i < n; i++) bag(-length / 2 + i * 0.56 + 0.28, 0.11, 0)
   for (let i = 0; i < n - 1; i++) if (random() < 0.8) bag(-length / 2 + i * 0.56 + 0.56, 0.32, (random() - 0.5) * 0.06)
+  k.block(length, 0.44, 0.44, 0, 0.22, 0)
 }
 
 function sawhorse(k: Kit) {
@@ -372,6 +393,7 @@ function sawhorse(k: Kit) {
     k.beam([x, 0, 0.35], [x, 0.9, 0], 0.07)
   }
   k.box(2.0, 0.22, 0.04, 0, 0.85, 0.05)
+  k.block(1.9, 0.95, 0.75, 0, 0.475, 0)
   for (let i = 0; i < 6; i++) k.line([[-0.95 + i * 0.36, 0.75, 0.072], [-0.8 + i * 0.36, 0.95, 0.072]], 'edge')
 }
 
@@ -407,6 +429,9 @@ function warningSign(k: Kit, sheet: DecalSheet, cells: Record<string, Cell | nul
   const post = k.child([0, 0, 0], [0, 0, tilt])
   post.beam([0, 0, 0], [0, 1.95, 0], 0.07)
   post.box(0.7, 0.5, 0.03, 0, 1.68, 0.05)
+  // Solid to walk into: the post, and the board at head height.
+  post.block(0.16, 1.95, 0.16, 0, 0.975, 0)
+  post.block(0.72, 0.52, 0.1, 0, 1.68, 0.05)
   const at = (x: number, y: number) => new THREE.Vector3(...post.point([x, y, 0.07]))
   const origin = at(0, 0)
   sheet.quad(cells.danger, at(0, 1.75), at(0.6, 0).sub(origin), at(0, 0.2).sub(origin), RED)
@@ -446,6 +471,7 @@ function litter(k: Kit, random: Random) {
 function handcart(k: Kit) {
   const cart = k.child([0, 0.62, 0], [0, 0, 1.25])
   cart.box(1.6, 0.06, 0.9, 0, 0, 0)
+  cart.block(1.7, 0.4, 1.0, 0, 0.1, 0)
   for (const z of [-0.45, 0.45]) cart.box(1.6, 0.25, 0.04, 0, 0.14, z, [0, 0, 0], 'detail')
   for (const z of [-0.5, 0.5]) {
     cart.solid(new THREE.CylinderGeometry(0.3, 0.3, 0.06, 18), [0.2, -0.3, z], [Math.PI / 2, 0, 0], false, true)
@@ -463,6 +489,7 @@ function handcart(k: Kit) {
 function burntCar(k: Kit, random: Random) {
   const body = k.child([0, 0.62, 0])
   body.box(4.3, 0.62, 1.8, 0, 0, 0)
+  body.block(4.3, 1.45, 1.8, 0, 0.1, 0)
   body.box(1.25, 0.06, 1.72, 1.45, 0.34, 0, [0, 0, -0.08])
   body.box(1.0, 0.05, 1.72, -1.6, 0.32, 0, [0, 0, 0.04])
   for (const side of [-1, 1]) {
@@ -1107,6 +1134,7 @@ export function addDressing(scene: THREE.Scene, world: CollisionWorld, random: R
   root.name = 'Dead Ink dressing'
   root.userData.noCollision = true
   root.userData.decorative = true
+  blockers = []
 
   const avoid = keepClear.map(point => ({ point, radius: 2.2 }))
   for (const gate of ZONE_GATES) avoid.push({ point: new THREE.Vector3(gate.centre[0], 0, gate.centre[1]), radius: gate.width / 2 + 1 })
@@ -1161,8 +1189,19 @@ export function addDressing(scene: THREE.Scene, world: CollisionWorld, random: R
   if (marks) root.add(marks)
   scene.add(root)
   root.updateMatrixWorld(true)
+  // The big props stop a player: signs, crates, barrels, sandbags, the car. Only the collision world
+  // holds them (as the runtime's other solids): outside the scene, the baked navigation's fingerprint
+  // of the map stays as it was.
+  const solids = new THREE.Group()
+  solids.name = 'Dead Ink dressing · solids'
+  if (blockers.length) solids.add(...blockers)
+  blockers = null
+  root.userData.solids = solids
+  world.addObject(solids)
 
   return () => {
+    world.removeObject(solids)
+    for (const box of solids.children) (box as THREE.Mesh).geometry.dispose()
     root.removeFromParent()
     root.traverse(object => {
       if (object instanceof THREE.Mesh) object.geometry.dispose()

@@ -6,8 +6,9 @@ import { Explosion, MushroomCloud, createGrenadeModel } from '../src/game/zombie
 import { seeded } from '../src/game/shared/random'
 import { buildNavScene } from './nav-scene'
 
-// Dead Ink's dressing is decoration only: it must leave the baked navigation fingerprint and every
-// collision query exactly as they were, stay off the spots it is told to keep clear, and come out cleanly.
+// Dead Ink's dressing is decoration, except that its big props stop a player: it must leave the baked
+// navigation fingerprint as it was, change collision only where a prop stands, stay off the spots it is
+// told to keep clear, and come out cleanly.
 // Node has no canvas, so the painted marks are skipped here; the 3D props, strokes and planks are not.
 const { scene, world } = buildNavScene()
 const hash = geometryHash(scene)
@@ -28,10 +29,24 @@ assert(root, 'the dressing adds one root to the scene')
 assert.equal(root.userData.noCollision, true, 'the dressing root is noCollision')
 assert.equal(geometryHash(scene), hash, 'the navigation fingerprint is unchanged by the dressing')
 world.refresh()
-assert.deepEqual(probe(), probes, 'every floor probe is unchanged: nothing here is walkable or solid')
+// The props that stop a player: movement only (bullets and sight pass), and nothing else changed.
+const solids = root.userData.solids as THREE.Group
+assert(solids.children.length > 20, `the big props have colliders (${solids.children.length})`)
+for (const box of solids.children) assert(box.userData.blocksShots === false && box.userData.blocksSight === false, `${box.name} stops movement only`)
+const underProp = (x: number, z: number) => solids.children.some(box => {
+  const local = box.worldToLocal(new THREE.Vector3(x, box.position.y, z)), size = ((box as THREE.Mesh).geometry as THREE.BoxGeometry).parameters
+  return Math.abs(local.x) <= size.width / 2 + 0.05 && Math.abs(local.z) <= size.depth / 2 + 0.05
+})
+const dressed = probe()
+let i = 0, changed = 0
+for (let x = -90; x <= 160; x += 5) for (let z = -55; z <= 70; z += 5, i++) {
+  if (dressed[i] === probes[i]) continue
+  changed++
+  assert(underProp(x, z), `the floor changed only under a prop (${x}, ${z}: ${probes[i]} -> ${dressed[i]})`)
+}
 const report = root.userData.dressing as { spots: Record<string, number[]>; missing: string[] }
 for (const name of ['stars', 'headstone']) assert(report.spots[name], `${name} found its place`)
-console.log(`PASS dressing leaves the navigation fingerprint and collision untouched (built in ${took.toFixed(0)} ms)`)
+console.log(`PASS dressing leaves the navigation fingerprint as it was; ${solids.children.length} props stop a player, ${changed} floor probes land on one (built in ${took.toFixed(0)} ms)`)
 
 /** Draw calls, vertices, and the nearest solid prop below 2.4 m to a point (ink strokes excluded). */
 const measure = (from = new THREE.Vector3(1e6, 0, 1e6)) => {
@@ -56,6 +71,8 @@ assert(first.meshes <= 5 * 3 + 1, `draw calls stay flat: ${first.meshes} meshes`
 const keep = first.at.clone()
 undress()
 assert(!dressing(), 'the dispose function removes the dressing')
+world.refresh()
+assert.deepEqual(probe(), probes, 'undressed, every floor probe is as it was: the props left the collision world too')
 undress = addDressing(scene as THREE.Scene, world, seeded(0xDEAD1), [keep])
 const kept = measure(keep)
 assert(kept.nearest > 1, `nothing below 2.4 m within 1 m of a kept-clear spot (nearest ${kept.nearest.toFixed(2)} m)`)

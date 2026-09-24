@@ -90,5 +90,6 @@ export function padBindings(canvas: HTMLCanvasElement, player: FirstPersonContro
     settings: () => { const s = getSettings(); return { sensitivity: s.controllerSensitivity, invertY: s.invertY } },
     action, menu,
     hasTarget: () => !!player.actions.target,
+    useHeld: held => { player.padUse = held },
   }
 }

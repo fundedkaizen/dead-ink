@@ -42,7 +42,7 @@ export class Hotbar {
       // The Death Machine power-up never runs dry; the Ink Ray counts its charges like any gun.
       const name = cell.querySelector<HTMLElement>('.hud-slot-name')!
       const mythic = item?.rarity === 'mythic' && !item.special
-      name.textContent = item ? item.special === 'deathMachine' ? 'Death Machine' : item.special === 'rayGun' ? 'Ink Ray'
+      name.textContent = item ? item.special === 'deathMachine' ? 'Death Machine' : item.special === 'rayGun' ? item.packed ? 'Ink Ray X2' : 'Ink Ray'
         : `${mythic ? 'Mythic ' : ''}${item.packed ? PACKED_NAMES[item.name] : SHORT[item.name]}` : ''
       name.style.backgroundImage = mythic ? MYTHIC_TEXT : ''
       name.style.backgroundClip = name.style.webkitBackgroundClip = mythic ? 'text' : ''

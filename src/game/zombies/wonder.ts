@@ -5,10 +5,16 @@ import type { CollisionWorld } from '../../player/collision'
  * The Ink Ray's bolts: glowing green slugs that fly fast, not instantly, and burst on the first thing
  * they touch, a zombie or a wall. What the burst does belongs to the runtime.
  */
-export const INK_RAY = { speed: 45, life: 3, radius: 3, selfRadius: 3, selfDamage: 40, boxWeight: 0.05 } as const
+export const INK_RAY = { speed: 45, life: 3, radius: 3, selfRadius: 3, selfDamage: 40, boxWeight: 0.05,
+  /** Call of Duty's numbers: the Ray Gun holds 20 with 160 spare; Porter's X2 holds 40 with 200. */
+  magazine: 20, reserve: 160, packedReserve: 200,
+  /** The X2's burst: wider, and twice the damage. */
+  packedRadius: 3.8, packedDamage: 2 } as const
 const GREEN = 0x46e05a
+/** The X2's bolts are red, as Porter's X2 Ray Gun fires red. */
+const RED = 0xd4332a
 
-type Bolt = { mesh: THREE.Mesh; trail: THREE.Mesh; ring: THREE.Mesh; velocity: THREE.Vector3; age: number }
+type Bolt = { mesh: THREE.Mesh; trail: THREE.Mesh; ring: THREE.Mesh; velocity: THREE.Vector3; age: number; packed: boolean }
 
 export class InkRayBolts {
   private bolts: Bolt[] = []
@@ -19,32 +25,36 @@ export class InkRayBolts {
   private trailGeometry = new THREE.CylinderGeometry(0.035, 0.005, 1, 8).rotateX(Math.PI / 2).translate(0, 0, -0.5)
   private material = new THREE.MeshBasicMaterial({ color: GREEN, toneMapped: false })
   private trailMaterial = new THREE.MeshBasicMaterial({ color: GREEN, transparent: true, opacity: 0.55, depthWrite: false, toneMapped: false })
+  private packedMaterial = new THREE.MeshBasicMaterial({ color: RED, toneMapped: false })
+  private packedTrailMaterial = new THREE.MeshBasicMaterial({ color: RED, transparent: true, opacity: 0.55, depthWrite: false, toneMapped: false })
+  private packedRingMaterial = new THREE.MeshBasicMaterial({ color: 0xffb0a8, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false })
 
   constructor(private scene: THREE.Scene, private world: CollisionWorld,
     /** Distance along a ray to the nearest zombie body, as the director measures it. */
     private bodies: (origin: THREE.Vector3, direction: THREE.Vector3, max: number) => number) {}
 
-  fire(origin: THREE.Vector3, direction: THREE.Vector3) {
-    const mesh = new THREE.Mesh(this.geometry, this.material)
-    const trail = new THREE.Mesh(this.trailGeometry, this.trailMaterial)
-    const ring = new THREE.Mesh(this.ringGeometry, this.ringMaterial)
+  fire(origin: THREE.Vector3, direction: THREE.Vector3, packed = false) {
+    const mesh = new THREE.Mesh(this.geometry, packed ? this.packedMaterial : this.material)
+    const trail = new THREE.Mesh(this.trailGeometry, packed ? this.packedTrailMaterial : this.trailMaterial)
+    const ring = new THREE.Mesh(this.ringGeometry, packed ? this.packedRingMaterial : this.ringMaterial)
     for (const m of [mesh, trail, ring]) { m.userData.noCollision = true; m.position.copy(origin); this.scene.add(m) }
     mesh.lookAt(origin.clone().add(direction))
-    this.bolts.push({ mesh, trail, ring, velocity: direction.clone().normalize().multiplyScalar(INK_RAY.speed), age: 0 })
+    this.bolts.push({ mesh, trail, ring, velocity: direction.clone().normalize().multiplyScalar(INK_RAY.speed), age: 0, packed })
   }
 
-  /** Returns where bolts burst this frame. */
-  update(dt: number): THREE.Vector3[] {
-    const bursts: THREE.Vector3[] = []
+  /** Returns where bolts burst this frame, and whether each came from the X2. */
+  update(dt: number): { at: THREE.Vector3; packed: boolean }[] {
+    const bursts: { at: THREE.Vector3; packed: boolean }[] = []
     for (const bolt of [...this.bolts]) {
       bolt.age += dt
       const step = bolt.velocity.length() * dt, direction = bolt.velocity.clone().normalize()
       const from = bolt.mesh.position
       const wall = this.world.raySurface(from, direction, step)
+      // The body test answers `step` itself when no zombie is in the way: only a shorter answer is a hit.
       const body = this.bodies(from, direction, step)
-      const reach = Math.min(wall?.distance ?? Infinity, body)
-      if (reach <= step || bolt.age > INK_RAY.life) {
-        bursts.push(from.clone().addScaledVector(direction, Math.min(reach, step)))
+      const reach = Math.min(wall?.distance ?? Infinity, body < step ? body : Infinity)
+      if (reach < Infinity || bolt.age > INK_RAY.life) {
+        bursts.push({ at: from.clone().addScaledVector(direction, Math.min(reach, step)), packed: bolt.packed })
         this.remove(bolt)
         continue
       }
@@ -67,5 +77,8 @@ export class InkRayBolts {
   }
 
   clear() { for (const bolt of [...this.bolts]) this.remove(bolt) }
-  dispose() { this.clear(); this.geometry.dispose(); this.trailGeometry.dispose(); this.ringGeometry.dispose(); this.material.dispose(); this.trailMaterial.dispose(); this.ringMaterial.dispose() }
+  dispose() {
+    this.clear(); this.geometry.dispose(); this.trailGeometry.dispose(); this.ringGeometry.dispose()
+    for (const material of [this.material, this.trailMaterial, this.ringMaterial, this.packedMaterial, this.packedTrailMaterial, this.packedRingMaterial]) material.dispose()
+  }
 }

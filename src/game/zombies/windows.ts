@@ -1,7 +1,6 @@
 import * as THREE from 'three'
 import { Capsule } from 'three/addons/math/Capsule.js'
 import type { CollisionWorld } from '../../player/collision'
-import { BUTTON } from '../../player/gamepad'
 import { Draft, palette, type Point } from '../../render/ink'
 import { WALL_THICKNESS } from '../../world/architecture'
 import { seeded, type Random } from '../shared/random'
@@ -518,11 +517,4 @@ function instanced(geometry: THREE.BufferGeometry, material: THREE.Material, cou
   mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
   mesh.userData.noCollision = true
   return mesh
-}
-
-/** A gamepad's use button (X / Square) held: holding it keeps rebuilding, as holding F does. */
-export function padUseHeld() {
-  if (typeof navigator === 'undefined' || !navigator.getGamepads) return false
-  for (const pad of navigator.getGamepads()) if (pad?.connected && pad.buttons[BUTTON.X]?.pressed) return true
-  return false
 }
