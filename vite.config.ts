@@ -56,7 +56,10 @@ export default defineConfig({
             { name: 'three', test: /node_modules[\\/]three[\\/]/, priority: 2 },
             // Clips build from the loaded rest skeleton, so they must stay behind import() and never pull in
             // their shared dependencies (that would make the game chunk import them eagerly). One request instead of six.
-            { name: 'clips', test: /src[\\/]lab[\\/](clips[\\/]|weapons[\\/]poses|postures|death-settle)/, priority: 1, includeDependenciesRecursively: false },
+            // Only modules that build clips on load: weapons/poses and postures are plain pose maths the game's own code
+            // imports (Dead Ink's co-op partner poses use heldPose), and grouping them here made the game import this
+            // chunk at startup, before loadStickman(), so the built game failed to load.
+            { name: 'clips', test: /src[\\/]lab[\\/](clips[\\/]|death-settle)/, priority: 1, includeDependenciesRecursively: false },
           ],
         },
       },

@@ -1,11 +1,8 @@
 import { makeClip, type Pose } from '../clip'
 import type { Action } from '../registry'
 
-/** Arms hanging at the sides with a slightly bent elbow. Reuse as the base for standing poses. */
-export const hang: Pose = {
-  'upper_arm.L': [-78, 0, 0], 'upper_arm.R': [-78, 0, 0],
-  'forearm.L': [0, 0, -10], 'forearm.R': [0, 0, 10],
-}
+import { hang } from '../hang'
+export { hang }
 
 const exhale: Pose = { ...hang, spine: [0, 0, 0], chest: [0, 0, 0], head: [0, 0, 0] }
 const inhale: Pose = {

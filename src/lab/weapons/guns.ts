@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { applyPenMaterial, penPalette } from '../../render/ballpoint'
 import { makeClip, type Key, type Pose } from '../clip'
-import { hang } from '../clips/idle'
+import { hang } from '../hang'
 import { enterPosture, postureClips, weaponPosture, type Posture } from '../postures'
 import type { Action, Ctx } from '../registry'
 import { builders, disposeGun, type Gun, type GunClass, type GunName } from './models'

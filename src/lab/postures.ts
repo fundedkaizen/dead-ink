@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { makeClip, poseQuat, type Key, type Pose } from './clip'
 import { BONE_NAMES, rest, type BoneName, type Rig } from './rig'
-import { hang } from './clips/idle'
+import { hang } from './hang'
 import { shiftTriggerPose } from './weapons/poses'
 
 export type Posture = 'stand' | 'crouch' | 'kneel' | 'prone'
