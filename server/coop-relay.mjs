@@ -111,5 +111,7 @@ if (import.meta.url === `file://${process.argv[1]?.replace(/\\/g, '/')}` || proc
   const port = Number(process.env.PORT ?? 8787)
   const server = createServer((_, response) => { response.writeHead(404); response.end() })
   attachRelay(server)
-  server.listen(port, () => console.log(`Dead Ink co-op relay on :${port}/coop`))
+  // HOST=127.0.0.1 behind a reverse proxy (nginx), so the relay is reached only through it.
+  const host = process.env.HOST ?? '0.0.0.0'
+  server.listen(port, host, () => console.log(`Dead Ink co-op relay on ${host}:${port}/coop`))
 }
