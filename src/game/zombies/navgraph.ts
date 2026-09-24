@@ -341,10 +341,11 @@ export class NavGraph {
    * Cut the graph round `solids`, props put in the world at run time that the bake never saw (Dead Ink's
    * crates, barrels, sandbags, the car), by the bake's own tests: the ground spots a body no longer fits on go,
    * and the steps a body no longer gets along (swept from knee height, else the guards' walker), where the
-   * solids are what stops it. Undone by openGap(key).
+   * solids are what stops it. A cut step that would strand a spot from where it was connected stays: from
+   * there zombies still squeeze past or claw at a player over the prop. Undone by openGap(key).
    */
   closeSolids(world: CollisionWorld, solids: THREE.Object3D) {
-    const cut: Gap = { masks: [], raised: [], edges: [], heights: [] }
+    const cut: Gap = { masks: [], raised: [], edges: [], heights: [] }, was = this.regions().id
     const box = new THREE.Box3(), a = new THREE.Vector3(), b = new THREE.Vector3(), q = new THREE.Vector3(), gone = new Set<number>()
     const capsule = new Capsule(new THREE.Vector3(), new THREE.Vector3(), BODY_RADIUS)
     const fits = (x: number, base: number, z: number, ignored: THREE.Object3D[]) => [[0, 0], [0.04, 0.03], [-0.03, -0.04]].every(([ox, oz]) => {
@@ -382,6 +383,7 @@ export class NavGraph {
     }
     for (const [index] of cut.heights!) this.heights[index] = NaN
     // The steps from each spot round a solid (one cell further out: a step is a cell long).
+    const steps: [number, number, number, number][] = []
     for (const [i0, i1, k0, k1] of areas) for (let i = i0 - 1; i <= i1 + 1; i++) for (let k = k0 - 1; k <= k1 + 1; k++) {
       const index = this.index(i, k)
       if (!this.walkable(index)) continue
@@ -391,9 +393,17 @@ export class NavGraph {
         this.point(index, a); this.point(next, b)
         const base = Math.max(a.y, b.y) + MAX_STEP * 0.7
         if (![0.25, 0.5, 0.75].some(t => { q.copy(a).lerp(b, t); return blocked(q.x, base, q.z) }) || walks()) continue
-        unlink(index, d)
-        unlink(next, DIRECTIONS.findIndex(([x, z]) => x === -di && z === -dk))
+        const back = DIRECTIONS.findIndex(([x, z]) => x === -di && z === -dk)
+        unlink(index, d); unlink(next, back)
+        steps.push([index, d, next, back])
       }
+    }
+    const now = this.regions().id, joined = new Map<number, number>()
+    const find = (r: number): number => { const up = joined.get(r); return up === undefined ? r : find(up) }
+    for (const [index, d, next, back] of steps) {
+      if (was[index] !== was[next] || find(now[index]) === find(now[next])) continue
+      this.masks[index] |= 1 << d; this.masks[next] |= 1 << back
+      joined.set(find(now[index]), find(now[next]))
     }
     for (const [from, edges] of this.edges) {
       const keep = edges.filter(edge => {
