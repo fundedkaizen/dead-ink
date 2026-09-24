@@ -3,24 +3,32 @@ import { EnemyActor } from '../actors'
 import { HOSTAGE_INK } from '../hostage-actor'
 import { createMissionGun } from '../weapon-models'
 import { disposeGun } from '../../lab/weapons/models'
+import { PartnerPoses } from './partner-poses'
 import type { WeaponName } from '../types'
 import type { ZombieSnap } from './director'
 import type { BlastKind } from './blasts'
 import type { PowerupKind } from './rules'
 
 /**
- * Dead Ink co-op: two players, one in each browser, talking through the relay (server/coop-relay.mjs).
+ * Dead Ink co-op: up to four players, each in their own browser, talking through the relay
+ * (server/coop-relay.mjs). Players are numbered: the host 0, guests 1 to 3.
  *
  * The host's game is the world: it runs the zombies, the rounds, the doors, the box and the power-ups, and
- * sends a snapshot fifteen times a second. The guest's game draws that world (its zombies are puppets)
- * and owns only its player: where it stands, its guns, points and perks. The guest's shots are sent to
- * the host, which works out the hits and sends back the points. Each player owns their own health; a
- * zombie's swipe at the guest is sent to the guest.
+ * sends a snapshot fifteen times a second with every player's state. A guest's game draws that world (its
+ * zombies are puppets) and owns only its player: where it stands, its guns, points and perks. A guest's
+ * shots go to the host, which works out the hits and sends the points back to that guest alone. Each
+ * player owns their own health; a zombie's swipe at a guest is sent to that guest.
  */
 export type CoopRole = 'host' | 'guest'
 
-/** One player as the other sees them. */
+/** Each player's colour, by number: the host blue (like the hostage), then green, orange and violet. */
+export const PLAYER_COLORS: readonly number[] = [HOSTAGE_INK, 0x2e9b45, 0xe08a1e, 0x9b4fd6]
+export const PLAYER_CSS: readonly string[] = PLAYER_COLORS.map(color => `#${color.toString(16).padStart(6, '0')}`)
+
+/** One player as the others see them. */
 export type PlayerState = {
+  /** The player's number: the host 0, guests 1 to 3. */
+  id: number
   p: [number, number, number]
   yaw: number
   pitch: number
@@ -31,8 +39,9 @@ export type PlayerState = {
   pts: number
   kills: number
   name: string
-  /** Reviving a teammate: how far it has run, 0 to 1 (0 or missing when not reviving). */
+  /** Reviving a teammate: how far it has run, 0 to 1 (0 or missing when not reviving), and whom. */
   rv?: number
+  rt?: number
 }
 
 /** The host's buildables, traps and quest, as the guest needs them (sent with every tick). */
@@ -50,12 +59,15 @@ export type WorldState = {
   /** Each inkwell: awake, souls, bottle taken. */
   wells: [0 | 1, number, 0 | 1][]
   bottles: number
+  /** Boarded windows (windows.ts): planks up at each, and each player's rebuild points this round, by number (it has a cap). */
+  win?: number[]
+  wp?: number[]
 }
 
 export type CoopMessage =
   // host -> guest
   | { t: 'sync'; gates: string[]; power: boolean; box: number; seed: number; difficulty: string }
-  | { t: 'tick'; z: ZombieSnap[]; r: number; ph: 'break' | 'active'; me: PlayerState; storm: boolean; pw: 0 | 1; pk: 0 | 1; w?: WorldState }
+  | { t: 'tick'; z: ZombieSnap[]; r: number; ph: 'break' | 'active'; players: PlayerState[]; storm: boolean; pw: 0 | 1; pk: 0 | 1; w?: WorldState }
   | { t: 'shield' }
   | { t: 'award'; n: number; k?: number; h?: number }
   | { t: 'hit'; pt: [number, number, number]; dealt: number; id: string; head: 0 | 1; lethal: 0 | 1 }
@@ -63,9 +75,9 @@ export type CoopMessage =
   | { t: 'announce'; text: string; s: number; tone?: string }
   | { t: 'sting'; name: 'roundStart' | 'boxSpin' | 'song' }
   | { t: 'gate'; id: string }
-  | { t: 'box'; a: 'spin' | 'take' | 'close' | 'move'; r?: { name: WeaponName; rarity: string; special?: 'rayGun' }; teddy?: boolean; by?: CoopRole; spot?: number }
+  | { t: 'box'; a: 'spin' | 'take' | 'close' | 'move'; r?: { name: WeaponName; rarity: string; special?: 'rayGun' }; teddy?: boolean; by?: number; spot?: number }
   | { t: 'drop'; k: PowerupKind; p: [number, number, number] }
-  | { t: 'grab'; k: PowerupKind; p: [number, number, number]; by: CoopRole }
+  | { t: 'grab'; k: PowerupKind; p: [number, number, number]; by: number }
   // `k`: how it looks and sounds (a rocket's, a Deadline round's); a frag's when missing.
   | { t: 'boom'; p: [number, number, number]; r: number; k?: BlastKind }
   | { t: 'soul'; p: [number, number, number]; i: number }
@@ -85,10 +97,16 @@ export type CoopMessage =
   | { t: 'use'; what: 'trap'; index: number }
   | { t: 'use'; what: 'bottle'; index: number }
   | { t: 'use'; what: 'pour' }
+  | { t: 'use'; what: 'window'; index: number }
   | { t: 'lure'; p: [number, number, number]; s: number }
-  // either way
-  | { t: 'revive' }
+  // either way (a guest reviving another guest goes through the host: `target`)
+  | { t: 'revive'; target?: number; by?: string }
   | { t: 'down'; dn: 0 | 1 | 2 }
+
+/** A message as it arrives: the relay marks a guest's messages to the host with who sent them. */
+export type CoopIncoming = CoopMessage & { from?: number }
+/** Where a host's message goes: one guest (`to`), every guest but one (`skip`), or every guest (neither). */
+export type CoopRoute = { to?: number; skip?: number }
 
 export type CoopStatus =
   | { kind: 'idle' }
@@ -116,13 +134,20 @@ export function inviteLink(code: string, seed: number) {
 /** The WebSocket to the relay, and the room it is in. */
 export class CoopLink {
   role: CoopRole | null = null
+  /** This player's number: the host 0, guests 1 to 3. */
+  id = 0
   code = ''
   link = ''
-  paired = false
+  /** Who else is connected: on the host its guests' numbers, on a guest 0 (the host) while it is there. */
+  readonly peers = new Set<number>()
   private socket: WebSocket | null = null
   private closed = false
 
-  constructor(private seed: number, private onMessage: (message: CoopMessage) => void, private onStatus: (status: CoopStatus) => void) {}
+  constructor(private seed: number, private onMessage: (message: CoopIncoming) => void, private onStatus: (status: CoopStatus) => void,
+    private onPeer: (id: number, joined: boolean) => void = () => {}) {}
+
+  /** Anyone else here. */
+  get paired() { return this.peers.size > 0 }
 
   get active() { return !!this.socket && !this.closed }
 
@@ -146,34 +171,39 @@ export class CoopLink {
       if (message.t === 'room') {
         clearTimeout(timeout)
         this.role = message.you as CoopRole
+        this.id = Number(message.id ?? 0)
         this.code = String(message.code)
         this.link = inviteLink(this.code, this.seed)
         this.onStatus(this.role === 'host' ? { kind: 'waiting', code: this.code, link: this.link } : { kind: 'alone', code: this.code, link: this.link, role: 'guest' })
       } else if (message.t === 'peer') {
-        this.paired = !!message.joined
+        const id = Number(message.id ?? 0)
+        if (message.joined) this.peers.add(id); else this.peers.delete(id)
+        this.onPeer(id, !!message.joined)
         this.onStatus(this.paired ? { kind: 'paired', code: this.code, link: this.link, role: this.role! }
           : message.hostLeft ? { kind: 'error', reason: 'Your friend closed the game.' }
           : this.role === 'host' ? { kind: 'waiting', code: this.code, link: this.link } : { kind: 'alone', code: this.code, link: this.link, role: 'guest' })
       } else if (message.t === 'error') {
         this.onStatus({ kind: 'error', reason: String(message.reason) })
-      } else this.onMessage(message as CoopMessage)
+      } else this.onMessage(message as CoopIncoming)
     }
     socket.onclose = () => {
       if (this.closed) return
-      this.paired = false
+      for (const id of [...this.peers]) { this.peers.delete(id); this.onPeer(id, false) }
       this.onStatus({ kind: 'error', reason: 'The connection dropped.' })
     }
     socket.onerror = () => this.onStatus({ kind: 'error', reason: 'Could not reach the game server.' })
   }
 
-  send(message: CoopMessage) {
-    if (this.socket?.readyState === WebSocket.OPEN && this.paired) this.socket.send(JSON.stringify(message))
+  /** Send to the host (from a guest), or from the host to the guests `route` names (all of them by default). */
+  send(message: CoopMessage, route?: CoopRoute) {
+    if (this.socket?.readyState === WebSocket.OPEN && this.paired) this.socket.send(JSON.stringify(route ? { ...message, ...route } : message))
   }
 
   close() {
     this.closed = true
-    this.paired = false
+    for (const id of [...this.peers]) { this.peers.delete(id); this.onPeer(id, false) }
     this.role = null
+    this.id = 0
     this.socket?.close()
     this.socket = null
   }
@@ -192,16 +222,19 @@ export class PartnerAvatar {
   private weapon: WeaponName | null = null
   private gun: ReturnType<typeof createMissionGun> | null = null
   private loading: Promise<void> | null = null
+  /** Going down, last stand, crawling, getting up, reviving, bled out (partner-poses.ts). */
+  readonly poses = new PartnerPoses()
 
-  constructor(private scene: THREE.Scene) {}
+  constructor(private scene: THREE.Scene, private color: number = HOSTAGE_INK) {}
 
   load() {
     this.loading ??= EnemyActor.create('pistol').then(actor => {
       this.actor = actor
       actor.root.name = 'Co-op partner'
-      // Blue like the hostage, so your partner stands out from every black zombie at a glance.
+      // In their player colour (the host blue like the hostage), so a teammate stands out from every
+      // black zombie at a glance.
       const body = actor.rig.mesh.material as THREE.MeshBasicMaterial
-      body.color.setHex(HOSTAGE_INK)
+      body.color.setHex(this.color)
       actor.root.visible = false
       actor.gun.visible = false
       this.scene.add(actor.root)
@@ -210,7 +243,7 @@ export class PartnerAvatar {
   }
 
   /** The head, for the name tag. */
-  head(out = new THREE.Vector3()) { return out.copy(this.feet).setY(this.feet.y + 1.95) }
+  head(out = new THREE.Vector3()) { return out.copy(this.feet).setY(this.feet.y + (this.state?.dn ? 0.95 : 1.95)) }
 
   update(dt: number, state: PlayerState | null) {
     const actor = this.actor
@@ -226,13 +259,8 @@ export class PartnerAvatar {
     this.yaw += Math.atan2(Math.sin(face - this.yaw), Math.cos(face - this.yaw)) * (1 - Math.exp(-dt * 14))
     if (state.w !== this.weapon) this.swapGun(state.w)
     actor.root.position.copy(this.feet)
-    if (state.dn) {
-      // Down: flat on the ground, propped on an elbow.
-      actor.root.rotation.set(-1.25, this.yaw, 0.2, 'YXZ')
-      actor.root.position.y += 0.25
-      actor.update(dt, 'combat', false)
-      return
-    }
+    // Down, getting up, reviving or bled out: partner-poses.ts owns the stickman until they stand again.
+    if (this.poses.update(dt, actor, state, this.yaw, this.gun)) return
     actor.root.rotation.set(0, this.yaw, 0, 'YXZ')
     const aim = this.feet.clone().add(new THREE.Vector3(-Math.sin(state.yaw) * Math.cos(state.pitch), 1.5 + Math.sin(state.pitch), -Math.cos(state.yaw) * Math.cos(state.pitch)).multiplyScalar(1).setLength(10)).setY(this.feet.y + 1.5 + Math.sin(state.pitch) * 10)
     actor.update(dt, state.mv ? 'patrol' : 'combat', !!state.mv, state.mv ? undefined : aim, state.mv ? 3.2 : 0)
@@ -251,6 +279,7 @@ export class PartnerAvatar {
   }
 
   dispose() {
+    this.poses.dispose()
     if (this.gun) disposeGun(this.gun)
     this.actor?.root.removeFromParent()
     this.actor?.dispose()
@@ -268,8 +297,9 @@ export class PartnerTag {
   private arrow = document.createElement('i')
   private projected = new THREE.Vector3()
 
-  constructor(parent: HTMLElement, name: string) {
+  constructor(parent: HTMLElement, name: string, color = PLAYER_CSS[0]) {
     this.element.className = 'coop-tag'
+    this.element.style.setProperty('--tag', color)
     this.element.hidden = true
     this.label.textContent = name
     this.arrow.setAttribute('aria-hidden', 'true')

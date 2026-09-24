@@ -10,16 +10,16 @@
 .dead-ink-scores[hidden] { display: none; }
 .dead-ink-scores div { display: flex; justify-content: space-between; gap: 14px; padding: 2px 8px; background: #fbfaf5; border: 1.5px solid var(--ink, #111); border-radius: 3px 4px 2px 4px; }
 .dead-ink-scores div.me { border-width: 2.5px; }
-.dead-ink-scores div:not(.me) { color: #2878d0; border-color: #2878d0; }
+.dead-ink-scores div:not(.me) { color: var(--tag, #2878d0); border-color: var(--tag, #2878d0); }
 .dead-ink-scores div.down { opacity: 0.5; text-decoration: line-through; }
 .dead-ink-scores strong { font-variant-numeric: tabular-nums; }
 /* The partner's name over their head, through walls; pinned to the edge with an arrow when off screen. */
 .coop-tag { position: absolute; left: 0; top: 0; pointer-events: none; display: grid; justify-items: center; gap: 1px; margin: -34px 0 0 -60px; width: 120px;
-  font: 700 13px/1.1 var(--notes, "Chalkboard SE", "Comic Sans MS", cursive); color: #2878d0;
+  font: 700 13px/1.1 var(--notes, "Chalkboard SE", "Comic Sans MS", cursive); color: var(--tag, #2878d0);
   text-shadow: 1px 1px 0 #fff, -1px 1px 0 #fff, 1px -1px 0 #fff, -1px -1px 0 #fff; }
 .coop-tag[hidden] { display: none; }
-.coop-tag i { width: 0; height: 0; border: 7px solid transparent; border-top: 9px solid #2878d0; border-bottom: 0; filter: drop-shadow(0 0 1px #fff); }
-.coop-tag.edge i { border: 7px solid transparent; border-left: 11px solid #2878d0; border-right: 0; }
+.coop-tag i { width: 0; height: 0; border: 7px solid transparent; border-top: 9px solid var(--tag, #2878d0); border-bottom: 0; filter: drop-shadow(0 0 1px #fff); }
+.coop-tag.edge i { border: 7px solid transparent; border-left: 11px solid var(--tag, #2878d0); border-right: 0; }
 .coop-tag.down { color: #d4332a; }
 /* An objective marker (the power switch): small and quiet, through walls; pinned to the edge with an arrow. */
 .world-marker { position: absolute; left: 0; top: 0; pointer-events: none; display: grid; justify-items: center; margin: -14px 0 0 -12px; width: 24px; opacity: 0.8; }
@@ -36,6 +36,16 @@
 .coop-name input { width: 140px; }
 .coop-link { display: flex; gap: 6px; }
 .coop-link input { flex: 1 1 auto; min-width: 0; }
+/* The lobby: who is here, each in their player colour, the host first. */
+.coop-players { display: grid; gap: 4px; }
+.coop-players ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; }
+.coop-players li { padding: 3px 8px; border: 1.5px solid var(--tag, #111); border-left-width: 6px; border-radius: 3px 5px 2px 4px; background: #fbfaf5; }
+.coop-players li.joining { border-style: dashed; border-color: var(--ink, #111); opacity: 0.7; }
+/* A guest once the host has started: the Jump in button calls for the click the page needs. */
+.coop-panel.started .coop-wait { display: none; }
+.coop-panel.started .coop-start { animation: coop-jump 0.7s ease-in-out infinite alternate; }
+@keyframes coop-jump { from { transform: scale(1); } to { transform: scale(1.07); } }
+@media (prefers-reduced-motion: reduce) { .coop-panel.started .coop-start { animation: none; } }
 body[data-mission="true"] .walk-card .coop-panel button { min-height: 32px; padding: 4px 12px; border: 2px solid var(--ink, #111); background: #fbfaf5; color: var(--ink, #111); font: 700 13px/1 var(--notes, sans-serif); border-radius: 3px; cursor: pointer; }
 body[data-mission="true"] .walk-card .coop-panel button:hover { background: var(--ink, #111); color: #fbfaf5; }
 body[data-mission="true"] .walk-card .coop-panel button.coop-start { width: 100%; min-height: 54px; margin-top: 6px; font-size: 18px; background: var(--ink, #111); color: #fbfaf5; box-shadow: 4px 4px 0 #d4332a; }
@@ -168,3 +178,18 @@ body[data-dead-ink-revive="true"] #world { animation: dead-ink-revive 2.4s linea
 .dead-ink-hud:has(> .dead-ink-minimap:not([hidden])) .dead-ink-boss { width: min(460px, 70vw, calc(100vw - 2 * (var(--minimap-edge) + var(--minimap) + 12px))); }
 @media (max-width: 900px), (max-height: 700px) { .dead-ink-hud { --minimap: 140px; --minimap-edge: 16px; } }
 @media (max-width: 640px) { .dead-ink-hud { --minimap: 112px; --minimap-edge: 12px; --tally: 44px; } }
+
+/* Game over, as Call of Duty: the ink the screen sinks into, then GAME OVER over a flight across the map.
+   Above the fall's own overlay, below the scores. While the camera flies, the rest of the HUD steps aside. */
+.dead-ink-over { position: fixed; inset: 0; z-index: 5; pointer-events: none; }
+.dead-ink-over[hidden] { display: none; }
+.dead-ink-over-ink { position: absolute; inset: 0; background: #0b0b0b; opacity: 0; }
+.dead-ink-over-title { position: absolute; left: 0; right: 0; top: 7vh; display: grid; justify-items: center; gap: 8px; opacity: 0; transform: scale(1.18);
+  transition: opacity 0.8s ease-out, transform 1.2s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.dead-ink-over.titled .dead-ink-over-title { opacity: 1; transform: scale(1); }
+.dead-ink-over-title strong { font: 900 clamp(44px, 9vw, 108px)/0.95 var(--notes, "Chalkboard SE", "Comic Sans MS", cursive); letter-spacing: 0.05em; color: #c8322b;
+  text-shadow: 3px 4px 0 #111, -1px -1px 0 #fff, 1px -1px 0 #fff, 0 0 22px rgba(255, 255, 255, 0.85); }
+.dead-ink-over-title span { font: 700 clamp(18px, 2.6vw, 30px)/1.1 var(--notes, "Chalkboard SE", "Comic Sans MS", cursive); color: #111;
+  text-shadow: 1px 1px 0 #fff, -1px 1px 0 #fff, 1px -1px 0 #fff, -1px -1px 0 #fff, 0 0 10px #fff; }
+body[data-dead-ink-over="flying"] #mission-hud, body[data-dead-ink-over="flying"] .mission-death { visibility: hidden; }
+@media (prefers-reduced-motion: reduce) { .dead-ink-over-title { transition: opacity 0.3s linear; transform: none; } }

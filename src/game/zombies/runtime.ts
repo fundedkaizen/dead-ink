@@ -54,12 +54,14 @@ import { INKWELL_PLACES, Inkwell, QUEST, SoulStreams, questHint, type QuestStep 
 import { BLOT, GAS, rollBlot } from './gas'
 import { POWER_ICON, WorldMarker } from './markers'
 import { REVIVE_ICON, ReviveSyringe } from './last-stand'
+import { GameOverFlight } from './game-over'
 import { playMythicSting } from './mythic'
-import { CoopLink, PartnerAvatar, PartnerTag, toVector, vec, type CoopMessage, type CoopStatus, type PlayerState, type WorldState } from './coop'
+import { CoopLink, PLAYER_COLORS, PLAYER_CSS, PartnerAvatar, PartnerTag, toVector, vec, type CoopIncoming, type CoopMessage, type CoopStatus, type PlayerState, type WorldState } from './coop'
 import type { Shot as ShotType } from '../types'
 import type { Rarity } from '../loot'
 import { MACHINE_PLACES, PACK, PERKS, PERK_EFFECT, PERK_LIMIT, PackAPunch, PackedLook, PerkBottle, PerkMachine, type PerkKind } from './perks'
-import { MATE_INK, Minimap, type MinimapMate } from './minimap'
+import { Minimap, type MinimapMate } from './minimap'
+import { Barriers, WINDOW, type Barrier } from './windows'
 
 export type ZombieState = {
   phase: 'active' | 'dead' | 'complete'
@@ -74,6 +76,8 @@ export const KNIFE = { damage: 150, range: 2.1, cooldown: 0.55 } as const
 /** Bodies lie a few seconds before they sink; spare actors let new zombies rise meanwhile. */
 export const POOL_SIZE = MAX_ALIVE + 8
 type TimedPowerup = 'instaKill' | 'doublePoints' | 'deathMachine'
+/** Another player in co-op: what they last told us, their stickman, name tag and revive cross, and their colour. */
+type Teammate = { id: number; state: PlayerState | null; avatar: PartnerAvatar; tag: PartnerTag; marker: WorldMarker; css: string }
 
 /**
  * Where else the Mystery Box can turn up once the teddy bear takes it: a point in each of three other
@@ -267,25 +271,31 @@ export class ZombiesRuntime {
    */
   readonly seed: number
   coop: CoopLink
-  partner: PartnerAvatar
-  private partnerTag: PartnerTag
+  /** Every other player, by number (the host 0, guests 1 to 3): what they last told us, their stickman, name tag and revive cross. */
+  readonly mates = new Map<number, Teammate>()
+  private hudRoot: HTMLElement
   /** Where the power switch is, until the power is on. */
   private powerMarker: WorldMarker
-  partnerState: PlayerState | null = null
   private lastTick: Extract<CoopMessage, { t: 'tick' }> | null = null
   private sendTimer = 0
   down: 0 | 1 | 2 = 0
   private bleed = 0
   private reviving = 0
+  /** Whom you are reviving. */
+  private revivingId = -1
   /** The guns you went down with, back in your hands when you are picked up. */
   private downWeapons: WeaponSnapshot | null = null
   private syringe: ReviveSyringe
-  private downMarker: WorldMarker
-  private boxOwner: 'host' | 'guest' = 'host'
+  /** The game over: ink, then a flight over the map under GAME OVER, then the scores. */
+  private gameOverFlight = new GameOverFlight(document.body)
+  /** The player who paid for the box's spin: the gun is theirs. */
+  private boxOwner = 0
   private coopPanel: HTMLElement | null = null
   private coopStatus: CoopStatus = { kind: 'idle' }
   private partnerKills = 0
-  /** The guest's Ink Dolls, on the host: where each lies and how long it keeps drawing zombies. */
+  /** Who is in the co-op lobby, as last drawn on the co-op page. */
+  private lobbyKey = ''
+  /** The guests' Ink Dolls, on the host: where each lies and how long it keeps drawing zombies. */
   private partnerLures: { position: THREE.Vector3; left: number }[] = []
   private partsKey = ''
   /** Accuracy for the game-over page: trigger pulls, and pulls that hit a zombie (a shotgun blast counts once). */
@@ -329,15 +339,23 @@ export class ZombiesRuntime {
   private skulls: { object: THREE.Object3D; found: boolean }[] = []
   /** Mini map (minimap.ts), and the teammates it shows: the co-op partner, one entry reused every frame. */
   private minimap: Minimap | null = null
-  private mapMate: MinimapMate = { position: new THREE.Vector3(), yaw: 0, color: MATE_INK }
+  private mapMatePool: MinimapMate[] = []
   private mapMates: MinimapMate[] = []
+  /**
+   * Boarded windows (windows.ts): the mess hall's windows on the road side. The window being rebuilt while
+   * F is held, the wait until the next plank, and (on the guest) its rebuild points this round as the host
+   * counts them.
+   */
+  barriers: Barriers | null = null
+  private repairing: Barrier | null = null
+  private repairWait = 0
+  private barrierPaid = 0
 
   constructor(private scene: THREE.Scene, private camera: EnvironmentCamera, readonly player: FirstPersonController,
     readonly world: MissionWorld, private invalidate: () => void, seed = Math.floor(Math.random() * 2 ** 31)) {
     this.random = seeded(seed)
     this.seed = seed
-    this.coop = new CoopLink(seed, message => this.coopMessage(message), status => this.coopStatusChanged(status))
-    this.partner = new PartnerAvatar(scene)
+    this.coop = new CoopLink(seed, message => this.coopMessage(message), status => this.coopStatusChanged(status), (id, joined) => this.coopPeer(id, joined))
     player.missionMode = true
     player.canPlay = () => this.ready && this.state.phase === 'active'
     if (!camera.perspective.parent) scene.add(camera.perspective)
@@ -376,12 +394,10 @@ export class ZombiesRuntime {
     this.applySettings()
     document.querySelector('#world')?.setAttribute('aria-label', 'Dead Ink, round-based zombies. Mouse to look, WASD move, left click fire, right click aim, mouse wheel switch weapon, V knife, F buy or use, R reload, Escape pause.')
     const hudRoot = document.querySelector<HTMLElement>('#mission-hud')!
+    this.hudRoot = hudRoot
     this.zombieHud = new ZombieHud(hudRoot)
     this.hits = new HitMarkers(hudRoot)
-    this.partnerTag = new PartnerTag(hudRoot, 'Partner')
     this.powerMarker = new WorldMarker(hudRoot, POWER_ICON, 'The power switch')
-    this.downMarker = new WorldMarker(hudRoot, REVIVE_ICON, 'A downed teammate', 0)
-    this.downMarker.element.classList.add('revive')
     this.indicator = new DamageIndicator(hudRoot)
     // One more cell than you start with, for Spare Nib's third gun; the hotbar hides cells you do not have.
     this.hotbar = new Hotbar(hudRoot, ZOMBIE_SLOTS + 1)
@@ -444,8 +460,13 @@ export class ZombiesRuntime {
       if (graph.geometry && graph.geometry !== hash) console.warn(`Dead Ink: navigation graph was baked for geometry ${graph.geometry}, map is ${hash}. Rebake with scripts/build-navgraph.ts.`)
       this.graph = graph
       this.director = new ZombieDirector({ scene: this.scene, world: this.player.world, doors: doors.filter(door => !door.userData.missionLocked), graph, emit: event => this.emit(event),
-        damagePlayer: (id, amount, source) => id === 'p2' ? this.coop.send({ t: 'hurt', n: Math.round(amount * DIFFICULTY[this.difficulty].damage), s: source ? vec(source) : undefined })
-          : id === 'p1' && this.damage(Math.round(amount * DIFFICULTY[this.difficulty].damage), 'zombie', source),
+        damagePlayer: (id, amount, source) => {
+          const n = Math.round(amount * DIFFICULTY[this.difficulty].damage)
+          // Targets are p1 for the host, p2 to p4 for guests 1 to 3.
+          const player = Number(id.slice(1)) - 1
+          if (player === 0) this.damage(n, 'zombie', source)
+          else if (player > 0) this.coop.send({ t: 'hurt', n, s: source ? vec(source) : undefined }, { to: player })
+        },
         onHit: hit => { this.impactPoint = hit.point.clone(); this.blood.emitHit(hit); this.audio.confirmHit(hit) },
         onRise: position => { this.riseMarks.emit(position); this.emit({ kind: 'zombie-rise', position, radius: 30 }) },
         onSlam: (position, radius) => { this.shockwaves.emit(position, radius); this.riseMarks.emit(position) } })
@@ -455,6 +476,9 @@ export class ZombiesRuntime {
       // Every zone but the first shut behind its gate, before anything is placed.
       this.zones = new ZoneGates(this.scene, this.player.world, graph)
       this.zones.closeAll()
+      // The mess hall's road-side windows boarded up: the only way in from the road (before anything is placed).
+      this.barriers = new Barriers(this.scene, this.player.world, graph, event => this.emit(event))
+      this.director.windows = this.barriers.list
       this.director.navigation.clear()
       this.player.world.warm()
       const floor = this.player.world.floor(this.spawn.clone().setY(0.6), 1, 1.5, 0.28)
@@ -564,6 +588,7 @@ export class ZombiesRuntime {
     this.state = { phase: 'active', health: PLAYER_HEALTH.base, elapsed: 0, kills: 0, points: STARTING_POINTS, round: 0, headshots: 0, knifeKills: 0 }
     this.rounds = newGame()
     this.director?.clear()
+    this.barriers?.reset(); this.repairing = null; this.barrierPaid = 0
     this.zones?.closeAll()
     this.director?.navigation.clear()
     if (this.box && this.boxSpots[0]) { this.box.place(this.boxSpots[0]); this.makeSolid(this.box.root, [1.44, 0.66, 0.64], [0, 0.33, 0]) }
@@ -593,7 +618,7 @@ export class ZombiesRuntime {
     this.camera.perspective.lookAt(look.x, this.spawn.y + 1.7, look.z)
     this.safePosition.copy(this.player.body.position)
     this.lastHurt = -100; this.knifeCooldown = 0; this.strandTimer = 0
-    this.down = 0; this.bleed = 0; this.reviving = 0; this.boxOwner = 'host'; this.partnerKills = 0
+    this.down = 0; this.bleed = 0; this.reviving = 0; this.revivingId = -1; this.boxOwner = 0; this.partnerKills = 0
     this.downWeapons = null; this.player.crawling = false; this.player.actions.disabled = false; this.syringe.stop(); this.zombieHud.lastStand(null)
     this.lastTick = null
     this.partnerLures = []
@@ -601,7 +626,7 @@ export class ZombiesRuntime {
   }
 
   restart() {
-    this.death.reset(); this.weapons.resetDeath(); this.playerHits.clear()
+    this.death.reset(); this.weapons.resetDeath(); this.playerHits.clear(); this.gameOverFlight.end(); delete document.body.dataset.deadInkOver
     this.player.pause(); this.cancelInput(); this.audio.reset(); this.player.actions.reset()
     this.player.movementLocked = false
     this.blood.restore(undefined)
@@ -710,6 +735,7 @@ export class ZombiesRuntime {
         use: () => this.useWall(buy) })
     }
     const eye = this.camera.perspective.position
+    this.barrierTargets(targets, eye)
     for (const gate of this.zones?.gates ?? []) {
       if (gate.state !== 'closed') continue
       const point = this.zones!.nearestPoint(gate, eye), cost = gate.spec.cost
@@ -737,10 +763,12 @@ export class ZombiesRuntime {
         : `Pack-a-Punch · ${held.packed ? 'upgrade again' : 'upgrade'} your ${this.weapons.label} · ${packCost(held)}${this.state.points >= packCost(held)! ? '' : ` · need ${packCost(held)! - this.state.points} more`}`
       targets.push({ object: pack.root, point: pack.point, kind: 'mission', descending: false, label, use: () => this.usePack(pack) })
     }
-    if (this.paired && this.partnerState?.dn === 1 && !this.down && this.partner.feet.distanceTo(this.player.body.position) < COOP.reviveReach)
-      targets.push({ object: this.partner.actor?.root ?? this.scene, point: this.partner.feet.clone().setY(this.partner.feet.y + 0.6), kind: 'mission', descending: false,
-        label: `Hold to revive ${this.partnerState.name}`, use: () => {
-          this.reviving = 0.001; this.player.movementLocked = true; this.cancelInput(); this.syringe.start(); return true } })
+    if (this.paired && !this.down) for (const mate of this.mates.values()) {
+      if (mate.state?.dn !== 1 || mate.avatar.feet.distanceTo(this.player.body.position) >= COOP.reviveReach) continue
+      targets.push({ object: mate.avatar.actor?.root ?? this.scene, point: mate.avatar.feet.clone().setY(mate.avatar.feet.y + 0.6), kind: 'mission', descending: false,
+        label: `Hold to revive ${mate.state.name}`, use: () => {
+          this.reviving = 0.001; this.revivingId = mate.id; this.player.movementLocked = true; this.cancelInput(); this.syringe.start(); return true } })
+    }
     for (const part of this.parts) {
       if (part.point.distanceTo(eye) > 3 || !part.root.visible) continue
       targets.push({ object: part.root, point: part.point, kind: 'mission', descending: false, label: `Pick up the ${PARTS[part.id].label}`, use: () => this.pickPart(part) })
@@ -850,15 +878,15 @@ export class ZombiesRuntime {
   private pickPart(part: PartPickup) {
     if (!this.isActive() || part.point.distanceTo(this.camera.perspective.position) > 3) return false
     if (this.isGuest) { this.coop.send({ t: 'use', what: 'part', id: part.id }); return true }
-    return this.takePart(part, false)
+    return this.takePart(part, null)
   }
 
-  /** A part into the team's hands (the host decides; `partner` when the guest picked it up). */
-  private takePart(part: PartPickup, partner: boolean) {
+  /** A part into the team's hands (the host decides; `by` is the guest who picked it up, null the host). */
+  private takePart(part: PartPickup, by: number | null) {
     this.carried.add(part.id)
     this.parts.splice(this.parts.indexOf(part), 1)
     part.dispose()
-    this.hud.notify(partner ? `Your partner found the ${PARTS[part.id].label}.` : `You found the ${PARTS[part.id].label}.`, 2.5)
+    this.hud.notify(by !== null ? `${this.mateName(by)} found the ${PARTS[part.id].label}.` : `You found the ${PARTS[part.id].label}.`, 2.5)
     this.emit({ kind: 'pickup', position: this.player.body.position.clone(), radius: 3 })
     this.zombieHud.parts([...this.carried].map(id => PARTS[id].label))
     this.invalidate()
@@ -894,16 +922,16 @@ export class ZombiesRuntime {
   private useSite(site: BuildSite) {
     if (!this.isActive() || !this.canReach(site.point, site.root)) return false
     if (this.isGuest) { this.coop.send({ t: 'use', what: 'site', build: site.build }); return true }
-    return this.buildAt(site, false)
+    return this.buildAt(site, null)
   }
 
-  /** Fit the team's parts at a site, or take the finished shield (`partner`: the guest is at the site). */
-  private buildAt(site: BuildSite, partner: boolean) {
+  /** Fit the team's parts at a site, or take the finished shield (`by`: the guest at the site, null the host). */
+  private buildAt(site: BuildSite, by: number | null) {
     if (site.complete) {
-      if (partner) {
+      if (by !== null) {
         if (site.build !== 'shield' || !this.shieldOnBench) return false
         this.shieldOnBench = false
-        this.coop.send({ t: 'shield' })
+        this.coop.send({ t: 'shield' }, { to: by })
         return true
       }
       if (site.build !== 'shield' || this.shield || !this.shieldOnBench) return false
@@ -1091,36 +1119,64 @@ export class ZombiesRuntime {
   /** This browser is the guest: its zombies are the host's, its world follows the host's. */
   get isGuest() { return this.coop.role === 'guest' }
   private get paired() { return this.coop.paired }
-  private get partnerUp() { return this.paired && !!this.partnerState && this.partnerState.dn === 0 }
 
   /** A player's name, remembered in this browser. */
   private get playerName() {
-    try { return (localStorage.getItem('dead-ink-name') ?? '').trim().slice(0, 16) || (this.isGuest ? 'Player 2' : 'Player 1') } catch { return this.isGuest ? 'Player 2' : 'Player 1' }
+    const fallback = `Player ${this.coop.id + 1}`
+    try { return (localStorage.getItem('dead-ink-name') ?? '').trim().slice(0, 16) || fallback } catch { return fallback }
   }
+
+  /** A teammate by number, made the first time we hear of them: their stickman, name tag and revive cross, in their colour. */
+  private mate(id: number): Teammate {
+    let mate = this.mates.get(id)
+    if (!mate) {
+      const color = PLAYER_COLORS[id] ?? PLAYER_COLORS[0], css = PLAYER_CSS[id] ?? PLAYER_CSS[0]
+      const avatar = new PartnerAvatar(this.scene, color)
+      void avatar.load()
+      const marker = new WorldMarker(this.hudRoot, REVIVE_ICON, 'A downed teammate', 0)
+      marker.element.classList.add('revive')
+      mate = { id, state: null, avatar, tag: new PartnerTag(this.hudRoot, `Player ${id + 1}`, css), marker, css }
+      this.mates.set(id, mate)
+    }
+    return mate
+  }
+
+  /** A teammate left: their stickman, tag and cross go. */
+  private dropMate(id: number) {
+    const mate = this.mates.get(id)
+    if (!mate) return
+    mate.avatar.dispose(); mate.tag.dispose(); mate.marker.dispose()
+    this.mates.delete(id)
+    this.partnerLures = []
+  }
+
+  private mateName(id: number) { return this.mates.get(id)?.state?.name || `Player ${id + 1}` }
+
+  /** Teammates who have told us where they are. */
+  private matesHere() { return [...this.mates.values()].filter((mate): mate is Teammate & { state: PlayerState } => !!mate.state) }
 
   private myState(): PlayerState {
     const cam = this.camera.perspective
     const e = new THREE.Euler().setFromQuaternion(cam.quaternion, 'YXZ')
     const body = this.player.body
-    return { p: vec(body.position), yaw: Math.round(e.y * 100) / 100, pitch: Math.round(e.x * 100) / 100, w: this.weapons.current?.name ?? null,
+    return { id: this.coop.id, p: vec(body.position), yaw: Math.round(e.y * 100) / 100, pitch: Math.round(e.x * 100) / 100, w: this.weapons.current?.name ?? null,
       mv: Math.hypot(body.velocity.x, body.velocity.z) > 0.6 ? 1 : 0, dn: this.down, pts: this.state.points, kills: this.state.kills, name: this.playerName,
-      rv: this.reviving > 0 ? Math.round(this.reviving / this.reviveTime() * 100) / 100 : 0 }
+      rv: this.reviving > 0 ? Math.round(this.reviving / this.reviveTime() * 100) / 100 : 0, rt: this.reviving > 0 ? this.revivingId : undefined }
   }
 
-  /** The host tells the guest how the world stands: open gates, the power, the box's place. */
-  private sendSync() {
+  /** The host tells a guest (or all of them) how the world stands: open gates, the power, the box's place. */
+  private sendSync(to?: number) {
     if (this.coop.role !== 'host' || !this.paired) return
     this.coop.send({ t: 'sync', gates: (this.zones?.gates ?? []).filter(g => g.state !== 'closed').map(g => g.spec.id), power: this.power,
-      box: this.box ? this.boxSpots.indexOf(this.box.spot) : 0, seed: this.seed, difficulty: this.difficulty })
+      box: this.box ? this.boxSpots.indexOf(this.box.spot) : 0, seed: this.seed, difficulty: this.difficulty }, to === undefined ? undefined : { to })
   }
 
-  /** In a round: the partner's stickman, reviving, bleeding out, power-ups the partner walks into, and what we send. */
+  /** In a round: power-ups teammates walk into, bleeding out, reviving, the last stand's bar, and the game's end. */
   private coopFrame(dt: number) {
     if (!this.paired) return
-    const partner = this.partnerState
-    // Power-ups are the host's: it checks the partner's feet as well as its own.
-    if (this.coop.role === 'host' && partner && partner.dn === 0)
-      for (const taken of this.powerups.collect(this.partner.feet)) this.grabbed(taken.kind, taken.position, 'guest')
+    // Power-ups are the host's: it checks every guest's feet as well as its own.
+    if (this.coop.role === 'host') for (const mate of this.matesHere())
+      if (mate.state.dn === 0) for (const taken of this.powerups.collect(mate.avatar.feet)) this.grabbed(taken.kind, taken.position, mate.id)
     if (this.down === 1 && (this.bleed -= dt) <= 0) {
       // Bled out: nothing in your hands, flat on the floor until the next round.
       this.down = 2
@@ -1132,47 +1188,57 @@ export class ZombiesRuntime {
       this.hud.notify('You bled out. You will be back next round.', 4, true)
     }
     if (this.reviving > 0) {
-      const near = partner && partner.dn === 1 && this.partner.feet.distanceTo(this.player.body.position) < COOP.reviveReach
+      const mate = this.mates.get(this.revivingId)
+      const near = !!mate && mate.state?.dn === 1 && mate.avatar.feet.distanceTo(this.player.body.position) < COOP.reviveReach
       // Held the whole way (F, or the pad's X): let go, step away or go down yourself and it stops.
-      if (!near || this.down || !this.player.useHeld) { this.reviving = 0; this.player.movementLocked = this.down === 2; this.syringe.stop() }
+      if (!mate || !near || this.down || !this.player.useHeld) { this.reviving = 0; this.player.movementLocked = this.down === 2; this.syringe.stop() }
       else if ((this.reviving += dt) >= this.reviveTime()) {
         this.reviving = 0
         this.player.movementLocked = false
         this.syringe.stop()
-        this.coop.send({ t: 'revive' })
-        if (this.partnerState) this.partnerState.dn = 0
+        // The host tells the guest; a guest asks the host to pass it on (or gets the host up itself).
+        if (this.coop.role === 'host') this.coop.send({ t: 'revive', by: this.playerName }, { to: mate.id })
+        else this.coop.send({ t: 'revive', target: mate.id, by: this.playerName })
+        if (mate.state) mate.state.dn = 0
         this.award(COOP.revivePoints)
-        this.hud.notify('You got your partner back up.', 2.5)
+        this.hud.notify(`You got ${this.mateName(mate.id)} back up.`, 2.5)
       } else this.interactionTime = Math.max(this.interactionTime, 0.2)
     }
     // One bar under the crosshair: yours to fill, theirs filling for you, or your time running out.
-    const name = partner?.name ?? 'Your partner'
-    if (this.reviving > 0) this.zombieHud.lastStand(`Reviving ${name}`, this.reviving / this.reviveTime())
-    else if (this.down === 1 && partner?.rv) this.zombieHud.lastStand(`${name} is reviving you`, partner.rv)
+    const helper = this.down === 1 ? this.matesHere().find(mate => mate.state.rv && mate.state.rt === this.coop.id) : undefined
+    if (this.reviving > 0) this.zombieHud.lastStand(`Reviving ${this.mateName(this.revivingId)}`, this.reviving / this.reviveTime())
+    else if (helper) this.zombieHud.lastStand(`${helper.state.name} is reviving you`, helper.state.rv!)
     else if (this.down === 1) this.zombieHud.lastStand('Bleeding out', this.bleed / COOP.bleedSeconds, 'bleed')
     else this.zombieHud.lastStand(null)
-    // Both down (or out): the game is over for both.
-    if (this.coop.role === 'host' && this.down && partner && partner.dn) {
+    // Everyone down (or out): the game is over for all.
+    if (this.coop.role === 'host' && this.down && this.matesHere().every(mate => mate.state.dn)) {
       this.coop.send({ t: 'gameover' })
       this.gameOver()
     }
   }
 
-  /** Every frame, playing or not: send our state, draw the partner and the scoreboard. */
+  /** Every frame, playing or not: draw the teammates and the scoreboard, keep the lobby current, send our state. */
   private coopIdle(dt: number) {
-    const partner = this.paired ? this.partnerState : null
-    this.partner.update(dt, partner)
-    this.partnerTag.update(this.camera.perspective, partner ? this.partner.head() : null, !!partner?.dn)
+    const paired = this.paired
+    for (const mate of this.mates.values()) {
+      const state = paired ? mate.state : null
+      // A reviver kneels facing whoever they are reviving: us, or another teammate.
+      mate.avatar.poses.reviveAt = state?.rv && state.rt !== undefined
+        ? state.rt === this.coop.id ? this.player.body.position : this.mates.get(state.rt)?.avatar.feet ?? null : null
+      mate.avatar.update(dt, state)
+      if (state) mate.tag.name(state.name)
+      mate.tag.update(this.camera.perspective, state ? mate.avatar.head() : null, !!state?.dn)
+      mate.marker.update(this.camera.perspective, this.player.playing && state?.dn === 1 ? mate.avatar.feet.clone().setY(mate.avatar.feet.y + 0.9) : null)
+    }
     this.powerMarker.update(this.camera.perspective, this.player.playing && !this.power && this.powerSwitch ? this.powerSwitch.point : null)
-    this.downMarker.update(this.camera.perspective, this.player.playing && partner?.dn === 1 ? this.partner.feet.clone().setY(this.partner.feet.y + 0.9) : null)
-    if (partner) this.partnerTag.name(partner.name)
-    this.zombieHud.scoreboard(this.paired ? [{ name: this.playerName, points: this.state.points, me: true, down: !!this.down },
-      { name: partner?.name ?? 'Partner', points: partner?.pts ?? 0, me: false, down: !!partner?.dn }] : null)
-    if (!this.paired || (this.sendTimer -= dt) > 0) return
+    this.zombieHud.scoreboard(paired ? [{ name: this.playerName, points: this.state.points, me: true, down: !!this.down, color: PLAYER_CSS[this.coop.id] },
+      ...this.matesHere().sort((a, b) => a.id - b.id).map(mate => ({ name: mate.state.name, points: mate.state.pts, me: false, down: !!mate.state.dn, color: mate.css }))] : null)
+    this.renderLobby()
+    if (!paired || (this.sendTimer -= dt) > 0) return
     this.sendTimer = 1 / COOP.sendRate
     if (this.coop.role === 'host') {
-      this.coop.send({ t: 'tick', z: this.director?.snapshot() ?? [], r: this.rounds.round, ph: this.rounds.phase, me: this.myState(), storm: this.storm,
-        pw: this.power ? 1 : 0, pk: this.packBuilt ? 1 : 0, w: this.worldState() })
+      this.coop.send({ t: 'tick', z: this.director?.snapshot() ?? [], r: this.rounds.round, ph: this.rounds.phase, players: [this.myState(), ...this.matesHere().map(mate => mate.state)],
+        storm: this.storm, pw: this.power ? 1 : 0, pk: this.packBuilt ? 1 : 0, w: this.worldState() })
     } else this.coop.send({ t: 'me', me: this.myState() })
   }
 
@@ -1206,7 +1272,7 @@ export class ZombiesRuntime {
     this.revive.holdDown()
     this.audio.play({ kind: 'player-fall' })
     this.zombieHud.announce('You are down', 2.5)
-    this.hud.notify('Crawl and keep shooting: your partner can pick you up.', 4, true)
+    this.hud.notify('Crawl and keep shooting: a teammate can pick you up.', 4, true)
     this.coop.send({ t: 'down', dn: 1 })
   }
 
@@ -1259,6 +1325,7 @@ export class ZombiesRuntime {
       carried: [...this.carried], placed, power: this.powerSwitch?.state ?? 'broken', shieldOnBench: this.shieldOnBench ? 1 : 0,
       traps: this.traps.map(t => [t.state, Math.round(t.timer * 10) / 10]), quest: this.questStep,
       wells: this.wells.map(w => [w.awake ? 1 : 0, w.souls, w.bottleTaken ? 1 : 0]), bottles: this.bottles,
+      win: this.barriers?.counts(), wp: [0, 1, 2, 3].map(id => this.barriers?.ledger.paidBy(`p${id + 1}`, this.rounds.round) ?? 0),
     }
   }
 
@@ -1290,10 +1357,13 @@ export class ZombiesRuntime {
       if (taken && !well.bottleTaken) well.takeBottle()
     })
     this.bottles = w.bottles
+    if (w.win) this.barriers?.apply(w.win)
+    this.barrierPaid = w.wp?.[this.coop.id] ?? 0
   }
 
-  /** Every message from the other browser. */
-  private coopMessage(m: CoopMessage) {
+  /** Every message from the other browsers (on the host, `from` says which guest). */
+  private coopMessage(m: CoopIncoming) {
+    const from = m.from ?? 0
     switch (m.t) {
       // ---- on the guest
       case 'sync': {
@@ -1306,7 +1376,9 @@ export class ZombiesRuntime {
       case 'tick': {
         const newRound = this.lastTick && m.r > this.lastTick.r
         this.lastTick = m
-        this.partnerState = m.me
+        // Everyone else, as the host sees them; anyone missing has left.
+        for (const player of m.players) if (player.id !== this.coop.id) this.mate(player.id).state = player
+        for (const id of [...this.mates.keys()]) if (!m.players.some(player => player.id === id)) this.dropMate(id)
         if (!!m.pw !== this.power) this.setPower(!!m.pw)
         if (m.pk && !this.packBuilt) this.completeBuild('pack')
         if (m.w) this.applyWorld(m.w)
@@ -1338,39 +1410,44 @@ export class ZombiesRuntime {
       case 'box': {
         const box = this.box
         if (!box) break
-        if (m.a === 'spin' && m.r) { box.spin({ name: m.r.name, rarity: m.r.rarity as Rarity, special: m.r.special }, !!m.teddy); this.boxOwner = m.by ?? 'host'; this.music.sting('boxSpin') }
+        if (m.a === 'spin' && m.r) { box.spin({ name: m.r.name, rarity: m.r.rarity as Rarity, special: m.r.special }, !!m.teddy); this.boxOwner = m.by ?? 0; this.music.sting('boxSpin') }
         else if (m.a === 'take') box.take()
         else if (m.a === 'close') box.close()
         else if (m.a === 'move' && m.spot !== undefined && this.boxSpots[m.spot]) { box.place(this.boxSpots[m.spot]); this.makeSolid(box.root, [1.44, 0.66, 0.64], [0, 0.33, 0]) }
         break
       }
       case 'drop': this.powerups.spawn(m.k, toVector(m.p)); break
-      case 'grab': this.powerups.removeNear(m.k, toVector(m.p)); this.activate(m.k, m.by === 'guest' ? 'me' : 'partner'); break
+      case 'grab': this.powerups.removeNear(m.k, toVector(m.p)); this.activate(m.k, m.by === this.coop.id ? 'me' : 'partner'); break
       case 'boom': this.blastLook(toVector(m.p), m.r, m.k); break
       case 'gameover': if (this.state.phase === 'active') this.gameOver(); break
-      case 'start': this.hud.notify('Your friend started the game.', 3); break
+      case 'start':
+        // The host pressed Start: jump in (the page needs a click of ours to take the mouse).
+        this.hud.notify(`${this.mateName(0)} started the game.`, 3)
+        this.coopPanel?.classList.add('started')
+        break
       // ---- on the host
-      case 'me': this.partnerState = m.me; break
-      case 'shot': this.partnerShot(m); break
-      case 'knife': this.partnerKnife(m); break
-      case 'blast': this.partnerBlast(toVector(m.p), m.r, m.dmg, m.k); break
+      case 'me': this.mate(from).state = { ...m.me, id: from }; break
+      case 'shot': this.partnerShot(m, from); break
+      case 'knife': this.partnerKnife(m, from); break
+      case 'blast': this.partnerBlast(toVector(m.p), m.r, m.dmg, from, m.k); break
       case 'use':
         if (m.what === 'gate') {
           const gate = this.zones?.gates.find(g => g.spec.id === m.id)
           if (gate && gate.state === 'closed') {
             this.zones!.open(gate)
             this.emit({ kind: 'door', position: this.zones!.nearestPoint(gate, this.player.body.position), radius: 30 })
-            this.hud.notify(`Your partner opened ${gate.spec.zone}.`, 2.5)
+            this.hud.notify(`${this.mateName(from)} opened ${gate.spec.zone}.`, 2.5)
             this.coop.send({ t: 'gate', id: gate.spec.id })
           }
-        } else if (m.what === 'box') this.spinBox('guest', m.guns)
+        } else if (m.what === 'box') this.spinBox(from, m.guns)
         else if (m.what === 'box-take') this.box?.take()
-        else if (m.what === 'part') { const part = this.parts.find(p => p.id === m.id); if (part) this.takePart(part, true) }
-        else if (m.what === 'site') { const site = this.sites.get(m.build as BuildId); if (site) this.buildAt(site, true) }
+        else if (m.what === 'part') { const part = this.parts.find(p => p.id === m.id); if (part) this.takePart(part, from) }
+        else if (m.what === 'site') { const site = this.sites.get(m.build as BuildId); if (site) this.buildAt(site, from) }
         else if (m.what === 'power' && this.powerSwitch) this.workPower(this.powerSwitch)
         else if (m.what === 'trap') { const trap = this.traps[m.index]; if (trap && trap.state === 'idle' && this.power) { trap.start(); this.emit({ kind: 'pack-work', position: trap.point.clone(), radius: 20 }) } }
-        else if (m.what === 'bottle') { const well = this.wells[m.index]; if (well?.takeBottle()) { this.bottles++; this.hud.notify(`Your partner took a bottle of ink (${this.bottles} of ${this.wells.length}).`, 2.5) } }
+        else if (m.what === 'bottle') { const well = this.wells[m.index]; if (well?.takeBottle()) { this.bottles++; this.hud.notify(`${this.mateName(from)} took a bottle of ink (${this.bottles} of ${this.wells.length}).`, 2.5) } }
         else if (m.what === 'pour') this.pourInk(true)
+        else if (m.what === 'window') this.partnerRebuild(m.index, from)
         break
       case 'lure': this.partnerLures.push({ position: toVector(m.p), left: m.s }); break
       case 'shield':
@@ -1379,13 +1456,20 @@ export class ZombiesRuntime {
         this.zombieHud.shield(1)
         break
       // ---- both
-      case 'revive': this.getUp(); this.hud.notify('Your partner got you back up.', 2.5); break
+      case 'revive':
+        // On the host, a guest's revive of another guest is passed on.
+        if (this.coop.role === 'host' && m.target !== undefined && m.target !== 0) {
+          this.coop.send({ t: 'revive', by: m.by }, { to: m.target })
+          const mate = this.mates.get(m.target)
+          if (mate?.state) mate.state.dn = 0
+        } else { this.getUp(); this.hud.notify(`${m.by ?? 'A teammate'} got you back up.`, 2.5) }
+        break
       case 'soul': {
         const well = this.wells[m.i]
         if (well) { const from = toVector(m.p); this.soulStreams?.emit(from, well); this.emit({ kind: 'soul', position: from, radius: 30 }) }
         break
       }
-      case 'down': if (this.partnerState) this.partnerState.dn = m.dn; break
+      case 'down': { const mate = this.mates.get(from); if (mate?.state) mate.state.dn = m.dn; break }
     }
   }
 
@@ -1393,16 +1477,22 @@ export class ZombiesRuntime {
     this.coopStatus = status
     // Second Draft's machine is lit without power only when alone.
     this.setPower(this.power, false)
-    if (status.kind === 'paired') {
-      this.partner.load()
-      if (this.coop.role === 'host') this.sendSync()
+    if (status.kind === 'error' || status.kind === 'waiting' || status.kind === 'alone') {
+      for (const id of [...this.mates.keys()]) this.dropMate(id)
+      this.zombieHud.lastStand(null)
     }
-    if (status.kind === 'error' || status.kind === 'waiting' || status.kind === 'alone') { this.partnerState = null; this.zombieHud.lastStand(null) }
     this.renderCoopPanel()
   }
 
+  /** Someone joined or left: the host brings a newcomer up to date; whoever left goes. */
+  private coopPeer(id: number, joined: boolean) {
+    if (joined && this.coop.role === 'host') this.sendSync(id)
+    if (!joined) this.dropMate(id)
+    this.lobbyKey = ''
+  }
+
   /** The host works out a guest's shot against its zombies, and sends back the points and hit markers. */
-  private partnerShot(m: Extract<CoopMessage, { t: 'shot' }>) {
+  private partnerShot(m: Extract<CoopMessage, { t: 'shot' }>, from: number) {
     const director = this.director
     if (!director) return
     const origin = toVector(m.o), direction = toVector(m.d).normalize()
@@ -1413,41 +1503,43 @@ export class ZombiesRuntime {
     for (const each of struck) {
       const head = each.reaction.zone === 'head'
       points += pointsForHit({ lethal: each.lethal, zone: each.reaction.zone })
-      this.coop.send({ t: 'hit', pt: vec(each.reaction.point), dealt: each.dealt, id: each.zombie.id, head: head ? 1 : 0, lethal: each.lethal ? 1 : 0 })
-      if (each.lethal) { kills++; if (head) heads++; this.partnerKills++; this.killed(each.zombie.position, each.zombie, null, head, true) }
+      this.coop.send({ t: 'hit', pt: vec(each.reaction.point), dealt: each.dealt, id: each.zombie.id, head: head ? 1 : 0, lethal: each.lethal ? 1 : 0 }, { to: from })
+      if (each.lethal) { kills++; if (head) heads++; this.partnerKills++; this.killed(each.zombie.position, each.zombie, null, head, from) }
     }
     if (!m.pellet) this.bulletTrails.emit(origin, origin.clone().addScaledVector(direction, Math.min(surface?.distance ?? m.range, 60)), m.weapon)
-    if (points) this.coop.send({ t: 'award', n: this.timers.doublePoints ? points * 2 : points, k: kills, h: heads })
+    if (points) this.coop.send({ t: 'award', n: this.timers.doublePoints ? points * 2 : points, k: kills, h: heads }, { to: from })
   }
 
-  private partnerKnife(m: Extract<CoopMessage, { t: 'knife' }>) {
+  private partnerKnife(m: Extract<CoopMessage, { t: 'knife' }>, from: number) {
     const hit = this.director?.knife(toVector(m.o), toVector(m.f).normalize(), m.range, m.damage, !!this.timers.instaKill)
     if (!hit) return
     const points = pointsForHit({ lethal: hit.lethal, zone: hit.reaction.zone, knife: true })
-    this.coop.send({ t: 'hit', pt: vec(hit.reaction.point), dealt: hit.dealt, id: hit.zombie.id, head: 0, lethal: hit.lethal ? 1 : 0 })
-    if (hit.lethal) { this.partnerKills++; this.killed(hit.zombie.position, hit.zombie, null, false, true) }
-    this.coop.send({ t: 'award', n: this.timers.doublePoints ? points * 2 : points, k: hit.lethal ? 1 : 0 })
+    this.coop.send({ t: 'hit', pt: vec(hit.reaction.point), dealt: hit.dealt, id: hit.zombie.id, head: 0, lethal: hit.lethal ? 1 : 0 }, { to: from })
+    if (hit.lethal) { this.partnerKills++; this.killed(hit.zombie.position, hit.zombie, null, false, from) }
+    this.coop.send({ t: 'award', n: this.timers.doublePoints ? points * 2 : points, k: hit.lethal ? 1 : 0 }, { to: from })
   }
 
   /** A guest's grenade, doll, Ink Ray bolt, rocket or Deadline round going off: the host does the damage, the guest gets the points. */
-  private partnerBlast(at: THREE.Vector3, radius: number, damage: number, kind?: BlastKind) {
+  private partnerBlast(at: THREE.Vector3, radius: number, damage: number, from: number, kind?: BlastKind) {
     const director = this.director
     if (!director) return
     let points = 0, kills = 0
     for (const hit of director.blast(at, radius, damage)) {
       points += pointsForHit({ lethal: hit.lethal, zone: 'torso' })
-      if (hit.lethal) { kills++; this.partnerKills++; this.killed(hit.zombie.position, hit.zombie, null, false, true) }
+      if (hit.lethal) { kills++; this.partnerKills++; this.killed(hit.zombie.position, hit.zombie, null, false, from) }
     }
     this.blastLook(at, radius, kind)
-    if (points) this.coop.send({ t: 'award', n: this.timers.doublePoints ? points * 2 : points, k: kills })
+    // The other guests see it go off too.
+    this.coop.send({ t: 'boom', p: vec(at), r: radius, k: kind }, { skip: from })
+    if (points) this.coop.send({ t: 'award', n: this.timers.doublePoints ? points * 2 : points, k: kills }, { to: from })
   }
 
-  /** The box spins for the host or the guest; its gun is for whoever paid. */
-  private spinBox(by: 'host' | 'guest', guns: readonly WeaponName[] = []) {
+  /** The box spins for a player (the host 0, or a guest); its gun is for whoever paid. */
+  private spinBox(by: number, guns: readonly WeaponName[] = []) {
     const box = this.box
     if (!box) return false
-    if (box.state !== 'idle') { if (by === 'guest') this.coop.send({ t: 'award', n: PRICES.box }); return false }
-    const held = by === 'host' ? this.weapons.slots : guns.map(name => ({ id: name, name, magazine: 0, reserve: 0 }))
+    if (box.state !== 'idle') { if (by !== 0) this.coop.send({ t: 'award', n: PRICES.box }, { to: by }); return false }
+    const held = by === 0 ? this.weapons.slots : guns.map(name => ({ id: name, name, magazine: 0, reserve: 0 }))
     const teddy = box.uses >= BOX_TEDDY_AFTER && this.boxSpots.length > 1 && this.random() < BOX_TEDDY_CHANCE
     const result = rollBox(this.random, held)
     box.spin(result, teddy)
@@ -1477,11 +1569,14 @@ export class ZombiesRuntime {
     if (s.kind === 'idle') body = `<button type="button" class="coop-invite">Play with a friend</button><p>Send them a link: they play in their browser, nothing to install.</p>`
     else if (s.kind === 'connecting') body = '<p>Connecting…</p>'
     else if (s.kind === 'waiting') body = `<p><strong>Send this link to your friend:</strong></p><div class="coop-link"><input readonly value="${escapeHtml(s.link)}" aria-label="Invite link"><button type="button" class="coop-copy">Copy</button></div><p>Waiting for them to open it… <button type="button" class="coop-cancel">Cancel</button></p>`
-    else if (s.kind === 'paired') body = (s.role === 'host' ? '<p><strong>Your friend is here.</strong> Start and play together.</p>' : '<p><strong>Connected to your friend\'s game.</strong> Start to jump in.</p>')
-      + '<button type="button" class="coop-start">Start</button>'
+    else if (s.kind === 'paired') body = (s.role === 'host'
+      ? `<div class="coop-link"><input readonly value="${escapeHtml(s.link)}" aria-label="Invite link"><button type="button" class="coop-copy">Copy</button></div><div class="coop-players"></div><p>Up to four players. Start when everyone is here.</p><button type="button" class="coop-start">Start</button>`
+      : '<div class="coop-players"></div><p class="coop-wait">Waiting for the host to start.</p><button type="button" class="coop-start">Jump in</button>')
     else if (s.kind === 'alone') body = '<p>Joined. Waiting for your friend\'s game…</p>'
     else body = `<p class="coop-error">${escapeHtml(s.reason)}</p><button type="button" class="coop-invite">Try again</button>`
     panel.innerHTML = `<h3>Co-op</h3>${name}${body}`
+    this.lobbyKey = ''
+    this.renderLobby()
     panel.querySelector<HTMLInputElement>('.coop-name input')?.addEventListener('change', event => {
       try { localStorage.setItem('dead-ink-name', (event.target as HTMLInputElement).value.trim().slice(0, 16)) } catch { /* private window */ }
     })
@@ -1496,6 +1591,23 @@ export class ZombiesRuntime {
       void navigator.clipboard?.writeText(input.value).catch(() => { input.select(); document.execCommand('copy') })
       ;(event.target as HTMLButtonElement).textContent = 'Copied'
     })
+  }
+
+  /** The co-op lobby: who is here, in their colours, the host first. Cheap when nothing changed. */
+  private renderLobby() {
+    const list = this.coopPanel?.querySelector<HTMLElement>('.coop-players')
+    if (!list) return
+    const players = [{ id: this.coop.id, name: this.playerName, me: true }, ...this.matesHere().map(mate => ({ id: mate.id, name: mate.state.name, me: false }))]
+      .sort((a, b) => a.id - b.id)
+    const key = players.map(player => `${player.id}:${player.name}`).join('|') + `|${this.coop.peers.size}`
+    if (key === this.lobbyKey) return
+    this.lobbyKey = key
+    const clean = (text: string) => text.replace(/[<>&"]/g, '')
+    // Guests who joined but have not said their name yet still count.
+    const waiting = this.coop.role === 'host' ? Math.max(0, this.coop.peers.size - (players.length - 1)) : 0
+    list.innerHTML = `<strong>Players ${players.length + waiting} of 4</strong><ul>${players.map(player =>
+      `<li style="--tag: ${PLAYER_CSS[player.id] ?? PLAYER_CSS[0]}">${clean(player.name)}${player.id === 0 ? ' (host)' : ''}${player.me ? ' · you' : ''}</li>`).join('')}${
+      Array.from({ length: waiting }, () => '<li class="joining">Joining…</li>').join('')}</ul>`
   }
 
   private removeSolid(owner: THREE.Object3D) {
@@ -1825,7 +1937,7 @@ export class ZombiesRuntime {
     const box = this.box
     if (!box || this.isGuest) return
     // The teddy bear's refund goes to whoever paid.
-    if (this.paired && this.boxOwner === 'guest') this.coop.send({ t: 'award', n: PRICES.box })
+    if (this.paired && this.boxOwner !== 0) this.coop.send({ t: 'award', n: PRICES.box }, { to: this.boxOwner })
     else { this.state.points += PRICES.box; this.zombieHud.gain(PRICES.box) }
     const others = this.boxSpots.filter(spot => spot !== box.spot)
     box.place(others[Math.floor(this.random() * others.length)] ?? box.spot)
@@ -1856,7 +1968,7 @@ export class ZombiesRuntime {
     if (this.timers.deathMachine) { this.hud.notify('Not while you hold the Death Machine.', 2, true); return false }
     if (box.state === 'offering') {
       // In co-op the gun is for whoever paid.
-      if (this.paired && this.boxOwner !== (this.isGuest ? 'guest' : 'host')) return false
+      if (this.paired && this.boxOwner !== this.coop.id) return false
       const offer = box.take()
       if (this.paired) this.coop.send(this.isGuest ? { t: 'use', what: 'box-take' } : { t: 'box', a: 'take' })
       if (!offer) return false
@@ -1867,9 +1979,51 @@ export class ZombiesRuntime {
     }
     if (box.state !== 'idle' || !this.spend(PRICES.box)) return false
     if (this.isGuest) { this.coop.send({ t: 'use', what: 'box', guns: this.weapons.slots.filter(Boolean).map(s => s!.name) }); return true }
-    this.spinBox('host')
+    this.spinBox(0)
     this.invalidate()
     return true
+  }
+
+  // ---------------------------------------------------------------- boarded windows (windows.ts)
+
+  /** From inside, at a window with planks missing: hold F to nail them back, a plank at a time. */
+  private barrierTargets(targets: ActionTarget[], eye: THREE.Vector3) {
+    const barriers = this.barriers
+    if (!barriers) return
+    const left = this.isGuest ? WINDOW.roundCap - this.barrierPaid : barriers.ledger.left('p1', this.rounds.round)
+    for (const barrier of barriers.list) {
+      if (barrier.boards >= WINDOW.boards || barrier.vaulting || !barrier.inside(eye) || barrier.point.distanceTo(eye) > 2.65) continue
+      targets.push({ object: barriers.root, point: barrier.point, kind: 'mission', descending: false,
+        label: left > 0 ? 'Hold to rebuild the barrier' : 'Hold to rebuild the barrier · no more points this round',
+        use: () => { this.repairing = barrier; return true } })
+    }
+  }
+
+  /**
+   * While F (or the pad's use button) stays down at a window: a plank every WINDOW.repairSeconds, however fast
+   * F is tapped, with the gun lowered. The host nails it and pays; the guest asks the host.
+   */
+  private updateRepair(dt: number) {
+    this.repairWait = Math.max(0, this.repairWait - dt)
+    const barrier = this.repairing
+    if (!barrier) return
+    const eye = this.camera.perspective.position
+    if (!this.player.useHeld || !this.isActive() || this.down || this.revive.down || barrier.boards >= WINDOW.boards
+      || !barrier.inside(eye) || barrier.point.distanceTo(eye) > 2.65) { this.repairing = null; return }
+    this.interactionTime = Math.max(this.interactionTime, 0.2)
+    if (this.repairWait > 0) return
+    this.repairWait = WINDOW.repairSeconds
+    if (this.isGuest) { this.coop.send({ t: 'use', what: 'window', index: barrier.index }); return }
+    const paid = this.barriers!.rebuild(barrier, 'p1', this.rounds.round, this.timers.doublePoints ? 2 : 1)
+    if (paid > 0) { this.state.points += paid; this.earned += paid; this.zombieHud.gain(paid) }
+  }
+
+  /** On the host: the guest nailed a plank back; the points go to the guest. */
+  private partnerRebuild(index: number, from: number) {
+    const barrier = this.barriers?.list[index]
+    if (!barrier || !this.mates.get(from) || this.mates.get(from)!.avatar.feet.distanceTo(barrier.point) > 3.5) return
+    const paid = this.barriers!.rebuild(barrier, `p${from + 1}`, this.rounds.round, this.timers.doublePoints ? 2 : 1)
+    if (paid > 0) this.coop.send({ t: 'award', n: paid }, { to: from })
   }
 
   // ---------------------------------------------------------------- combat
@@ -1904,8 +2058,9 @@ export class ZombiesRuntime {
   }
 
   /** A kill by the player: the Brute pays and always leaves a Max Ammo; others may drop a power-up. */
-  private killed(position: THREE.Vector3, zombie?: Zombie, weapon?: WeaponItem | null, headshot = false, byPartner = false) {
-    const credit = (points: number) => byPartner ? this.coop.send({ t: 'award', n: this.timers.doublePoints ? points * 2 : points }) : this.award(points)
+  private killed(position: THREE.Vector3, zombie?: Zombie, weapon?: WeaponItem | null, headshot = false, byGuest?: number) {
+    const byPartner = byGuest !== undefined
+    const credit = (points: number) => byPartner ? this.coop.send({ t: 'award', n: this.timers.doublePoints ? points * 2 : points }, { to: byGuest }) : this.award(points)
     if (!byPartner) this.toastUnlocks(recordKill({ weapon: weapon && !weapon.special ? weapon.name : null, headshot, packed: !!weapon?.packed,
       packLevel: weapon?.packLevel, round: this.rounds.round, special: !!weapon?.special }))
     this.lastKillAt = position.clone()
@@ -1945,9 +2100,9 @@ export class ZombiesRuntime {
     this.emit({ kind: 'powerup-drop', position: at.clone(), radius: 40 })
   }
 
-  /** A power-up was walked into (on the host): its effects here, and the guest hears who took it. */
-  private grabbed(kind: PowerupKind, at: THREE.Vector3, by: 'host' | 'guest') {
-    this.activate(kind, by === 'host' ? 'me' : 'partner')
+  /** A power-up was walked into (on the host): its effects here, and the guests hear who took it. */
+  private grabbed(kind: PowerupKind, at: THREE.Vector3, by: number) {
+    this.activate(kind, by === 0 ? 'me' : 'partner')
     this.coop.send({ t: 'grab', k: kind, p: vec(at), by })
   }
 
@@ -2011,7 +2166,7 @@ export class ZombiesRuntime {
     const current = this.weapons.current
     if (this.timers.deathMachine && current?.special) current.magazine = DEATH_MACHINE_ROUNDS
     const feet = this.state.phase === 'active' && !this.down && !this.isGuest ? this.player.body.position : null
-    for (const kind of this.powerups.update(dt, feet)) this.grabbed(kind, this.player.body.position.clone(), 'host')
+    for (const kind of this.powerups.update(dt, feet)) this.grabbed(kind, this.player.body.position.clone(), 0)
     this.zombieHud.powerups((Object.keys(this.timers) as TimedPowerup[]).map(kind => ({ kind, left: this.timers[kind]! })))
   }
 
@@ -2198,9 +2353,10 @@ export class ZombiesRuntime {
     this.hud.hurt(); this.audio.play({ kind: 'damage' })
     if (cause !== 'gas') this.audio.play({ kind: 'bullet-hit', intensity: Math.min(1, amount / 50) })
     if (cause === 'fall') this.hud.notify('You fell.', 2)
-    // Alone, Second Draft gets you up; in co-op it is a faster revive instead, and your partner does it.
+    // Alone, Second Draft gets you up. In co-op you always go down into your last stand: a teammate can pick
+    // you up, and the game ends only when everyone is down (the host sees to that).
     if (dead && this.perks.has('secondDraft') && !this.paired) this.selfRevive()
-    else if (dead && this.partnerUp && !this.down) this.goDown()
+    else if (dead && this.paired && !this.down) this.goDown()
     else if (dead && !this.down) { if (this.coop.role === 'host') this.coop.send({ t: 'gameover' }); this.gameOver(source) }
     this.invalidate()
   }
@@ -2221,6 +2377,20 @@ export class ZombiesRuntime {
     this.hud.notify(`+${report.inkTotal} Ink`, 3)
     this.lowHealth.clear()
     delete document.body.dataset.deadInkOneHit
+    // As in Call of Duty: the fall, then ink, then the map from above under GAME OVER while the requiem plays.
+    this.gameOverFlight.begin(this.player.body.position.clone(), this.flightStops(), Math.max(1, this.state.round), this.player.world)
+  }
+
+  /** Where the game-over flight passes: the start, the box, the Pack-a-Punch and every perk machine. */
+  private flightStops() {
+    return [this.spawn, this.box?.root.position, this.pack?.root.position, ...this.perkMachines.map(machine => machine.root.position)]
+      .filter((point): point is THREE.Vector3 => !!point).map(point => point.clone())
+  }
+
+  /** What the HUD shows of a death here: the fall's blur until the flight, then the scores on the flight's clock. */
+  private deathView() {
+    const flight = this.gameOverFlight, death = this.death
+    return { reducedMotion: death.reducedMotion, menuVisible: flight.menuVisible, menuOpacity: flight.menuOpacity, visionLoss: flight.flying ? 0 : death.visionLoss }
   }
 
   // ---------------------------------------------------------------- zombies
@@ -2244,13 +2414,17 @@ export class ZombiesRuntime {
   private spawnZombie() {
     const director = this.director, graph = this.graph
     if (!director || !graph) return false
-    const spot = pickSpawn(graph, this.player.world, { near: 14, far: 42, eyes: [] }, this.random)
+    // Some come from the road, clawing up outside a boarded window of the mess hall and tearing their way in.
+    const entry = this.barriers?.pickSpawn(this.random) ?? null
+    const spot = entry?.rise ?? pickSpawn(graph, this.player.world, { near: 14, far: 42, eyes: [] }, this.random)
     if (!spot) return false
     const feet = this.player.body.position
     // From round 8 a few are Blots: bloated, slower, tougher, and they burst into poison gas.
     const blot = !this.storm && rollBlot(this.rounds.round, this.random)
     const health = Math.round(zombieHealth(this.rounds.round) * DIFFICULTY[this.difficulty].health * (this.storm ? STORM.health : 1) * (blot ? BLOT.health : 1))
-    return !!director.spawn(spot, health, this.storm ? 'sprint' : this.gait(), Math.atan2(feet.x - spot.x, feet.z - spot.z), true, false, blot)
+    const zombie = director.spawn(spot, health, this.storm ? 'sprint' : this.gait(), entry ? entry.barrier.facing : Math.atan2(feet.x - spot.x, feet.z - spot.z), true, false, blot)
+    if (zombie && entry) director.sendToWindow(zombie, entry.barrier)
+    return !!zombie
   }
 
   /** The Ink Storm darkens the page while it lasts. */
@@ -2335,8 +2509,9 @@ export class ZombiesRuntime {
     const lures = this.dolls.resting()
     const allLures = [...lures.map(doll => doll.position), ...this.partnerLures.map(lure => lure.position)]
     const target = (): ZombieTarget[] => allLures.length ? allLures.map((feet, i) => ({ id: `doll-${i}`, feet, alive: true }))
-      : [{ id: 'p1', feet: this.player.body.position, alive: this.state.phase === 'active' && !this.down },
-        ...(this.coop.role === 'host' && this.partnerUp ? [{ id: 'p2', feet: this.partner.feet, alive: true }] : [])]
+      // After the game ends the horde still shambles about, closing in on where you fell (as in Call of Duty).
+      : [{ id: 'p1', feet: this.player.body.position, alive: (this.state.phase === 'active' && !this.down) || this.gameOverFlight.active },
+        ...(this.coop.role === 'host' && this.paired ? this.matesHere().filter(mate => mate.state.dn === 0).map(mate => ({ id: `p${mate.id + 1}`, feet: mate.avatar.feet, alive: true })) : [])]
     if (active && this.director) {
       this.state.elapsed += dt
       const body = this.player.body
@@ -2372,7 +2547,7 @@ export class ZombiesRuntime {
     if (!this.director) return
     {
       // Rounds: announce, feed zombies in, and hand back any that found nowhere to stand.
-      const events = stepRounds(this.rounds, dt, this.director.aliveCount, 1, DIFFICULTY[this.difficulty].spawnDelay * (this.storm ? STORM.spawnDelay : 1))
+      const events = stepRounds(this.rounds, dt, this.director.aliveCount, 1 + this.matesHere().length, DIFFICULTY[this.difficulty].spawnDelay * (this.storm ? STORM.spawnDelay : 1))
       this.state.round = this.rounds.round
       if (events.roundStarted) {
         this.dropper.newRound(); this.sting('roundStart')
@@ -2487,6 +2662,7 @@ export class ZombiesRuntime {
       this.blood.update(dt); this.impacts.update(dt); this.riseMarks.update(dt); this.sparks.update(dt); this.shockwaves.update(dt)
       this.explosions.update(dt); this.nukeCloud.update(dt)
       this.zones?.update(dt)
+      this.barriers?.update(dt); this.updateRepair(dt)
       this.grenadeCooldown = Math.max(0, this.grenadeCooldown - dt)
       for (const pending of [...this.pendingThrows]) if ((pending.timer -= dt) <= 0) { this.pendingThrows.splice(this.pendingThrows.indexOf(pending), 1); pending.launch() }
       for (const at of this.grenades.update(dt)) this.grenadeBlast(at)
@@ -2529,11 +2705,17 @@ export class ZombiesRuntime {
     }
     deathVisible = this.death.active && this.player.enabled && !this.player.immersive
     if (deathVisible) {
-      if (this.death.update(document.hidden ? 0 : dt, this.camera.perspective, this.player.world)) this.audio.play({ kind: 'player-fall' })
+      // The fall until the screen has gone to ink; then the flight has the camera. The fall's clock stops
+      // there, so the horde keeps moving and frames keep coming for as long as the flight runs.
+      const flying = this.gameOverFlight.flying
+      if (!flying && this.death.update(document.hidden ? 0 : dt, this.camera.perspective, this.player.world)) this.audio.play({ kind: 'player-fall' })
+      this.gameOverFlight.update(document.hidden ? 0 : dt, this.camera.perspective, this.hud.reducedMotion)
+      if (flying) document.body.dataset.deadInkOver = 'flying'
       this.weapons.updateDeath(this.death.elapsed, this.death.reducedMotion, this.death.hitKick, this.death.hitSide)
-      this.hud.setDeath(this.death)
+      this.hud.setDeath(this.deathView())
     } else {
       if (this.death.active) { this.death.reset(); this.weapons.resetDeath(); this.hud.clearDeath() }
+      if (this.gameOverFlight.active) { this.gameOverFlight.end(); delete document.body.dataset.deadInkOver }
       this.weapons.update(dt, { active: reactionActive && this.interactionTime === 0 && (!this.revive.down || this.revive.settled), climbing: this.player.actions.traversing,
         moving: this.player.body.velocity.length(), aiming: this.aiming, reducedMotion: this.hud.reducedMotion, feet: this.player.body.position, hitPose })
     }
@@ -2563,11 +2745,15 @@ export class ZombiesRuntime {
     return active || this.death.running
   }
 
-  /** Mini map teammates: the co-op partner while connected. */
+  /** Mini map teammates: every other player while connected, in their colour. */
   private minimapMates() {
-    const partner = this.paired ? this.partnerState : null
     this.mapMates.length = 0
-    if (partner) { this.mapMate.position.copy(this.partner.feet); this.mapMate.yaw = partner.yaw; this.mapMates.push(this.mapMate) }
+    if (!this.paired) return this.mapMates
+    for (const mate of this.matesHere()) {
+      const dot = this.mapMatePool[this.mapMates.length] ??= { position: new THREE.Vector3(), yaw: 0, color: mate.css }
+      dot.position.copy(mate.avatar.feet); dot.yaw = mate.state.yaw; dot.color = mate.css
+      this.mapMates.push(dot)
+    }
     return this.mapMates
   }
 
@@ -2588,13 +2774,14 @@ export class ZombiesRuntime {
     for (const skull of this.skulls) skull.object.removeFromParent()
     delete document.body.dataset.deadInkStorm
     delete document.body.dataset.deadInkOneHit
-    this.coop.close(); this.partner.dispose(); this.partnerTag.dispose(); this.powerMarker.dispose(); this.downMarker.dispose(); this.syringe.dispose()
+    this.coop.close(); for (const id of [...this.mates.keys()]) this.dropMate(id); this.powerMarker.dispose(); this.syringe.dispose(); this.gameOverFlight.dispose(); delete document.body.dataset.deadInkOver
     for (const part of this.parts) part.dispose()
     for (const site of this.sites.values()) site.dispose()
     this.powerSwitch?.dispose()
     for (const trap of this.traps) trap.dispose()
     for (const well of this.wells) well.dispose()
     this.soulStreams?.dispose()
+    this.barriers?.dispose()
     document.body.style.removeProperty('--dead-ink-gas')
     this.audio.dispose(); this.music.dispose(); this.hud.dispose()
     this.player.movementLocked = false; this.player.onPlayingChange = () => {}; this.player.lookSensitivity = () => 1
