@@ -5,7 +5,7 @@ import type { WallSpot } from './placement'
 /**
  * The Ink Doll, Dead Ink's Monkey Bomb: a wind-up paper toy that bangs its cymbals where it lands. Every
  * zombie drops what it is doing and goes for it, then it goes off and takes them with it. Bought off a
- * wall in the warehouse, three at a time; a Max Ammo tops them up. Thrown with T.
+ * wall in the warehouse, three at a time; a Max Ammo tops them up. Thrown with E (or T, which the pad sends).
  */
 export const DECOY = { price: 3000, carry: 3, lure: 7, radius: 7, cooldown: 1 } as const
 

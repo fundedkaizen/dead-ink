@@ -1,5 +1,5 @@
 import { WEAPON_RULES } from '../balance'
-import { rollRarity, type Rarity } from '../loot'
+import { rollRarity, weaponRules, type Rarity } from '../loot'
 import type { WeaponItem, WeaponName } from '../types'
 import type { HitZone } from '../hit-reactions'
 import { weighted, type Random } from '../shared/random'
@@ -20,10 +20,21 @@ export function pointsForHit(hit: { lethal: boolean; zone: HitZone; knife?: bool
 export const ZOMBIE_SLOTS = 2
 /** Spare magazines that come with a gun from a wall or the box. */
 export const RESERVE_MAGAZINES = 4
+/** The Ink Rocket carries rockets, not magazines: ten spare, sixteen for the Press Ram. */
+export const ROCKET_RESERVE = { fresh: 10, packed: 16 } as const
+
+/**
+ * The spare ammo a gun is filled to, from the box or a wall, by the Pack-a-Punch or a Max Ammo: four
+ * magazines, twice that upgraded (an upgrade can hold more to a magazine); the Ink Rocket its own count.
+ */
+export function spareAmmo(item: Pick<WeaponItem, 'name' | 'packed' | 'packLevel' | 'rarity'>) {
+  if (item.name === 'rocket') return item.packed ? ROCKET_RESERVE.packed : ROCKET_RESERVE.fresh
+  return weaponRules(item).capacity * RESERVE_MAGAZINES * (item.packed ? 2 : 1)
+}
 
 export const freshWeapon = (id: string, name: WeaponName, rarity?: Rarity): WeaponItem => {
   const capacity = WEAPON_RULES[name].capacity
-  return { id, name, magazine: capacity, reserve: capacity * RESERVE_MAGAZINES, ...(rarity ? { rarity } : {}) }
+  return { id, name, magazine: capacity, reserve: spareAmmo({ name }), ...(rarity ? { rarity } : {}) }
 }
 
 /** The starting pistol: Call of Duty starts you with one pistol and two spare magazines' worth more. */
@@ -55,9 +66,9 @@ export function wallOffer(name: WeaponName, price: number, slots: readonly (Weap
 
 /**
  * The Mystery Box's weapon table. Snipers and shotguns are the exciting draws; the pistol is the
- * letdown every box has. Weights are relative.
+ * letdown every box has; the Ink Rocket, only ever from the box, the rarest pull. Weights are relative.
  */
-export const BOX_WEIGHTS: Record<WeaponName, number> = { ak: 24, smg: 22, shotgun: 22, sniper: 18, pistol: 14, magnum: 12, lmg: 10 }
+export const BOX_WEIGHTS: Record<WeaponName, number> = { ak: 24, smg: 22, shotgun: 22, sniper: 18, pistol: 14, magnum: 12, lmg: 10, rocket: 5 }
 /** The chance a box roll is the Ink Ray, Dead Ink's wonder weapon (Call of Duty's Ray Gun is a rare draw too). */
 export const RAY_GUN_CHANCE = 0.05
 /**

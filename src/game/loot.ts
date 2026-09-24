@@ -78,11 +78,22 @@ export const PACKED = { damage: [2, 3.2, 4.8] } as const
 export function pierceOf(item: { name: WeaponName; special?: string; packLevel?: number; packed?: boolean }) {
   if (item.special === 'deathMachine') return 2
   const level = item.packLevel ?? (item.packed ? 1 : 0)
+  // The Deadline's rounds are explosive: each bursts in the first body it strikes (Mustang & Sally).
+  if (item.name === 'magnum' && level > 0) return 1
   const base = item.name === 'sniper' ? 3 : item.name === 'magnum' || item.name === 'lmg' ? 2 : 1
   return base + (level > 0 ? (item.name === 'sniper' ? 2 : 1) : 0)
 }
 export const PACKED_NAMES: Record<WeaponName, string> = { pistol: 'Fountain Pen', smg: 'Inkjet', ak: 'Blotter', shotgun: 'Splatter', sniper: 'Quill',
-  magnum: 'Deadline', lmg: 'Printing Press' }
+  magnum: 'Deadline', lmg: 'Printing Press', rocket: 'Press Ram' }
+/**
+ * Two upgrades change a gun's handling, as in Call of Duty. The Deadline is a pair of Magnums, one in
+ * each hand, as Mustang & Sally: six rounds a gun, and the two take turns, so shots come quicker. The
+ * Press Ram loads two rockets.
+ */
+export const PACKED_HANDLING: Partial<Record<WeaponName, { capacity: number; interval?: number }>> = {
+  magnum: { capacity: 12, interval: 0.3 },
+  rocket: { capacity: 2 },
+}
 
 export function weaponRules(item: { name: WeaponName; rarity?: Rarity; special?: 'deathMachine' | 'rayGun'; packed?: boolean; packLevel?: number }): ScaledRules {
   const base = WEAPON_RULES[item.name]
@@ -101,6 +112,8 @@ export function weaponRules(item: { name: WeaponName; rarity?: Rarity; special?:
     const level = Math.max(1, Math.min(3, item.packLevel ?? 1))
     rules.label = `${PACKED_NAMES[item.name]}${level > 1 ? ` ${'I'.repeat(level)}` : ''}`
     rules.damage *= PACKED.damage[level - 1]
+    const handling = PACKED_HANDLING[item.name]
+    if (handling) { rules.capacity = handling.capacity; rules.interval = handling.interval ?? rules.interval }
   }
   return rules
 }

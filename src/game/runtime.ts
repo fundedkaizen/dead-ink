@@ -119,6 +119,7 @@ export class MissionRuntime {
       this.weapons.cancel(); this.aiming = false; this.interactionTime = 0.25
       if (target.kind === 'door' || target.kind === 'ladder') this.emit({ kind: target.kind, position: target.point, radius: target.kind === 'door' ? 8 : 5 }, true)
       if (target.kind === 'door') this.coop?.doorUsed(target.object)
+      if (target.kind === 'zipline') this.audio.play({ kind: 'zipline', duration: this.player.actions.rideSeconds })
     }
     const options = { signal: this.abort.signal }
     document.querySelector('#walk-start')!.addEventListener('click', () => { void this.audio.unlock() }, options)

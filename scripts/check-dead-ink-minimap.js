@@ -36,7 +36,7 @@ const status = window.__minimapCheck = { done: false, results }
   const size = Math.round(rect.width), perMetre = rect.width / 2 / 35
   const wide = innerWidth > 900 && innerHeight > 700
   check(wide ? size === 180 : size < 180 && size >= 110, `it is ${wide ? '180' : 'smaller than 180'} px across here`, `${size} px at ${innerWidth}x${innerHeight}`)
-  check(rect.left < 30 && rect.top < 30, 'in the top-left corner', `${rect.left},${rect.top}`)
+  check(rect.right > innerWidth - 30 && rect.top < 30, 'in the top-right corner', `${rect.right},${rect.top}`)
   status.size = size
   status.buildMs = Math.round(mm.buildMs)
 
@@ -182,7 +182,8 @@ const status = window.__minimapCheck = { done: false, results }
     check(!overlaps(mapBox, element.getBoundingClientRect()), `the map clears the ${name}`, JSON.stringify(element.getBoundingClientRect()))
   }
   const round = document.querySelector('.dead-ink-round').getBoundingClientRect()
-  check(round.top >= mapBox.bottom && round.left < mapBox.right, 'the round tally sits under the map', `${round.top} vs ${mapBox.bottom}`)
+  check(mapBox.right > innerWidth - 40 && mapBox.top < 40, 'the map sits in the top right corner', JSON.stringify(mapBox))
+  check(round.left < 60 && round.top < 60, 'the round tally keeps the top left', `${round.left}, ${round.top}`)
   m.coop.peers.delete(1); m.dropMate(1)
   m.timers = {}
 

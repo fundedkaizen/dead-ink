@@ -69,6 +69,8 @@ export type ZoneGate = {
   opened: THREE.Object3D | null
   ownOpened: boolean
   gap: number | null
+  /** Graph cuts along the swung-open leaves of a gate made here (the baked graph never saw them). */
+  leaves: number[]
   state: 'closed' | 'opening' | 'open'
   sink: number
 }
@@ -92,7 +94,7 @@ export class ZoneGates {
       const [x, z] = spec.centre
       const existing = spec.replaces ? scene.getObjectByName(spec.replaces) ?? null : null
       const opened = existing ?? gate(`${spec.zone} gate · open`, x, z, spec.width, spec.angle, true)
-      this.gates.push({ spec, segment: gateSegment(spec), closed: closedGate(spec), opened, ownOpened: !existing, gap: null, state: 'open', sink: 0 })
+      this.gates.push({ spec, segment: gateSegment(spec), closed: closedGate(spec), opened, ownOpened: !existing, gap: null, leaves: [], state: 'open', sink: 0 })
     }
   }
 
@@ -110,6 +112,7 @@ export class ZoneGates {
         this.world.removeObject(g.opened)
         if (g.ownOpened) g.opened.removeFromParent()
       }
+      this.uncutLeaves(g)
       g.gap = this.graph.closeGap(g.segment[0], g.segment[1])
       g.state = 'closed'
     }
@@ -125,10 +128,30 @@ export class ZoneGates {
       g.opened.visible = true
       if (g.ownOpened) this.scene.add(g.opened)
       this.world.addObject(g.opened)
+      if (g.ownOpened) this.cutLeaves(g)
     }
     g.state = 'opening'
     g.sink = 0
     return true
+  }
+
+  /**
+   * A gate made here swings its leaves out across the approach, where the baked graph has open ground:
+   * the graph is cut along each leaf, so zombies go round its end instead of into it. The compound's own
+   * open gates were there when the graph was baked.
+   */
+  private cutLeaves(g: ZoneGate) {
+    const opened = g.opened!
+    opened.updateMatrixWorld(true)
+    for (const panel of (opened.userData.collisionPanels ?? []) as { a: [number, number]; b: [number, number] }[]) {
+      const a = opened.localToWorld(new THREE.Vector3(panel.a[0], 0, panel.a[1])), b = opened.localToWorld(new THREE.Vector3(panel.b[0], 0, panel.b[1]))
+      g.leaves.push(this.graph.closeGap(a, b))
+    }
+  }
+
+  private uncutLeaves(g: ZoneGate) {
+    for (const key of g.leaves) this.graph.openGap(key)
+    g.leaves.length = 0
   }
 
   update(dt: number) {
@@ -157,6 +180,7 @@ export class ZoneGates {
         if (g.ownOpened) g.opened.removeFromParent()
         else { g.opened.visible = true; this.world.addObject(g.opened) }
       }
+      this.uncutLeaves(g)
       if (g.gap !== null) this.graph.openGap(g.gap)
     }
     for (const run of this.fences) { this.world.removeObject(run); run.removeFromParent() }

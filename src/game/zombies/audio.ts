@@ -40,10 +40,13 @@ export class DeadInkAudio extends MissionAudio {
     const context = this.context
     const handled = ['zombie-groan', 'zombie-scream', 'zombie-snarl', 'zombie-swipe', 'zombie-rise', 'powerup-drop', 'powerup-grab', 'nuke', 'round-start', 'round-end',
       'perk-drink', 'perk-jingle', 'pack-work', 'pack-ready', 'boss-roar', 'boss-growl', 'boss-slam', 'box-leave', 'box-open', 'box-spin', 'box-offer', 'ink-burst', 'grenade-blast', 'grenade-throw',
-      'headshot-pop', 'gore-rip', 'gib', 'gas-burst', 'blot-gurgle', 'storm', 'doll-clap', 'heartbeat', 'shot-raygun', 'soul', 'soul-in', 'board-tear', 'board-hammer']
+      'headshot-pop', 'gore-rip', 'gib', 'gas-burst', 'blot-gurgle', 'storm', 'doll-clap', 'heartbeat', 'shot-raygun', 'soul', 'soul-in', 'board-tear', 'board-hammer',
+      'shot-rocket', 'rocket-boom', 'round-burst']
     if (event.kind === 'door' && this.context && this.active && !this.muted) this.slam(event)
     // The Magnum: the usual report with a chest punch, a hard crack and a rolling echo under it.
-    if (event.kind === 'shot-magnum' && context && this.master && this.active && !this.muted && !this.disposed && !this.dying) this.magnum()
+    // Only your own Magnum (fired at your position): a teammate's comes from where they stand, without the chest punch.
+    const own = !event.position || event.position.distanceTo(this.listenerPosition) < 2
+    if (event.kind === 'shot-magnum' && own && context && this.master && this.active && !this.muted && !this.disposed && !this.dying) this.magnum()
     // Upgraded guns, as in Call of Duty: the gun's own report with a bright electric zap on top.
     if (event.packed && event.kind.startsWith('shot-') && event.kind !== 'shot-raygun' && context && this.master && this.active && !this.muted && !this.disposed && !this.dying) this.zap(event)
     if (!handled.includes(event.kind)) { super.play(FOOTSTEP_VOLUME[event.kind] ? { ...event, volume: FOOTSTEP_VOLUME[event.kind] } : event); return }
@@ -94,6 +97,11 @@ export class DeadInkAudio extends MissionAudio {
       case 'gas-burst': this.pop(event, 0.4); this.splatter(event, 5, 0.12); this.hiss(event); break
       case 'blot-gurgle': this.gurgle(event); break
       case 'shot-raygun': this.rayGun(event); break
+      // The Ink Rocket: the tube's thump and the motor's whoosh; its burst, a grenade's boom with a harder crack.
+      case 'shot-rocket': this.launch(event); break
+      case 'rocket-boom': this.boom(event); this.blastCrack(event, 0.9, 0.16); this.dirt(event); break
+      // A Deadline round going off: a small, hard pop.
+      case 'round-burst': this.blastCrack(event, 0.55, 0.1); this.thump(event, 0.5); break
       // A soul tearing loose and flying off; its arrival: a gulp in the ink and a small bright note.
       case 'soul': this.whoosh(event); this.wail(event); break
       case 'soul-in': this.pop(event, 0.7); this.arpeggio(event, [784, 1174.7], 0.06, 'triangle', 0.12, 0.6); break
@@ -148,19 +156,87 @@ export class DeadInkAudio extends MissionAudio {
     this.track(punch, [body, ...(bodyPanner ? [bodyPanner] : [])]); punch.start(t); punch.stop(t + 0.15)
   }
 
-  /** The Pack-a-Punch layer: a quick bright chirp falling fast, with a ring a fifth above. */
+  /**
+   * The Ink Rocket leaving the tube: a hollow thump, then the motor, a roar of noise whose band climbs as
+   * the rocket gets up to speed and fades as it flies off, with a hiss under it.
+   */
+  private launch(event: SoundEvent) {
+    const context = this.context!, t = context.currentTime
+    this.thump(event, 0.9)
+    const { gain, panner } = this.output(event)
+    const roar = context.createBufferSource(), band = context.createBiquadFilter()
+    roar.buffer = this.noise; roar.playbackRate.value = 1.4
+    band.type = 'bandpass'; band.Q.value = 1.1
+    band.frequency.setValueAtTime(380, t); band.frequency.exponentialRampToValueAtTime(2600, t + 0.3); band.frequency.exponentialRampToValueAtTime(900, t + 1.1)
+    gain.gain.setValueAtTime(0.0001, t); gain.gain.exponentialRampToValueAtTime(0.75, t + 0.04); gain.gain.exponentialRampToValueAtTime(0.25, t + 0.45); gain.gain.exponentialRampToValueAtTime(0.0001, t + 1.2)
+    roar.connect(band).connect(gain)
+    this.track(roar, [band, gain, ...(panner ? [panner] : [])]); roar.start(t); roar.stop(t + 1.25)
+    const { gain: air, panner: airPanner } = this.output(event)
+    const hiss = context.createBufferSource(), high = context.createBiquadFilter()
+    hiss.buffer = this.noise; hiss.playbackRate.value = 2.4
+    high.type = 'highpass'; high.frequency.value = 3200
+    air.gain.setValueAtTime(0.0001, t); air.gain.exponentialRampToValueAtTime(0.22, t + 0.02); air.gain.exponentialRampToValueAtTime(0.0001, t + 0.8)
+    hiss.connect(high).connect(air)
+    this.track(hiss, [high, air, ...(airPanner ? [airPanner] : [])], 'incidental'); hiss.start(t); hiss.stop(t + 0.82)
+    this.duckMusic()
+  }
+
+  /** A blast's hard crack: a very short burst of bright noise, `length` seconds. */
+  private blastCrack(event: SoundEvent, level: number, length: number) {
+    const context = this.context!, t = context.currentTime
+    const { gain, panner } = this.output(event)
+    const snap = context.createBufferSource(), high = context.createBiquadFilter()
+    snap.buffer = this.noise; snap.playbackRate.value = 1.6
+    high.type = 'highpass'; high.frequency.value = 1400
+    gain.gain.setValueAtTime(0.0001, t); gain.gain.exponentialRampToValueAtTime(level, t + 0.003); gain.gain.exponentialRampToValueAtTime(0.0001, t + length)
+    snap.connect(high).connect(gain)
+    this.track(snap, [high, gain, ...(panner ? [panner] : [])]); snap.start(t); snap.stop(t + length + 0.02)
+  }
+
+  /** A low thump, felt more than heard: a sine dropping fast. */
+  private thump(event: SoundEvent, level: number) {
+    const context = this.context!, t = context.currentTime
+    const { gain, panner } = this.output(event)
+    const low = context.createOscillator()
+    low.type = 'sine'; low.frequency.setValueAtTime(110, t); low.frequency.exponentialRampToValueAtTime(38, t + 0.24)
+    gain.gain.setValueAtTime(0.0001, t); gain.gain.exponentialRampToValueAtTime(level, t + 0.006); gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.3)
+    low.connect(gain)
+    this.track(low, [gain, ...(panner ? [panner] : [])]); low.start(t); low.stop(t + 0.32)
+  }
+
+  /**
+   * The Pack-a-Punch layer, as upgraded guns sound in Call of Duty: under the gun's own report, a resonant
+   * synth "pew" falling from a whistle to a growl, a bright ring at its start and a short low punch. Loud
+   * enough to hear over the shot, short enough for a machine gun.
+   */
   private zap(event: SoundEvent) {
     const context = this.context!, t = context.currentTime
-    for (const ratio of [1, 1.5]) {
-      const { gain, panner } = this.output(event)
-      const tone = context.createOscillator()
-      tone.type = ratio === 1 ? 'triangle' : 'sine'
-      tone.frequency.setValueAtTime(2600 * ratio, t); tone.frequency.exponentialRampToValueAtTime(620 * ratio, t + 0.08)
-      gain.gain.setValueAtTime(0.0001, t); gain.gain.exponentialRampToValueAtTime(ratio === 1 ? 0.2 : 0.09, t + 0.003); gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.11)
-      tone.connect(gain)
-      this.track(tone, [gain, ...(panner ? [panner] : [])], 'incidental'); tone.start(t); tone.stop(t + 0.12)
-    }
+    const level = Math.min(3, event.packed ?? 1)
+    const { gain, panner } = this.output(event)
+    const pew = context.createOscillator(), filter = context.createBiquadFilter()
+    pew.type = 'sawtooth'
+    pew.frequency.setValueAtTime(1400 + level * 150, t); pew.frequency.exponentialRampToValueAtTime(280, t + 0.17)
+    filter.type = 'lowpass'; filter.Q.value = 9
+    filter.frequency.setValueAtTime(5200, t); filter.frequency.exponentialRampToValueAtTime(700, t + 0.18)
+    gain.gain.setValueAtTime(0.0001, t); gain.gain.exponentialRampToValueAtTime(0.32, t + 0.004); gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.21)
+    pew.connect(filter).connect(gain)
+    this.track(pew, [filter, gain, ...(panner ? [panner] : [])], 'incidental'); pew.start(t); pew.stop(t + 0.22)
+    const { gain: ring, panner: ringPanner } = this.output(event)
+    const tsing = context.createOscillator()
+    tsing.type = 'sine'
+    tsing.frequency.setValueAtTime(3300, t); tsing.frequency.exponentialRampToValueAtTime(1800, t + 0.07)
+    ring.gain.setValueAtTime(0.0001, t); ring.gain.exponentialRampToValueAtTime(0.13, t + 0.003); ring.gain.exponentialRampToValueAtTime(0.0001, t + 0.09)
+    tsing.connect(ring)
+    this.track(tsing, [ring, ...(ringPanner ? [ringPanner] : [])], 'incidental'); tsing.start(t); tsing.stop(t + 0.1)
+    const { gain: body, panner: bodyPanner } = this.output(event)
+    const punch = context.createOscillator()
+    punch.type = 'sine'
+    punch.frequency.setValueAtTime(140, t); punch.frequency.exponentialRampToValueAtTime(60, t + 0.08)
+    body.gain.setValueAtTime(0.0001, t); body.gain.exponentialRampToValueAtTime(0.3, t + 0.004); body.gain.exponentialRampToValueAtTime(0.0001, t + 0.1)
+    punch.connect(body)
+    this.track(punch, [body, ...(bodyPanner ? [bodyPanner] : [])], 'incidental'); punch.start(t); punch.stop(t + 0.11)
   }
+
 
   /** A plank torn off: the nails' squeal, a sharp crack, splinters, and the plank's own hollow knock. */
   private crack(event: SoundEvent) {

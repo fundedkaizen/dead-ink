@@ -9,6 +9,7 @@ import { createRarityBeam } from '../render/ink'
 import type { EquippedCosmetics, KnifeId } from './zombies/cosmetics/catalogue'
 import { CHARM_ANCHORS, CHARM_LENGTH, KNIFE_BUILDERS, applyCamo, buildCharm, buildWatch, removeCamo } from './zombies/cosmetics/models'
 import { applyDragonSkin, removeDragonSkin } from './zombies/mythic'
+import { Offhand, firingHand, isAkimbo, type Kick } from './akimbo'
 export { WEAPON_RULES } from './balance'
 
 const up = new THREE.Vector3(0, 1, 0)
@@ -48,6 +49,7 @@ const FEEL: Record<WeaponName, { kick: number; roll: number; shake: number; flas
   sniper: { kick: 2.1, roll: 0.075, shake: 0.02, flash: 1.35 },
   magnum: { kick: 1.8, roll: 0.09, shake: 0.014, flash: 1.35 },
   lmg: { kick: 0.75, roll: 0.04, shake: 0.006, flash: 1.15 },
+  rocket: { kick: 2.3, roll: 0.06, shake: 0.03, flash: 2.1 },
 }
 const DEATH_MACHINE_FEEL = { kick: 0.3, roll: 0.02, shake: 0.002, flash: 1.1 }
 /** Where a watch face points: up and toward the eye, so a glance at the wrist shows it. */
@@ -81,6 +83,12 @@ const THROW_PATH: [number, V3, V3][] = [
   [THROW_TIME, [0.0, -0.45, -0.46], [0.9, Math.PI - 0.2, -0.3]],
 ]
 const copyItem = (item: WeaponItem): WeaponItem => ({ ...item, ...(item.position ? { position: [...item.position] } : {}) })
+/** Where the wrist sits in a grip mount's space: the firing hand's, and (the other side) the Deadline's left hand's. */
+const GRIP_WRIST = new THREE.Vector3(-0.029, -0.02, -0.033), LEFT_WRIST = new THREE.Vector3(0.029, -0.02, -0.033)
+/** The Ink Rocket rides on the shoulder: its grip further out and lower than a rifle's, turned out a little so its side and warhead show. */
+const ROCKET_GRIP = new THREE.Vector3(0.23, -0.27, -0.32), ROCKET_TURN = 0.08
+/** The Deadline's two Magnums sit a little wider apart than one pistol does. */
+const AKIMBO_GRIP = new THREE.Vector3(0.19, -0.215, -0.43)
 const smooth = (value: number, a: number, b: number) => THREE.MathUtils.smoothstep(value, a, b)
 type LooseWeapon = { item: WeaponItem; model: Gun }
 /** A spent magazine dropped during a reload: it falls, lands, and is gone a few seconds later. */
@@ -171,6 +179,8 @@ export class FirstPersonWeapons {
   private cosmetics: EquippedCosmetics | null = null
   private watch: Gun | null = null
   private charm: { pivot: THREE.Group; model: Gun; bob: THREE.Vector3; previous: THREE.Vector3; anchor: THREE.Vector3; ready: boolean } | null = null
+  /** The Deadline's second Magnum, in the left hand (akimbo.ts); null for every other gun. */
+  private offhand: Offhand | null = null
 
   constructor(private context: WeaponContext) {
     this.root.name = 'First-person stickman arms'
@@ -281,6 +291,8 @@ export class FirstPersonWeapons {
   private setHeldModel(swap = false) {
     this.scopeZoom = SNIPER_ZOOM.initial
     this.clearSwap()
+    this.offhand?.dispose()
+    this.offhand = null
     const animate = swap && !this.frame.reducedMotion
     let outgoing: Gun | null = null
     if (this.model && animate) outgoing = this.model
@@ -304,6 +316,8 @@ export class FirstPersonWeapons {
       this.flash.position.copy(this.model.userData.muzzle).z += 0.035
       this.dress()
       if (outgoing) this.model.visible = false
+      // The Deadline: a second Magnum in the left hand, the right hand's mirror image.
+      if (isAkimbo(this.current)) this.offhand = new Offhand(this.root, createMissionGun(this.current.name), this.model, this.rightHand.clone(), this.flash.clone())
     }
     if (animate) this.swap = { time: outgoing ? 0 : SWAP_OUT, outgoing }
     this.root.visible = this.enabled && !!this.current
@@ -463,6 +477,7 @@ export class FirstPersonWeapons {
     for (const [part, position] of this.partRest) part.position.copy(position)
     for (const [part, rotation] of this.partRotation) part.rotation.copy(rotation)
     this.kick.value = this.kick.velocity = this.kick.roll = this.kick.rollVelocity = 0
+    this.offhand?.reset()
     this.shake.amplitude = 0
     this.rollCamera(0)
     this.idleTime = 0
@@ -633,6 +648,7 @@ export class FirstPersonWeapons {
     this.barrelSpeed = THREE.MathUtils.damp(this.barrelSpeed, this.held && this.current?.special ? 42 : 0, 5, delta)
     this.barrelAngle = (this.barrelAngle + this.barrelSpeed * delta) % (Math.PI * 2)
     this.flashTime = Math.max(0, this.flashTime - delta)
+    if (this.offhand) this.offhand.flashTime = Math.max(0, this.offhand.flashTime - delta)
     this.reducedMotion = frame.reducedMotion
     if (this.reloadElapsed !== null && this.current) {
       this.reloadElapsed += delta
@@ -661,6 +677,8 @@ export class FirstPersonWeapons {
     this.pose(delta)
     this.updateFalling(delta)
     const item = this.current
+    // A launcher reloads by itself once its rocket is away, as launchers do in Call of Duty.
+    if (item?.name === 'rocket' && item.magazine === 0 && item.reserve > 0 && this.cooldown <= 0 && !this.reloading && this.switchTime <= 0) this.reload()
     if (item && this.cooldown <= 0 && !this.reloading && this.switchTime <= 0 && !this.obstructed &&
         (this.pendingShot || (this.held && WEAPON_RULES[item.name].automatic))) this.shoot(item)
     else if (this.settle.pitch || this.settle.yaw) {
@@ -676,6 +694,11 @@ export class FirstPersonWeapons {
     this.flash.visible = this.flashTime > 0
     // A snappy flash: biggest on the frame of the shot, shrinking over its two or three frames.
     if (this.flash.visible) this.flash.scale.setScalar(this.flashScale * (0.55 + 0.9 * this.flashTime / 0.05))
+    const offhand = this.offhand
+    if (offhand) {
+      offhand.flash.visible = offhand.flashTime > 0
+      if (offhand.flash.visible) offhand.flash.scale.setScalar(offhand.flashScale * (0.55 + 0.9 * offhand.flashTime / 0.05))
+    }
     this.shakeCamera(delta)
     this.lastLook = new THREE.Euler().setFromQuaternion(this.context.camera.quaternion, 'YXZ')
   }
@@ -702,9 +725,13 @@ export class FirstPersonWeapons {
     if (!targetY && Math.abs(this.sway.y) < 1e-6) this.sway.y = 0
   }
 
-  /** Sub-stepped so the stiff kick spring stays stable at 30 FPS and below. */
+  /** Sub-stepped so the stiff kick spring stays stable at 30 FPS and below. The Deadline's left hand has its own. */
   private stepSprings(delta: number) {
-    const kick = this.kick
+    this.stepSpring(this.kick, delta)
+    if (this.offhand) this.stepSpring(this.offhand.kick, delta)
+  }
+
+  private stepSpring(kick: Kick, delta: number) {
     if (!kick.value && !kick.velocity && !kick.roll && !kick.rollVelocity) return
     const steps = Math.max(1, Math.ceil(delta * 240)), h = delta / steps
     for (let i = 0; i < steps; i++) {
@@ -818,6 +845,9 @@ export class FirstPersonWeapons {
   }
 
   private gripPosition() {
+    // Neither can aim: the launcher on the shoulder, the Deadline's pair spread a little wider.
+    if (this.current?.name === 'rocket') return ROCKET_GRIP.clone()
+    if (this.offhand) return AKIMBO_GRIP.clone()
     const rifle = this.current?.name === 'ak' || this.current?.name === 'sniper' || this.current?.name === 'shotgun' || this.current?.name === 'lmg'
     return new THREE.Vector3(THREE.MathUtils.lerp(rifle ? 0.17 : 0.16, 0, this.aim),
       THREE.MathUtils.lerp(rifle ? -0.23 : -0.20, this.aimedGripY, this.aim), rifle ? -0.36 : -0.43)
@@ -845,7 +875,7 @@ export class FirstPersonWeapons {
     const hit = motion ? this.frame.hitPose : undefined
     const current = this.current
     let progress = 0, inspect = 0
-    let magazine: THREE.Object3D | undefined, action: THREE.Object3D | undefined, pump: THREE.Object3D | undefined
+    let magazine: THREE.Object3D | undefined, action: THREE.Object3D | undefined, pump: THREE.Object3D | undefined, warhead: THREE.Object3D | undefined
     if (knife || !this.model || !current) this.poseKnife(motion)
     else {
       progress = this.reloadElapsed === null ? 0 : Math.max(0, this.reloadElapsed) / (weaponRules(current).reload * this.reloadScale)
@@ -856,14 +886,20 @@ export class FirstPersonWeapons {
       position.y += Math.cos(this.time * 14) * 0.003 * bob - this.lower * 0.20
       position.z += this.lower * 0.12
       position.x -= working * 0.025
+      // A launcher is not rolled like a rifle: it comes down off the shoulder and is swung across the
+      // chest, its mouth up and to the left, so the fresh rocket is seen going in from the side.
+      const heavy = current.name === 'rocket'
+      if (heavy) { position.x -= working * 0.03; position.z += working * 0.12 }
       // A magazine change: the gun rolls toward you and tips up while the magazine comes out, then the new
       // one is seated with a small upward jolt.
       const tilt = this.reloading && motion ? smooth(progress, 0.05, 0.25) * (1 - smooth(progress, 0.7, 0.9)) : 0
       const seat = this.reloading && motion ? smooth(progress, 0.6, 0.66) * (1 - smooth(progress, 0.66, 0.76)) : 0
       position.y += seat * 0.014 - tilt * 0.018
       this.mount.position.copy(position)
-      this.mount.rotation.set(AIM_PITCH * this.aim + this.lower * 0.5 + tilt * 0.12 - seat * 0.06,
-        Math.PI + working * 0.18, -working * 0.23 - tilt * 0.32, 'YXZ')
+      const pitch = heavy ? -0.5 * working : tilt * 0.12 - seat * 0.06
+      const turn = heavy ? working - ROCKET_TURN : working * 0.18
+      this.mount.rotation.set(AIM_PITCH * this.aim + this.lower * 0.5 + pitch,
+        Math.PI + turn, (-working * 0.23 - tilt * 0.32) * (heavy ? 0.25 : 1), 'YXZ')
       if (hit) {
         this.mount.position.add(hit.weaponPosition)
         this.mount.rotation.x += hit.weaponRotation.x
@@ -904,10 +940,24 @@ export class FirstPersonWeapons {
       }
       const barrels = this.model.userData.parts.barrels
       if (barrels) barrels.rotation.z += this.barrelAngle
+      // The Ink Rocket's warhead sits in the tube's mouth while loaded and is gone once fired. Reloading an
+      // empty tube, the free hand brings a fresh one up from below, lines it up ahead of the mouth and
+      // slides it in.
+      warhead = this.model.userData.parts.warhead
+      if (warhead) {
+        const loading = this.reloading && current.magazine === 0
+        warhead.visible = current.magazine > 0 || (loading && progress > 0.12)
+        if (loading) {
+          const up = smooth(progress, 0.14, 0.42), home = smooth(progress, 0.46, 0.72)
+          warhead.position.y -= 0.34 * (1 - up)
+          warhead.position.z += (0.15 + 0.15 * up) * (1 - home)
+          warhead.rotation.x += 0.5 * (1 - up)
+        }
+      }
     }
     this.root.updateWorldMatrix(true, true)
     const shoulders = this.arms.map((arm, index) => arm.shoulder.clone().add(hit?.shoulders[index] ?? new THREE.Vector3()))
-    const wrist = this.root.worldToLocal(this.mount.localToWorld(new THREE.Vector3(-0.029, -0.02, -0.033)))
+    const wrist = this.root.worldToLocal(this.mount.localToWorld(GRIP_WRIST.clone()))
     const reachableWrist = wrist.clone().sub(shoulders[0]).clampLength(0.021, 0.699).add(shoulders[0])
     // Move the whole grip if a combined reload/recoil/hit reaches the IK limit.
     // The firing hand stays attached and neither arm is stretched to fake impact.
@@ -916,11 +966,14 @@ export class FirstPersonWeapons {
     // While the old gun drops out of a switch, the hands still hold the old gun.
     const held = this.swap?.outgoing ?? this.model
     const pistol = held?.userData.cls === 'pistol'
+    // The Deadline: the free hand holds its own Magnum (akimbo.ts) instead of helping the right one.
+    const offhand = this.offhand && !knife && !this.swap?.outgoing && !!this.model?.visible ? this.offhand : null
+    if (this.offhand) this.offhand.mount.visible = !!offhand
     // A pistol's free hand comes up into view to show the watch while the gun is inspected.
-    const showWrist = pistol && inspect > 0.02
-    this.leftHand.visible = !knife && (!pistol || showWrist || this.reloadElapsed !== null && this.reloadElapsed >= 0)
+    const showWrist = pistol && inspect > 0.02 && !offhand
+    this.leftHand.visible = !knife && !offhand && (!pistol || showWrist || this.reloadElapsed !== null && this.reloadElapsed >= 0)
     const leftArm = this.arms[1]
-    leftArm.upper.visible = leftArm.fore.visible = leftArm.elbow.visible = this.leftHand.visible
+    leftArm.upper.visible = leftArm.fore.visible = leftArm.elbow.visible = this.leftHand.visible || !!offhand
     const support = held?.userData.support?.clone() ?? new THREE.Vector3(0, 0.035, 0.145)
     // Place the palm against the fore-end rather than intersecting the receiver.
     if (held?.userData.support) support.y += 0.026
@@ -958,7 +1011,13 @@ export class FirstPersonWeapons {
       const contact = this.root.worldToLocal(loadingPort.getWorldPosition(new THREE.Vector3()))
       left.lerp(contact, Math.sin(Math.PI * progress))
     }
-    if (hit) left.add(hit.leftHand)
+    // The Ink Rocket: the free hand drops away to fetch the fresh warhead and stays with it until it is in.
+    if (this.reloading && warhead && this.current?.magazine === 0) {
+      const grip = this.root.worldToLocal(warhead.localToWorld((warhead.userData.grip as THREE.Vector3 | undefined)?.clone() ?? new THREE.Vector3()))
+      left.lerp(grip, smooth(progress, 0.06, 0.16) * (1 - smooth(progress, 0.74, 0.86)))
+    }
+    if (offhand) left.copy(this.poseOffhand(offhand, shoulders[1]))
+    else if (hit) left.add(hit.leftHand)
     left.sub(shoulders[1]).clampLength(0.021, 0.699).add(shoulders[1])
     this.leftHand.position.copy(left)
     this.leftHand.quaternion.copy(this.mount.quaternion)
@@ -1020,6 +1079,35 @@ export class FirstPersonWeapons {
     m.rotation.z += w * (-0.3 * a + 0.6 * b)
     m.rotation.x += w * (0.05 * a - 0.3 * b)
     return w
+  }
+
+  /**
+   * The Deadline's left gun: the right grip's pose mirrored across the middle of the view (akimbo.ts), with
+   * its own kick in place of the right one's and poseFeel's sway kept the same way round, so both guns trail
+   * a turn together. Returns where its wrist is, pulling the gun back in if the left arm cannot reach it.
+   */
+  private poseOffhand(offhand: Offhand, shoulder: THREE.Vector3) {
+    const m = offhand.mount, right = this.mount
+    m.position.set(-right.position.x, right.position.y, right.position.z)
+    m.rotation.set(right.rotation.x, -right.rotation.y, -right.rotation.z, 'YXZ')
+    if (!this.frame.reducedMotion) {
+      // poseFeel's kick and sway terms, as it applies them to the right grip: swap the right hand's kick for
+      // this one's, and put the sway back the way it was before the mirror turned it round.
+      const kick = offhand.kick.value - this.kick.value, sway = this.sway.x * (1 - this.aim * 0.85)
+      m.position.z += kick * 0.03
+      m.position.y += kick * 0.009
+      m.rotation.x -= kick * 0.06
+      m.rotation.z += this.kick.roll + offhand.kick.roll
+      m.position.x += 2 * sway
+      m.rotation.y += 2 * sway * 1.5
+      m.rotation.z -= 2 * sway * 1.2
+    }
+    offhand.match()
+    this.root.updateWorldMatrix(true, true)
+    const wrist = this.root.worldToLocal(m.localToWorld(LEFT_WRIST.clone()))
+    const reach = wrist.clone().sub(shoulder).clampLength(0.021, 0.699).add(shoulder)
+    if (reach.distanceToSquared(wrist) > 1e-12) { m.position.add(reach.clone().sub(wrist)); this.root.updateWorldMatrix(true, true) }
+    return reach
   }
 
   /** The knife in the hand: a slash, or the idle flourish with the equipped skin's own trick. */
@@ -1156,7 +1244,10 @@ export class FirstPersonWeapons {
       return
     }
     this.root.updateWorldMatrix(true, true)
-    const origin = this.model!.localToWorld(this.model!.userData.muzzle.clone())
+    // The Deadline's two guns take turns: every other round leaves the left one.
+    const offhand = this.offhand && firingHand(item.magazine, rules.capacity) === 'left' ? this.offhand : null
+    const barrel = offhand?.model ?? this.model!
+    const origin = barrel.localToWorld(barrel.userData.muzzle.clone())
     const eye = this.context.camera.getWorldPosition(new THREE.Vector3())
     const forward = this.context.camera.getWorldDirection(new THREE.Vector3())
     const worldDistance = this.context.world.rayDistance(eye, forward, rules.range)
@@ -1169,14 +1260,23 @@ export class FirstPersonWeapons {
     if (this.context.world.rayDistance(eye, bridge.clone().normalize(), bridge.length() + 0.02) < bridge.length() ||
         this.context.world.rayDistance(origin, direction, 0.15) < 0.15) { this.obstructed = true; return }
     item.magazine--
-    this.recoil = item.name === 'shotgun' ? 1.7 : 1
-    this.flashTime = 0.05
     const feel = item.special ? DEATH_MACHINE_FEEL : FEEL[item.name]
-    this.flash.rotation.z = Math.random() * Math.PI * 2
-    this.flashScale = feel.flash * (0.9 + Math.random() * 0.25)
-    // Kicks stack under automatic fire but never past a firm limit, so a long burst stays readable.
-    this.kick.value = Math.min(this.kick.value + feel.kick, 2.4)
-    this.kick.roll = THREE.MathUtils.clamp(this.kick.roll + (Math.random() < 0.5 ? -1 : 1) * feel.roll * (0.6 + Math.random() * 0.4), -0.16, 0.16)
+    if (offhand) {
+      // The left gun's own flash and kick; the right one stays where it is.
+      offhand.flashTime = 0.05
+      offhand.flash.rotation.z = Math.random() * Math.PI * 2
+      offhand.flashScale = feel.flash * (0.9 + Math.random() * 0.25)
+      offhand.kick.value = Math.min(offhand.kick.value + feel.kick, 2.4)
+      offhand.kick.roll = THREE.MathUtils.clamp(offhand.kick.roll + (Math.random() < 0.5 ? -1 : 1) * feel.roll * (0.6 + Math.random() * 0.4), -0.16, 0.16)
+    } else {
+      this.recoil = item.name === 'shotgun' ? 1.7 : 1
+      this.flashTime = 0.05
+      this.flash.rotation.z = Math.random() * Math.PI * 2
+      this.flashScale = feel.flash * (0.9 + Math.random() * 0.25)
+      // Kicks stack under automatic fire but never past a firm limit, so a long burst stays readable.
+      this.kick.value = Math.min(this.kick.value + feel.kick, 2.4)
+      this.kick.roll = THREE.MathUtils.clamp(this.kick.roll + (Math.random() < 0.5 ? -1 : 1) * feel.roll * (0.6 + Math.random() * 0.4), -0.16, 0.16)
+    }
     this.shake.amplitude = Math.max(this.shake.amplitude * Math.exp(-this.shake.time * 11), feel.shake)
     this.shake.time = 0
     this.shake.sign = Math.random() < 0.5 ? -1 : 1
@@ -1361,6 +1461,8 @@ export class FirstPersonWeapons {
     this.disposed = true
     this.clearFalling()
     this.clearSwap()
+    this.offhand?.dispose()
+    this.offhand = null
     if (this.model) disposeGun(this.model)
     for (const { model } of this.loose.values()) disposeGun(model)
     this.loose.clear()

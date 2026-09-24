@@ -1,6 +1,7 @@
 import { builders, type Gun } from '../lab/weapons/models'
 import { buildDeathMachine, buildLmg } from '../lab/weapons/models/automatics'
 import { buildRevolver } from '../lab/weapons/models/handguns'
+import { buildInkRocket } from '../lab/weapons/models/launcher'
 import { buildInkRay } from '../lab/weapons/models/wonder'
 import type { WeaponItem, WeaponName } from './types'
 
@@ -10,5 +11,6 @@ export function createMissionGun(name: WeaponName, special?: WeaponItem['special
   if (special === 'rayGun') return buildInkRay()
   if (name === 'magnum') return buildRevolver()
   if (name === 'lmg') return buildLmg()
+  if (name === 'rocket') return buildInkRocket()
   return builders[name]()
 }

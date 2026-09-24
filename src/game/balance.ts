@@ -25,6 +25,9 @@ export const WEAPON_RULES = {
   // belt, a slow reload.
   magnum: { label: 'Magnum', capacity: 6, reload: 2.6, interval: 0.42, range: 140, damage: 95, automatic: false, kick: 0.075, settle: 0.72 },
   lmg: { label: 'LMG', capacity: 75, reload: 4.2, interval: 0.095, range: 170, damage: 42, automatic: true, kick: 0.02, settle: 0.7 },
+  // Dead Ink's Mystery Box launcher: one rocket to a load. Its rocket does its damage by bursting
+  // (zombies/rockets.ts), so these are its handling; `damage` only scales that burst with rarity.
+  rocket: { label: 'Ink Rocket', capacity: 1, reload: 2.6, interval: 0.8, range: 150, damage: 40, automatic: false, kick: 0.07, settle: 0.8 },
 } as const
 
 export const ENEMY_WEAPONS = {

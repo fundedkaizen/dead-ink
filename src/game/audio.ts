@@ -425,6 +425,59 @@ export class MissionAudio {
     } else if (audible && !this.alarmSource) this.play({ kind: 'horn', position, radius: 100 })
   }
 
+  /**
+   * A zip line ride, for as long as it lasts: the trolley's clack as it bites the cable, a rolling whirr
+   * pulsed by its wheels under a thin cable whine that climbs as it gathers speed, and a thump and clank
+   * as you land. The rider's own sound, so it is not placed in the world.
+   */
+  private zipline(seconds: number) {
+    const context = this.context!, noise = this.noise
+    if (!noise) return
+    const t = context.currentTime, end = t + Math.max(0.6, seconds), speedUp = Math.min(1.5, seconds * 0.4)
+    for (const [delay, pitch] of [[0, 1], [0.05, 1.35]] as const) {
+      const { gain } = this.output({ kind: 'zipline' })
+      const click = context.createBufferSource(), band = context.createBiquadFilter()
+      click.buffer = noise; band.type = 'bandpass'; band.frequency.value = 3200 * pitch; band.Q.value = 8
+      gain.gain.setValueAtTime(0.0001, t + delay); gain.gain.exponentialRampToValueAtTime(0.5, t + delay + 0.003); gain.gain.exponentialRampToValueAtTime(0.0001, t + delay + 0.07)
+      click.connect(band).connect(gain)
+      this.track(click, [band, gain]); click.start(t + delay); click.stop(t + delay + 0.08)
+    }
+    const { gain: roll } = this.output({ kind: 'zipline' })
+    const rumble = context.createBufferSource(), band = context.createBiquadFilter(), wheels = context.createOscillator(), depth = context.createGain()
+    rumble.buffer = noise; rumble.loop = true
+    band.type = 'bandpass'; band.Q.value = 2.5
+    band.frequency.setValueAtTime(500, t); band.frequency.linearRampToValueAtTime(1400, t + speedUp)
+    wheels.frequency.setValueAtTime(18, t); wheels.frequency.linearRampToValueAtTime(42, t + speedUp)
+    depth.gain.value = 0.05
+    wheels.connect(depth).connect(roll.gain)
+    roll.gain.setValueAtTime(0.0001, t); roll.gain.exponentialRampToValueAtTime(0.12, t + 0.25)
+    roll.gain.setValueAtTime(0.12, end - 0.25); roll.gain.exponentialRampToValueAtTime(0.0001, end)
+    rumble.connect(band).connect(roll)
+    this.track(rumble, [band, roll, depth]); this.track(wheels, [])
+    rumble.start(t); rumble.stop(end + 0.05); wheels.start(t); wheels.stop(end + 0.05)
+    const { gain: sing } = this.output({ kind: 'zipline' })
+    const whine = context.createOscillator()
+    whine.type = 'sine'
+    whine.frequency.setValueAtTime(900, t); whine.frequency.exponentialRampToValueAtTime(2300, t + Math.min(2, seconds * 0.6))
+    whine.frequency.setValueAtTime(2300, end - 0.3); whine.frequency.exponentialRampToValueAtTime(1200, end)
+    sing.gain.setValueAtTime(0.0001, t); sing.gain.exponentialRampToValueAtTime(0.035, t + 0.4)
+    sing.gain.setValueAtTime(0.035, end - 0.3); sing.gain.exponentialRampToValueAtTime(0.0001, end)
+    whine.connect(sing)
+    this.track(whine, [sing]); whine.start(t); whine.stop(end + 0.05)
+    const { gain: thump } = this.output({ kind: 'zipline' })
+    const low = context.createOscillator()
+    low.type = 'sine'; low.frequency.setValueAtTime(110, end); low.frequency.exponentialRampToValueAtTime(45, end + 0.15)
+    thump.gain.setValueAtTime(0.0001, end); thump.gain.exponentialRampToValueAtTime(0.6, end + 0.008); thump.gain.exponentialRampToValueAtTime(0.0001, end + 0.22)
+    low.connect(thump)
+    this.track(low, [thump]); low.start(end); low.stop(end + 0.25)
+    const { gain: clank } = this.output({ kind: 'zipline' })
+    const letGo = context.createBufferSource(), ring = context.createBiquadFilter()
+    letGo.buffer = noise; ring.type = 'bandpass'; ring.frequency.value = 2400; ring.Q.value = 10
+    clank.gain.setValueAtTime(0.0001, end + 0.02); clank.gain.exponentialRampToValueAtTime(0.3, end + 0.025); clank.gain.exponentialRampToValueAtTime(0.0001, end + 0.2)
+    letGo.connect(ring).connect(clank)
+    this.track(letGo, [ring, clank]); letGo.start(end + 0.02); letGo.stop(end + 0.22)
+  }
+
   play(event: SoundEvent) {
     const context = this.context
     if (!context || !this.master || !this.active || this.muted || this.volume <= 0 || this.disposed) return
@@ -438,6 +491,7 @@ export class MissionAudio {
       return
     }
     if (event.kind === 'horn' && this.alarmSource) return
+    if (event.kind === 'zipline') { if (this.sources.size < SOURCE_LIMIT) this.zipline(event.duration ?? 3); return }
     const distance = event.kind === 'bullet-hit' ? 0 : event.position?.distanceTo(this.listenerPosition) ?? 0
     if (distance > (event.radius ?? 60)) return
     if (event.kind === 'enemy-bullet-whiz' || event.kind === 'bullet-hit') {

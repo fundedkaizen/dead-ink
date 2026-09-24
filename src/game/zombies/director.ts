@@ -8,7 +8,8 @@ import { hitDamage, shotgunDamageMultiplier } from '../balance'
 import { BONE_NAMES, type BoneName } from '../../lab/rig'
 import type { EmitSound, Shot } from '../types'
 import { zombieEyeMaterial } from '../../render/ink'
-import type { NavGraph } from './navgraph'
+import { PERCH, type NavGraph } from './navgraph'
+import { setDoorOpen } from '../../world/doors'
 import { BOSS, PLAYER_HEALTH } from './rules'
 import { InkGore, restoreParts, setPartLost } from './gore'
 import { BLOT, GasClouds, bloatCentre, bloatDripPoint, setBloat } from './gas'
@@ -74,6 +75,11 @@ export const CRAWL = {
   speed: 1.6, fall: 0.55, pitch: 1.22, climbPace: 0.55,
   front: 0.4, back: 0.02, swing: 0.32, stride: 0.56,
   attack: { range: 1.15, windup: 0.35, reach: 1.55, swing: 0.7, recover: 0.5 },
+  /**
+   * Dead Ink weapons: at most this many crawl at once. Past it, a blast or a heavy round that would take the
+   * legs takes an arm instead, so explosives in the late rounds never turn the crowd into a crawl.
+   */
+  most: 4,
 } as const
 /**
  * Gore odds, our own and tuned by play. A blast that does not kill takes the legs (a crawler) or an arm;
@@ -97,6 +103,8 @@ const FLINCH_SECONDS = 0.22
 const REACH_UP = 0.8
 /** How often the shared flow field is recomputed. */
 export const FLOW_INTERVAL = 0.35
+/** How long a link that refused a body stays out of the graph. */
+export const LINK_BLOCK_SECONDS = 25
 
 export type Zombie = {
   id: string
@@ -134,6 +142,8 @@ export type Zombie = {
   /** The closest this zombie has come to a player (walking distance), and how long since it improved. */
   bestDistance: number
   noProgress: number
+  /** Seconds before it looks again for standing room beside a player up on something (see perch). */
+  perchTimer: number
   /** Seconds left climbing out of the ground. */
   rise: number
   /** How long only other zombies have stood in its way (the crowd around its prey). */
@@ -283,6 +293,27 @@ const scratch = { q: new THREE.Quaternion(), p: new THREE.Quaternion(), d: new T
   f: new THREE.Vector3(), s: new THREE.Vector3(), a: new THREE.Vector3(), b: new THREE.Vector3(), t: new THREE.Vector3(), e: new THREE.Vector3() }
 
 const SIDESTEP = [0.45, 0.9, 1.35], SIDESTEP_CROWD = [...SIDESTEP, ...CROWD.orbit]
+const doorFrom = new THREE.Vector3(), doorTo = new THREE.Vector3()
+const reachSpot = new THREE.Vector3(), reachFrom = new THREE.Vector3(), NO_ONE = new THREE.Object3D()
+
+/**
+ * Whether a body standing at `from` may be put on graph spot `spot`: never one behind the wall it stands
+ * against (a player pressed to the warehouse wall was put on the spot inside it, and the horde went in
+ * there). A knee-high sight line, and only for a spot not right underfoot. The flow field starts from
+ * the players' spots by this rule, and each zombie finds its own by it.
+ */
+export function spotInReach(graph: NavGraph, world: CollisionWorld, spot: number, from: THREE.Vector3) {
+  const p = graph.point(spot, reachSpot)
+  if ((p.x - from.x) ** 2 + (p.z - from.z) ** 2 < 0.36 && Math.abs(p.y - from.y) < 0.5) return true
+  reachFrom.copy(from).y += 0.55
+  p.y += 0.55
+  return world.visible(reachFrom, p, NO_ONE)
+}
+/** Do the flat segments p-q and a-b cross? */
+function crossesFlat(p: THREE.Vector3, q: THREE.Vector3, a: THREE.Vector3, b: THREE.Vector3) {
+  const side = (o: THREE.Vector3, u: THREE.Vector3, v: THREE.Vector3) => (u.x - o.x) * (v.z - o.z) - (u.z - o.z) * (v.x - o.x)
+  return side(a, b, p) * side(a, b, q) < 0 && side(p, q, a) * side(p, q, b) < 0
+}
 /** Knee to sole in the rest pose (the rig has no foot bone). */
 const SHIN_LENGTH = 0.405
 /** The climb out of the ground hands over to the normal stance through these, blended bone by bone. */
@@ -299,6 +330,12 @@ export class ZombieDirector {
   private time = 0
   /** Fine route plans, for the rare zombie the flow field cannot step along (a narrow gate, a doorway edge). */
   private plans = new Map<Zombie, Generator<void, THREE.Vector3[]>>()
+  /** Each door's opening, hinge to latch at its floor, for pushDoors. */
+  private openings = new Map<THREE.Group, { a: THREE.Vector3; b: THREE.Vector3; centre: THREE.Vector3; reach: number }>()
+  /** Whether a body at `from` may be put on graph spot `spot` (see spotInReach). */
+  private inReach = (spot: number, from: THREE.Vector3) => spotInReach(this.context.graph!, this.context.world, spot, from)
+  /** Links taken out of the graph for refusing a body, and when each goes back in (see blockLink). */
+  private blockedLinks: { key: number; until: number }[] = []
   /** Ink chunks, drops, splats and torn-off limbs; the Blots' poison clouds. Both updated with the zombies. */
   readonly gore: InkGore
   readonly gas: GasClouds
@@ -325,7 +362,7 @@ export class ZombieDirector {
       this.zombies.push({
         id: `zombie-${i + 1}`, actor, position: new THREE.Vector3(), yaw: 0, moving: false, health: 0, maxHealth: 0, gait: 'walk',
         state: 'idle', stuck: 0, unreachable: 0, swing: 0, swingLanded: false,
-        recover: 0, stagger: 0, deadFor: 0, stranded: false, footstep: 0, route: [], routeTimer: 0, routeNode: -1, routeFrom: -1, blocked: -1, avoidTimer: 0, edgeFail: 0, probeFail: -1, probeFails: 0, bestDistance: Infinity, noProgress: 0,
+        recover: 0, stagger: 0, deadFor: 0, stranded: false, footstep: 0, route: [], routeTimer: 0, routeNode: -1, routeFrom: -1, blocked: -1, avoidTimer: 0, edgeFail: 0, probeFail: -1, probeFails: 0, bestDistance: Infinity, noProgress: 0, perchTimer: 0,
         rise: 0, crowded: 0, climb: null, voice: 0, carriage: randomCarriage('walk'), flinch: 0, flinchBack: 0, flinchSide: 0,
         boss: false, slam: 0, slamTimer: 0, direct: false, directTimer: 0, sideBias: 0, sideTimer: 0,
         crawler: false, crawlFall: 0, crawled: 0, pitch: 0, lift: 0.82, blot: false, drip: 0, lost: { head: false, L: false, R: false }, gibbed: false,
@@ -364,7 +401,7 @@ export class ZombieDirector {
     zombie.swing = 0; zombie.swingLanded = false; zombie.recover = 0; zombie.stagger = 0; zombie.deadFor = 0
     zombie.stranded = false; zombie.footstep = 0
     zombie.route = []; zombie.routeTimer = 0; zombie.routeNode = -1; zombie.routeFrom = -1; zombie.blocked = -1; zombie.avoidTimer = 0; zombie.edgeFail = 0; zombie.probeFail = -1; zombie.probeFails = 0
-    zombie.bestDistance = Infinity; zombie.noProgress = 0
+    zombie.bestDistance = Infinity; zombie.noProgress = 0; zombie.perchTimer = 0
     zombie.rise = rise ? RISE.seconds : 0; zombie.climb = null; zombie.crowded = 0
     zombie.voice = 1 + Math.random() * 3
     zombie.carriage = randomCarriage(gait); zombie.flinch = 0
@@ -405,7 +442,7 @@ export class ZombieDirector {
     zombie.actor.root.position.copy(floor)
     zombie.stuck = 0; zombie.unreachable = 0; zombie.stranded = false
     zombie.route = []; zombie.routeTimer = 0; zombie.routeNode = -1; zombie.blocked = -1
-    zombie.bestDistance = Infinity; zombie.noProgress = 0; zombie.probeFail = -1; zombie.probeFails = 0
+    zombie.bestDistance = Infinity; zombie.noProgress = 0; zombie.probeFail = -1; zombie.probeFails = 0; zombie.perchTimer = 0
     zombie.rise = 0; zombie.climb = null
     zombie.actor.root.rotation.set(0, zombie.yaw, 0)
     this.plans.delete(zombie)
@@ -414,6 +451,7 @@ export class ZombieDirector {
 
   update(dt: number, targets: readonly ZombieTarget[]) {
     this.time += dt
+    this.restoreLinks()
     // One flow field for the whole crowd, a few times a second: walking distance from everywhere to
     // the nearest player. Every zombie then just walks downhill on it.
     this.flowTimer -= dt
@@ -422,7 +460,7 @@ export class ZombieDirector {
       const sources = targets.filter(t => t.alive).map(t => t.feet)
       // Only restart the clock on a real refresh: with every player down there is nothing to flow to, and
       // the first update after a revive must not judge progress on the old field.
-      if (sources.length) { graph.flow(sources); this.flowTimer = FLOW_INTERVAL }
+      if (sources.length) { graph.flow(sources, this.inReach); this.flowTimer = FLOW_INTERVAL }
     }
     this.advanceFinePlans()
     this.gore.update(dt)
@@ -811,8 +849,7 @@ export class ZombieDirector {
   }
 
   /** Start up a ladder or over a ledge, unless someone is just ahead on the same one. */
-  private startClimb(zombie: Zombie, from: number, to: number, points: THREE.Vector3[]) {
-    const key = from < to ? `${from}:${to}` : `${to}:${from}`
+  private startClimb(zombie: Zombie, from: number, to: number, points: THREE.Vector3[], key = from < to ? `${from}:${to}` : `${to}:${from}`) {
     if (this.zombies.some(z => z !== zombie && z.state === 'chase' && z.climb?.key === key && z.climb.travelled < 0.9)) return false
     const path = [zombie.position.clone()]
     for (const point of points) {
@@ -1055,7 +1092,17 @@ export class ZombieDirector {
       zombie.routeTimer -= dt
       while (zombie.route.length && zombie.position.distanceTo(zombie.route[0]) < 0.45) zombie.route.shift()
       if (!zombie.route.length || zombie.routeTimer <= 0) {
-        const here = graph.nearest(zombie.position)
+        const here = graph.nearest(zombie.position, 3, 2.2, this.inReach)
+        // Up on something the graph does not reach (a fence rail it climbed after a player who has left):
+        // down to the nearest spot below.
+        if (here < 0 && this.offPerch(graph, zombie)) return true
+        // Where the flow field starts (or a stride from it), as close as the graph gets to the player, yet no
+        // straight way to them: up or down to them if they are on something, else the fine planner for the
+        // last metres.
+        if (here >= 0 && this.atFlowEnd(graph, here, zombie.position)) {
+          if (this.perch(zombie, goal, dt)) return true
+          return this.lastMetres(zombie, goal, dt)
+        }
         const foot = here >= 0 ? this.climbFoot(graph, zombie, here) : null
         if (foot) {
           if (this.startClimb(zombie, foot.from, foot.to, foot.points)) return true
@@ -1096,6 +1143,7 @@ export class ZombieDirector {
     // The walk and run clips only travel forward: finish a sharp turn before moving.
     if (turn > 0.7) return false
     const step = Math.min(speedOf(zombie) * dt, Math.max(0.01, remaining - stopShort))
+    this.pushDoors(zombie, waypoint)
     // Movement allows a slightly slimmer body than planning does. Stepping into that margin wedges a
     // zombie somewhere no plan can start from, so only move where planning clearance also holds.
     const candidate = this.navigation.step(zombie.position, waypoint, step)
@@ -1119,8 +1167,7 @@ export class ZombieDirector {
       if (!stepped && this.context.graph && zombie.routeFrom >= 0 && zombie.routeNode >= 0) {
         zombie.edgeFail += dt
         if (zombie.edgeFail > 1) {
-          this.context.graph.blockEdge(zombie.routeFrom, zombie.routeNode)
-          this.flowTimer = 0
+          this.blockLink(this.context.graph, zombie.routeFrom, zombie.routeNode)
           zombie.edgeFail = 0; zombie.route.length = 0; zombie.routeTimer = 0
           zombie.routeNode = -1; zombie.routeFrom = -1; zombie.blocked = -1
           return false
@@ -1139,7 +1186,7 @@ export class ZombieDirector {
       }
       if (zombie.stuck > 0.5 && !this.plans.has(zombie) && this.context.graph) {
         zombie.blocked = zombie.routeNode
-        const ahead = this.lookAhead(this.context.graph, zombie, 3)
+        const ahead = this.lookAhead(this.context.graph, zombie, 3, goal)
         const from = this.navigation.floor(zombie.position.clone()), to = this.navigation.floor(ahead.clone())
         if (from && to) this.plans.set(zombie, this.navigation.createPlan(from, to))
       }
@@ -1155,6 +1202,36 @@ export class ZombieDirector {
     zombie.position.copy(next)
     if (zombie.footstep > (zombie.crawler ? CRAWL.stride / 2 : 0.9)) { zombie.footstep = 0; this.context.emit({ kind: 'enemy-footstep', position: zombie.position.clone(), radius: zombie.crawler ? 4 : 6 }) }
     return true
+  }
+
+  /**
+   * Zombies push shut doors open. The graph is baked with every door open, so a route may run through a
+   * doorway the player has shut since; a zombie about to walk through one opens it, with the door's
+   * sound, and carries on as it would through an open one. Sealed exits are not in the director's list.
+   */
+  private pushDoors(zombie: Zombie, toward: THREE.Vector3) {
+    const p = zombie.position
+    const dx = toward.x - p.x, dz = toward.z - p.z, length = Math.hypot(dx, dz)
+    if (length < 1e-3) return
+    for (const door of this.context.doors) {
+      if (door.userData.open || door.userData.missionLocked) continue
+      let opening = this.openings.get(door)
+      if (!opening) {
+        // Doors never move, only their leaves swing: the opening, hinge to latch at its floor, once.
+        const half = (door.userData.width ?? 1.35) / 2
+        opening = { a: door.localToWorld(new THREE.Vector3(-half, 0, 0)), b: door.localToWorld(new THREE.Vector3(half, 0, 0)),
+          centre: door.getWorldPosition(new THREE.Vector3()), reach: half + 1.5 }
+        this.openings.set(door, opening)
+      }
+      const c = opening.centre
+      if (Math.abs(c.y - p.y) > 1.5 || (c.x - p.x) ** 2 + (c.z - p.z) ** 2 > opening.reach ** 2) continue
+      // Its way from just behind it to a stride and a half ahead: does that pass through the opening?
+      doorFrom.set(p.x - dx / length * 0.3, p.y, p.z - dz / length * 0.3)
+      doorTo.set(p.x + dx / length * 1.3, p.y, p.z + dz / length * 1.3)
+      if (!crossesFlat(doorFrom, doorTo, opening.a, opening.b)) continue
+      setDoorOpen(door, true)
+      this.context.emit({ kind: 'door', position: c.clone(), radius: 8 })
+    }
   }
 
   /**
@@ -1207,6 +1284,9 @@ export class ZombieDirector {
     if (!options.length) return -1
     const current = graph.distance(here)
     const point = new THREE.Vector3()
+    // Only the best way toward the player is counted each time (see below): with two refusing, counting
+    // both would take turns resetting the count, and neither would ever come out.
+    let counted = false
     for (const option of options) {
       // A ladder or a ledge is not walked, so a first step toward it proves nothing.
       if (graph.linkKind(here, option.index) === 'climb') { zombie.probeFail = -1; zombie.probeFails = 0; return option.index }
@@ -1215,19 +1295,22 @@ export class ZombieDirector {
       if (!probe || !this.navigation.fitsPlanned(probe)) {
         // A link toward the player that keeps refusing the first step is not really there: after a few
         // tries, delete it so the flow field routes everyone around instead of shuffling on the spot.
-        if (option.distance < current) {
+        if (option.distance < current && !counted) {
+          counted = true
           zombie.probeFails = zombie.probeFail === option.index ? zombie.probeFails + 1 : 1
           zombie.probeFail = option.index
           if (zombie.probeFails >= 3) {
-            graph.blockEdge(here, option.index)
-            this.flowTimer = 0
+            this.blockLink(graph, here, option.index)
             zombie.probeFail = -1; zombie.probeFails = 0; zombie.blocked = -1
             return -1
           }
         }
         continue
       }
-      zombie.probeFail = -1; zombie.probeFails = 0
+      // A step toward the player clears the count; an escape keeps it, or a link that refuses the first step
+      // would never come out while there is anywhere else to step (runtime-only things the bake never saw,
+      // an open zone gate's leaves, solid props, and the zombie shuttles back and forth in front of them).
+      if (option.distance < current) { zombie.probeFail = -1; zombie.probeFails = 0 }
       // Taking a step away from the player is an escape: do not turn straight back next time.
       if (option.distance >= current) { zombie.blocked = here; zombie.avoidTimer = 3 }
       return option.index
@@ -1235,12 +1318,130 @@ export class ZombieDirector {
     return options[0].index
   }
 
+  /**
+   * A player up on something no graph spot reaches (balanced on a fence rail, on a sill) or down in a
+   * hole, right over or under this zombie: it clambers up the face as it climbs a wall, or drops down,
+   * onto standing room beside them, and swipes from there. Only from the end of the flow field, and only
+   * where there is room to stand next to them (not in mid-air beside a rail).
+   */
+  private perch(zombie: Zombie, goal: THREE.Vector3, dt: number) {
+    const rise = goal.y - zombie.position.y, flat = Math.hypot(goal.x - zombie.position.x, goal.z - zombie.position.z)
+    zombie.perchTimer -= dt
+    // Up to them as up a wall; down to them off whatever it stands on (a counter top the flow ends on,
+    // with the player in the kitchen behind it), which walking will not do.
+    const up = rise > 1.2 && rise <= PERCH.up && flat <= PERCH.beside
+    const down = rise < -0.6 && rise >= -PERCH.down && flat <= PERCH.beside + 1
+    if (!(up || down) || zombie.perchTimer > 0) return false
+    const beside = this.besidePerch(goal, zombie.position)
+    // Nowhere to stand beside them, or something in the way: look again in a moment (they may move along).
+    if (!beside || !this.clearClimb(zombie.position, beside)) { zombie.perchTimer = 0.8; return false }
+    return this.startClimb(zombie, -1, -1, [beside], `perch:${Math.round(beside.x * 2)},${Math.round(beside.z * 2)}`)
+  }
+
+  /** Whether spot `here` is where the flow field starts, or the next spot on is and the zombie is all but on it. */
+  private atFlowEnd(graph: NavGraph, here: number, position: THREE.Vector3) {
+    if (!Number.isFinite(graph.distance(here))) return false
+    const next = graph.downhill(here)
+    return next < 0 || (graph.downhill(next) < 0 && graph.point(next, reachSpot).distanceToSquared(position) < 0.8 * 0.8)
+  }
+
+  /**
+   * A climb from `from` to `to` has no collision, so it must not pass through anything: up then across, or
+   * across then down (as startClimb lays it out), chest-high lines clear all the way.
+   */
+  private clearClimb(from: THREE.Vector3, to: THREE.Vector3) {
+    const up = to.y > from.y
+    const corner = up ? from.clone().lerp(to, 0.45).setY(to.y) : from.clone().lerp(to, 0.55).setY(from.y)
+    const chest = (p: THREE.Vector3) => p.clone().setY(p.y + 1.1)
+    if (!this.context.world.visible(chest(from), chest(corner), NO_ONE) || !this.context.world.visible(chest(corner), chest(to), NO_ONE)) return false
+    // The body too, along the level leg (wire fences let sight lines through, not bodies).
+    const [a, b] = up ? [corner, to] : [from, corner]
+    const steps = Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) / 0.2)
+    for (let i = 1; i <= steps; i++) if (!this.navigation.fitsPlanned(a.clone().lerp(b, i / steps).setY(a.y + 0.05))) return false
+    return true
+  }
+
+  /** Standing room for a zombie at `goal`'s height, 0.7 to 1.05 m from it, nothing between; the one nearest `from`. */
+  private besidePerch(goal: THREE.Vector3, from: THREE.Vector3) {
+    let best: THREE.Vector3 | null = null, bestDistance = Infinity
+    for (const out of [0.7, 1.05]) for (let i = 0; i < 12; i++) {
+      const angle = i / 12 * Math.PI * 2
+      const point = this.navigation.floor(new THREE.Vector3(goal.x + Math.sin(angle) * out, goal.y, goal.z + Math.cos(angle) * out))
+      if (!point || Math.abs(point.y - goal.y) > 0.35) continue
+      const distance = point.distanceToSquared(from)
+      if (distance >= bestDistance) continue
+      if (!this.context.world.visible(point.clone().setY(point.y + 1.1), goal.clone().setY(goal.y + 1.1), NO_ONE)) continue
+      best = point; bestDistance = distance
+    }
+    return best
+  }
+
+  /** A zombie off the graph (left up on a perch): straight down onto the nearest spot below. */
+  private offPerch(graph: NavGraph, zombie: Zombie) {
+    const below = graph.nearest(zombie.position, 3, PERCH.down, this.inReach)
+    if (below < 0) return false
+    const spot = graph.point(below)
+    if (zombie.position.y - spot.y < 1) return false
+    return this.startClimb(zombie, -1, below, [spot], `down:${below}`)
+  }
+
+  /**
+   * The end of the flow field: the zombie is on the spot the field starts from, and the player is not
+   * straight ahead of it (round a table, in a gap the coarse grid misses, off the graph altogether). The
+   * fine planner works out the last few metres to them, or to the nearest place a body fits beside them;
+   * until it has, the zombie turns to face them rather than wandering about the spot.
+   */
+  private lastMetres(zombie: Zombie, goal: THREE.Vector3, dt: number) {
+    zombie.route.length = 0
+    zombie.routeTimer = 0.4
+    zombie.routeNode = -1; zombie.routeFrom = -1
+    if (!this.plans.has(zombie)) {
+      const from = this.navigation.floor(zombie.position.clone()), to = this.besideTarget(zombie.position, goal)
+      if (from && to && Math.hypot(to.x - from.x, to.z - from.z) > 0.3) this.plans.set(zombie, this.navigation.createPlan(from, to))
+    }
+    this.face(zombie, goal, dt, 4)
+    return false
+  }
+
+  /** Where a zombie can stand at `goal`, or failing that the nearest such place on the way back toward `from`. */
+  private besideTarget(from: THREE.Vector3, goal: THREE.Vector3) {
+    const at = this.navigation.floor(goal.clone())
+    if (at) return at
+    const dx = from.x - goal.x, dz = from.z - goal.z, length = Math.hypot(dx, dz)
+    if (length < 0.1) return null
+    for (let back = 0.3; back <= 1.5 && back < length; back += 0.3) {
+      const point = this.navigation.floor(new THREE.Vector3(goal.x + dx / length * back, goal.y, goal.z + dz / length * back))
+      if (point) return point
+    }
+    return null
+  }
+
+  /**
+   * A link that keeps refusing a body comes out of the graph and the flow field routes round it. Only for
+   * a while (LINK_BLOCK_SECONDS): what stopped the body may pass (a door leaf mid-swing, a shove from the
+   * crowd), and a doorway taken out for good would send the whole horde the long way round all game.
+   */
+  private blockLink(graph: NavGraph, a: number, b: number) {
+    this.blockedLinks.push({ key: graph.blockEdge(a, b), until: this.time + LINK_BLOCK_SECONDS })
+    this.flowTimer = 0
+  }
+
+  /** Links whose time out of the graph is up go back in; all of them at once when `all`. */
+  private restoreLinks(all = false) {
+    const graph = this.context.graph
+    while (graph && this.blockedLinks.length && (all || this.blockedLinks[0].until <= this.time)) {
+      graph.openGap(this.blockedLinks.shift()!.key)
+      this.flowTimer = 0
+    }
+  }
+
   /** A point a few flow-field steps further on, to plan toward when stuck. */
-  private lookAhead(graph: NavGraph, zombie: Zombie, steps: number) {
-    let node = graph.nearest(zombie.position)
+  private lookAhead(graph: NavGraph, zombie: Zombie, steps: number, goal?: THREE.Vector3) {
+    let node = graph.nearest(zombie.position, 3, 2.2, this.inReach)
     for (let i = 0; i < steps && node >= 0; i++) {
       const next = graph.downhill(node)
-      if (next < 0) break
+      // The field starts here: what is further on is the player (see lastMetres).
+      if (next < 0) return goal && Number.isFinite(graph.distance(node)) ? this.besideTarget(zombie.position, goal) ?? graph.point(node) : graph.point(node)
       node = next
     }
     return node >= 0 ? graph.point(node) : zombie.position.clone()
@@ -1461,7 +1662,7 @@ export class ZombieDirector {
         if (roll() < GORE_ODDS.lethalArm) this.loseArm(zombie, roll() < 0.5 ? 'L' : 'R', direction)
         return
       }
-      if (!zombie.crawler && zombie.rise <= 0 && !zombie.climb && !zombie.window && roll() < GORE_ODDS.blastCrawl) this.makeCrawler(zombie, direction)
+      if (!zombie.crawler && zombie.rise <= 0 && !zombie.climb && !zombie.window && this.crawlers() < CRAWL.most && roll() < GORE_ODDS.blastCrawl) this.makeCrawler(zombie, direction)
       else if (roll() < GORE_ODDS.blastArm) this.loseArm(zombie, roll() < 0.5 ? 'L' : 'R', direction)
       return
     }
@@ -1469,7 +1670,14 @@ export class ZombieDirector {
     if (zombie.boss) return
     if (zone === 'arm' && heavy && roll() < (lethal ? Math.max(heavy, GORE_ODDS.lethalArm) : heavy)) this.loseArm(zombie, side, direction)
     const leg = weapon ? GORE_ODDS.leg[weapon] : undefined
-    if (!lethal && zone === 'leg' && leg && !zombie.crawler && zombie.rise <= 0 && !zombie.climb && !zombie.window && roll() < leg) this.makeCrawler(zombie, direction)
+    if (!lethal && zone === 'leg' && leg && !zombie.crawler && zombie.rise <= 0 && !zombie.climb && !zombie.window && this.crawlers() < CRAWL.most && roll() < leg) this.makeCrawler(zombie, direction)
+  }
+
+  /** Dead Ink weapons: how many are crawling now (see CRAWL.most). */
+  private crawlers() {
+    let count = 0
+    for (const zombie of this.zombies) if (zombie.state === 'chase' && zombie.crawler) count++
+    return count
   }
 
   /** The legs go: they fly off, and the zombie drops onto its front and crawls on. */
@@ -1562,9 +1770,10 @@ export class ZombieDirector {
     return count
   }
 
-  /** Back to an empty field: every actor to the pool. */
+  /** Back to an empty field: every actor to the pool, and the graph whole again (before any gate shuts). */
   clear() {
     this.plans.clear()
+    this.restoreLinks(true)
     for (const zombie of this.zombies) { zombie.state = 'idle'; zombie.actor.root.visible = false; zombie.window = null }
     for (const slot of this.windows) { slot.occupant = null; slot.waiting.length = 0; slot.vaulting = null }
     this.gore.clear()

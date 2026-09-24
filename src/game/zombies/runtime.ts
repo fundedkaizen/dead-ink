@@ -27,12 +27,16 @@ import { pickSpawn } from './spawn'
 import { findWallSpots, type WallSpot } from './placement'
 import { newGame, returnSpawns, stepRounds, type RoundState } from './rounds'
 import { BOSS, DIFFICULTY, MAX_ALIVE, PLAYER_HEALTH, POWERUPS, PRICES, STARTING_POINTS, STORM, ZOMBIE_DAMAGE_SCALE, isBossRound, isStormRound, movementMix, zombieHealth, type Difficulty, type PowerupKind } from './rules'
-import { BOX_WEIGHTS, WALL_WEAPONS, ZOMBIE_SLOTS, freshWeapon, pointsForHit, rollBox, startingPistol, wallOffer, RESERVE_MAGAZINES } from './economy'
+import { BOX_WEIGHTS, WALL_WEAPONS, ZOMBIE_SLOTS, freshWeapon, pointsForHit, rollBox, spareAmmo, startingPistol, wallOffer, RESERVE_MAGAZINES } from './economy'
 import { MysteryBox, WallBuy } from './stations'
 import { ZombieHud } from './hud'
 import { MuzzleSparks, RiseMarks, Shockwaves } from './effects'
 import { GRENADE, Grenades } from './grenades'
 import { INK_RAY, InkRayBolts } from './wonder'
+// Dead Ink weapons: the Ink Rocket and the Deadline's explosive rounds.
+import { InkRockets, ROCKET, rocketLoad, type RocketBurst } from './rockets'
+import { DEADLINE_ROUND, roundDamage, selfBlast, type BlastKind } from './blasts'
+import { isAkimbo } from '../akimbo'
 import { REVIVE, SecondDraftRevive } from './revive'
 import { DECOY, DollBuy, animateDoll, inkDoll } from './decoy'
 import { THROW_RELEASE } from '../weapons'
@@ -160,7 +164,7 @@ export const DEAD_INK_COPY: MenuCopy = {
   restartWarning: 'This game ends and a new one starts at round 1.',
   missionPage: false,
   modeLink: { label: 'Hostage mission', href: './' },
-  controls: [['Knife', 'V'], ['Grenade', 'Q or G'], ['Ink Doll', 'T'], ['Switch weapon', 'Wheel']],
+  controls: [['Knife', 'V'], ['Grenade', 'Q or G'], ['Ink Doll', 'E'], ['Switch weapon', 'Wheel']],
   pages: [ARMORY_PAGE], home: deadInkHome, mode: 'zombies', gameOver: DEAD_INK_GAME_OVER,
 }
 
@@ -189,6 +193,8 @@ export class ZombiesRuntime {
   readonly shockwaves: Shockwaves
   readonly grenades: Grenades
   readonly bolts: InkRayBolts
+  /** The Ink Rocket's rockets in flight (rockets.ts). */
+  readonly rockets: InkRockets
   /** Frags carried, and seconds before another can be thrown. */
   grenadeCount: number = GRENADE.start
   private grenadeCooldown = 0
@@ -373,6 +379,7 @@ export class ZombiesRuntime {
     this.grenades = new Grenades(scene, player.world, createGrenadeModel)
     this.dolls = new Grenades(scene, player.world, inkDoll, { fuse: DECOY.lure + 1, upright: true })
     this.bolts = new InkRayBolts(scene, player.world, (origin, direction, max) => this.director?.aimDistance(origin, direction, max) ?? Infinity)
+    this.rockets = new InkRockets(scene, player.world, (origin, direction, max) => this.director?.aimDistance(origin, direction, max) ?? max)
     this.powerups = new PowerupDrops(scene)
     this.bottle = new PerkBottle(camera.perspective)
     this.syringe = new ReviveSyringe(camera.perspective)
@@ -402,6 +409,7 @@ export class ZombiesRuntime {
     player.actions.onAction = target => {
       this.weapons.cancel(); this.aiming = false; this.interactionTime = Math.max(this.interactionTime, 0.25)
       if (target.kind === 'door' || target.kind === 'ladder') this.emit({ kind: target.kind, position: target.point, radius: target.kind === 'door' ? 8 : 5 })
+      if (target.kind === 'zipline') this.audio.play({ kind: 'zipline', duration: this.player.actions.rideSeconds })
     }
     this.bindInput()
     this.initialized = this.initialize()
@@ -597,7 +605,7 @@ export class ZombiesRuntime {
     this.brute = null; this.bruteTimer = -1
     for (const skull of this.skulls) { skull.found = false; skull.object.userData.found = false }
     this.music.stopStings()
-    this.grenades.clear(); this.bolts.clear(); this.grenadeCount = GRENADE.start; this.grenadeCooldown = 0
+    this.grenades.clear(); this.bolts.clear(); this.rockets.clear(); this.grenadeCount = GRENADE.start; this.grenadeCooldown = 0
     this.dolls.clear(); this.dollCount = 0; this.dollCooldown = 0; this.pendingThrows = []
     if (this.pack && this.pack.state !== 'idle') this.pack.take()
     this.dropper = new PowerupDropper(this.random)
@@ -685,9 +693,10 @@ export class ZombiesRuntime {
     if (event.ctrlKey || event.metaKey || event.altKey || (event.repeat && !zoomKey) || !this.player.enabled || this.player.immersive) return
     if (event.target instanceof HTMLElement && event.target.closest('button,input,select,textarea,summary,[contenteditable="true"]')) return
     if (!this.isActive()) return
-    // Q zooms a scoped sniper; otherwise it throws a grenade (so does G).
+    // Q zooms a scoped sniper; otherwise it throws a grenade (so does G). E zooms a scoped sniper in;
+    // otherwise it throws an Ink Doll (so does T, which the pad uses).
     const scoped = this.aiming && this.weapons.current?.name === 'sniper'
-    if (event.code === 'KeyT') {
+    if (event.code === 'KeyT' || (event.code === 'KeyE' && !scoped)) {
       if (!event.repeat && this.throwDoll()) { event.preventDefault(); this.invalidate() }
       return
     }
@@ -1413,7 +1422,7 @@ export class ZombiesRuntime {
       }
       case 'drop': this.powerups.spawn(m.k, toVector(m.p)); break
       case 'grab': this.powerups.removeNear(m.k, toVector(m.p)); this.activate(m.k, m.by === this.coop.id ? 'me' : 'partner'); break
-      case 'boom': this.explosions.emit(toVector(m.p), m.r); this.emit({ kind: 'grenade-blast', position: toVector(m.p), radius: 120 }); break
+      case 'boom': this.blastLook(toVector(m.p), m.r, m.k); break
       case 'gameover': if (this.state.phase === 'active') this.gameOver(); break
       case 'start':
         // The host pressed Start: jump in (the page needs a click of ours to take the mouse).
@@ -1424,7 +1433,7 @@ export class ZombiesRuntime {
       case 'me': this.mate(from).state = { ...m.me, id: from }; break
       case 'shot': this.partnerShot(m, from); break
       case 'knife': this.partnerKnife(m, from); break
-      case 'blast': this.partnerBlast(toVector(m.p), m.r, m.dmg, from); break
+      case 'blast': this.partnerBlast(toVector(m.p), m.r, m.dmg, from, m.k); break
       case 'use':
         if (m.what === 'gate') {
           const gate = this.zones?.gates.find(g => g.spec.id === m.id)
@@ -1462,7 +1471,9 @@ export class ZombiesRuntime {
       case 'fire': {
         // A teammate's shot: its tracer (green for the Ink Ray, red once upgraded) and its report where they stand.
         const o = toVector(m.o), e = toVector(m.e), ray = m.w === 'raygun'
-        this.bulletTrails.emit(o, e, ray ? 'pistol' : m.w as WeaponName, undefined, undefined, m.pk ? PACKED_TRACER : ray ? RAY_TRACER : undefined)
+        // Dead Ink weapons: a teammate's Ink Rocket is seen flying, not as a tracer (its burst comes as a blast).
+        if (m.w === 'rocket') this.rockets.fire(o, e.clone().sub(o), rocketLoad({ name: 'rocket', packed: !!m.pk }), true)
+        else this.bulletTrails.emit(o, e, ray ? 'pistol' : m.w as WeaponName, undefined, undefined, m.pk ? PACKED_TRACER : ray ? RAY_TRACER : undefined)
         this.audio.play({ kind: ray ? 'shot-raygun' : `shot-${m.w}`, position: o, radius: 55, packed: m.pk })
         if (this.coop.role === 'host' && m.from !== undefined) this.coop.send({ t: 'fire', o: m.o, e: m.e, w: m.w, pk: m.pk }, { skip: m.from })
         break
@@ -1521,8 +1532,8 @@ export class ZombiesRuntime {
     this.coop.send({ t: 'award', n: this.timers.doublePoints ? points * 2 : points, k: hit.lethal ? 1 : 0 }, { to: from })
   }
 
-  /** A guest's grenade, doll or Ink Ray bolt going off: the host does the damage, the guest gets the points. */
-  private partnerBlast(at: THREE.Vector3, radius: number, damage: number, from: number) {
+  /** A guest's grenade, doll, Ink Ray bolt, rocket or Deadline round going off: the host does the damage, the guest gets the points. */
+  private partnerBlast(at: THREE.Vector3, radius: number, damage: number, from: number, kind?: BlastKind) {
     const director = this.director
     if (!director) return
     let points = 0, kills = 0
@@ -1530,10 +1541,9 @@ export class ZombiesRuntime {
       points += pointsForHit({ lethal: hit.lethal, zone: 'torso' })
       if (hit.lethal) { kills++; this.partnerKills++; this.killed(hit.zombie.position, hit.zombie, null, false, from) }
     }
-    this.explosions.emit(at, radius)
-    this.emit({ kind: 'grenade-blast', position: at.clone(), radius: 120 })
+    this.blastLook(at, radius, kind)
     // The other guests see it go off too.
-    this.coop.send({ t: 'boom', p: vec(at), r: radius }, { skip: from })
+    this.coop.send({ t: 'boom', p: vec(at), r: radius, k: kind }, { skip: from })
     if (points) this.coop.send({ t: 'award', n: this.timers.doublePoints ? points * 2 : points, k: kills }, { to: from })
   }
 
@@ -1637,7 +1647,7 @@ export class ZombiesRuntime {
   private useDollWall(buy: DollBuy) {
     if (!this.isActive() || !this.canReach(buy.point, buy.root) || this.dollCount >= DECOY.carry || !this.spend(DECOY.price)) return false
     this.dollCount = DECOY.carry
-    this.hud.notify('Ink Dolls: throw one with T and every zombie goes for it.', 3)
+    this.hud.notify('Ink Dolls: throw one with E and every zombie goes for it.', 3)
     this.emit({ kind: 'pickup', position: this.player.body.position.clone(), radius: 2 })
     this.invalidate()
     return true
@@ -1796,7 +1806,7 @@ export class ZombiesRuntime {
     const level = (current.packed ? current.packLevel ?? 1 : 0) + 1
     const upgraded = { ...current, id: `${current.id}-packed${level}`, packed: true, packLevel: level }
     const capacity = weaponRules(upgraded).capacity
-    pack.insert({ ...upgraded, magazine: capacity, reserve: current.special === 'rayGun' ? INK_RAY.packedReserve : capacity * RESERVE_MAGAZINES * 2 })
+    pack.insert({ ...upgraded, magazine: capacity, reserve: current.special === 'rayGun' ? INK_RAY.packedReserve : spareAmmo(upgraded) })
     this.emit({ kind: 'pack-work', position: pack.point.clone(), radius: 30 })
     this.invalidate()
     return true
@@ -1810,19 +1820,27 @@ export class ZombiesRuntime {
    * Co-op blasts: the guest's go to the host (which does the damage and pays the guest) and are drawn
    * here; the host's are drawn on the guest's screen too.
    */
-  private coopBlast(at: THREE.Vector3, radius: number, damage: number) {
+  private coopBlast(at: THREE.Vector3, radius: number, damage: number, kind?: BlastKind) {
     if (!this.paired) return
     if (this.isGuest) {
-      this.coop.send({ t: 'blast', p: vec(at), r: radius, dmg: damage })
-      this.explosions.emit(at, radius)
-      this.emit({ kind: 'grenade-blast', position: at.clone(), radius: 120 })
-    } else this.coop.send({ t: 'boom', p: vec(at), r: radius })
+      this.coop.send({ t: 'blast', p: vec(at), r: radius, dmg: damage, k: kind })
+      this.blastLook(at, radius, kind)
+    } else this.coop.send({ t: 'boom', p: vec(at), r: radius, k: kind })
   }
 
-  /** What each kind of blast deals, the same numbers the host uses for its own. */
+  /**
+   * What each kind of blast deals, the same numbers the host uses for its own. A frag's is fixed, as in Call
+   * of Duty (grenades.ts); the Ink Doll's and the Ink Ray's still rise with the round, as their wonder does.
+   */
   private blastDamage(kind: string) {
     const health = zombieHealth(this.rounds.round) * DIFFICULTY[this.difficulty].health
-    return kind === 'dollBlast' ? health * 3 : kind === 'boltBurst' ? Math.max(1500, health * 1.6) : Math.max(600, health * 2)
+    return kind === 'dollBlast' ? health * 3 : kind === 'boltBurst' ? Math.max(1500, health * 1.6) : GRENADE.damage
+  }
+
+  /** How a blast shows: a frag's burst (the Ink Doll's and the Ink Ray's too, as before), a rocket's, a Deadline round's pop. */
+  private blastLook(at: THREE.Vector3, radius: number, kind: BlastKind = 'grenade') {
+    this.explosions.emit(at, kind === 'round' ? DEADLINE_ROUND.look : radius)
+    this.emit({ kind: kind === 'rocket' ? 'rocket-boom' : kind === 'round' ? 'round-burst' : 'grenade-blast', position: at.clone(), radius: kind === 'rocket' ? 160 : 120 })
   }
 
   private blockByZombies() {
@@ -2127,8 +2145,7 @@ export class ZombiesRuntime {
         if (this.dollCount > 0) this.dollCount = DECOY.carry
         for (const item of [...this.weapons.slots, ...(this.heldWeapons?.slots ?? [])]) {
           if (!item || item.special === 'deathMachine') continue
-          item.reserve = Math.max(item.reserve, item.special === 'rayGun' ? item.packed ? INK_RAY.packedReserve : INK_RAY.reserve
-            : WEAPON_RULES[item.name].capacity * RESERVE_MAGAZINES * (item.packed ? 2 : 1))
+          item.reserve = Math.max(item.reserve, item.special === 'rayGun' ? item.packed ? INK_RAY.packedReserve : INK_RAY.reserve : spareAmmo(item))
         }
         break
       case 'deathMachine':
@@ -2187,10 +2204,18 @@ export class ZombiesRuntime {
       this.bolts.fire(shot.origin, shot.direction, !!held.packed)
       return
     }
+    // The Ink Rocket: a rocket, not a bullet (rockets.ts); it bursts where it lands.
+    if (held?.name === 'rocket') { this.rockets.fire(shot.origin, shot.direction, rocketLoad(held)); return }
+    // The Deadline's rounds burst where they strike (blasts.ts): in the first body, or on a wall.
+    const explosive = held && isAkimbo(held) ? held : null
     if (this.isGuest) {
       // The host has the real zombies: it works the shot out and sends back hits and points.
       this.coop.send({ t: 'shot', o: vec(shot.origin), d: vec(shot.direction), range: shot.range, damage: shot.damage, weapon: shot.weapon ?? held?.name ?? 'pistol',
         scale, pierce: held ? pierceOf(held) : 1, pellet: shot.pelletIndex })
+      if (explosive) {
+        const body = this.director.aimDistance(shot.origin, shot.direction, distance)
+        if (body < distance || surface) this.roundBurst(shot.origin.clone().addScaledVector(shot.direction, Math.min(body, distance)), shot.direction, explosive)
+      }
       return
     }
     const struck = this.director.hitAll(shot, distance, scale, !!this.timers.instaKill, held ? pierceOf(held) : 1)
@@ -2209,6 +2234,36 @@ export class ZombiesRuntime {
     } : undefined
     // An upgraded gun's rounds fly red, as Pack-a-Punched rounds glow in Call of Duty.
     this.bulletTrails.emit(shot.origin, end, shot.weapon, undefined, impact, held?.packed ? PACKED_TRACER : undefined)
+    if (explosive && (hit || surface)) this.roundBurst(end, shot.direction, explosive)
+  }
+
+  /** A Deadline round goes off where it struck: a small splash that gibs and cripples, and stings you close up. */
+  private roundBurst(point: THREE.Vector3, direction: THREE.Vector3, item: WeaponItem) {
+    this.burst(point.clone().addScaledVector(direction, -0.05), DEADLINE_ROUND.radius, roundDamage(item), 'round', DEADLINE_ROUND.selfRadius, DEADLINE_ROUND.selfDamage)
+  }
+
+  /** An Ink Rocket bursts: a big blast that clears a pack, gibs and cripples, and hurts you if you are close. */
+  private rocketBurst(burst: RocketBurst) {
+    this.burst(burst.at, burst.radius, burst.damage, 'rocket', burst.radius * ROCKET.selfRadius, ROCKET.selfDamage)
+  }
+
+  /**
+   * A rocket or a Deadline round going off. It hurts you if you stood too close, host or guest alike; the
+   * host does the damage to the zombies, and a guest's goes to the host, as its grenades do.
+   */
+  private burst(at: THREE.Vector3, radius: number, damage: number, kind: BlastKind, selfReach: number, selfDamage: number) {
+    const hurt = selfBlast(this.player.world, at, this.player.body.position, this.camera.perspective.getWorldPosition(new THREE.Vector3()), selfReach, selfDamage)
+    if (hurt >= 1) this.damage(Math.round(hurt), 'zombie', at.clone())
+    this.coopBlast(at, radius, damage, kind)
+    const director = this.director
+    if (this.isGuest || !director) return
+    for (const hit of director.blast(at, radius, damage)) {
+      this.hitFlash = 0.15
+      this.award(pointsForHit({ lethal: hit.lethal, zone: 'torso' }))
+      this.hits.hit(hit.reaction.point, hit.dealt, hit.zombie.id, false, hit.lethal)
+      if (hit.lethal) { this.state.kills++; this.killed(hit.zombie.position, hit.zombie) }
+    }
+    this.blastLook(at, radius, kind)
   }
 
   /** Throw a frag the way you are looking, a little up, carrying your own speed with it. */
@@ -2250,9 +2305,9 @@ export class ZombiesRuntime {
     if (!director) return
     this.coopBlast(at, GRENADE.radius, this.blastDamage('grenadeBlast'))
     if (this.isGuest) return
-    // Twice a zombie's health: everything inside the radius dies, even in the high rounds.
-    const damage = Math.max(600, zombieHealth(this.rounds.round) * DIFFICULTY[this.difficulty].health * 2)
-    for (const hit of director.blast(at, GRENADE.radius, damage)) {
+    // A fixed blow, as a frag's is in Call of Duty (grenades.ts): a pack dies early on; from about round 6
+    // the ones at the edge live through it, and some of them crawl.
+    for (const hit of director.blast(at, GRENADE.radius, GRENADE.damage)) {
       this.award(pointsForHit({ lethal: hit.lethal, zone: 'torso' }))
       this.hits.hit(hit.reaction.point, hit.dealt, hit.zombie.id, false, hit.lethal)
       if (hit.lethal) { this.state.kills++; this.killed(hit.zombie.position, hit.zombie) }
@@ -2435,7 +2490,8 @@ export class ZombiesRuntime {
     if (this.strandTimer > 0 || !this.director || !this.graph) return
     this.strandTimer = 0.5
     for (const zombie of this.director.zombies) {
-      if (zombie.state !== 'chase' || !zombie.stranded) continue
+      // Never the Brute: it vanishing behind your back and turning up elsewhere reads as a glitch.
+      if (zombie.state !== 'chase' || !zombie.stranded || zombie.boss) continue
       if (this.seen(zombie.position.clone().setY(zombie.position.y + 1.2), zombie.actor.root)) continue
       const spot = pickSpawn(this.graph, this.player.world, { near: 12, far: 32, eyes: this.eyes() }, this.random)
       if (spot) this.director.relocate(zombie, spot)
@@ -2641,6 +2697,7 @@ export class ZombiesRuntime {
       if (lures.length && (this.dollClap -= dt) <= 0) { this.dollClap = 0.32; this.emit({ kind: 'doll-clap', position: lures[0].position.clone(), radius: 25 }) }
       for (const at of this.dolls.update(dt)) this.dollBlast(at)
       for (const burst of this.bolts.update(dt)) this.boltBurst(burst.at, burst.packed)
+      for (const burst of this.rockets.update(dt)) this.rocketBurst(burst)
       this.tickPowerups(dt)
       const speed = Math.hypot(body.velocity.x, body.velocity.z)
       if (speed > 0.5 && body.grounded || this.player.actions.climbing) {
@@ -2733,7 +2790,7 @@ export class ZombiesRuntime {
     this.director?.dispose()
     this.hits.dispose(); this.indicator.dispose(); this.hotbar.dispose(); this.zombieHud.dispose()
     this.minimap?.dispose()
-    this.uninstallCosmetics(); this.lowHealth.dispose(); this.stopSettings(); this.bulletTrails.dispose(); this.weapons.dispose(); this.blood.dispose(); this.impacts.dispose(); this.riseMarks.dispose(); this.sparks.dispose(); this.shockwaves.dispose(); this.explosions.dispose(); this.nukeCloud.dispose(); this.undress?.(); this.grenades.dispose(); this.dolls.dispose(); this.dollBuy?.dispose(); this.bolts.dispose(); this.powerups.dispose()
+    this.uninstallCosmetics(); this.lowHealth.dispose(); this.stopSettings(); this.bulletTrails.dispose(); this.weapons.dispose(); this.blood.dispose(); this.impacts.dispose(); this.riseMarks.dispose(); this.sparks.dispose(); this.shockwaves.dispose(); this.explosions.dispose(); this.nukeCloud.dispose(); this.undress?.(); this.grenades.dispose(); this.dolls.dispose(); this.dollBuy?.dispose(); this.bolts.dispose(); this.rockets.dispose(); this.powerups.dispose()
     for (const skull of this.skulls) skull.object.removeFromParent()
     delete document.body.dataset.deadInkStorm
     delete document.body.dataset.deadInkOneHit

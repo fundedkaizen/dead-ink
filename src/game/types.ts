@@ -2,13 +2,15 @@ import type * as THREE from 'three'
 import type { CollisionWorld } from '../player/collision'
 
 export type Vec3 = [number, number, number]
-export type WeaponName = 'pistol' | 'ak' | 'smg' | 'shotgun' | 'sniper' | 'magnum' | 'lmg'
+export type WeaponName = 'pistol' | 'ak' | 'smg' | 'shotgun' | 'sniper' | 'magnum' | 'lmg' | 'rocket'
 export type WeaponItem = { id: string; name: WeaponName; magazine: number; reserve: number; position?: Vec3; rarity?: import('./loot').Rarity; special?: 'deathMachine' | 'rayGun'; packed?: boolean; packLevel?: number }
-export type SoundEvent = { kind: string; position?: THREE.Vector3; source?: THREE.Vector3; intensity?: number; radius?: number; text?: string; voice?: string; speaker?: number; weapon?: WeaponName; zone?: import('./hit-reactions').HitZone; volume?: number; packed?: number }
+export type SoundEvent = { kind: string; position?: THREE.Vector3; source?: THREE.Vector3; intensity?: number; radius?: number; text?: string; voice?: string; speaker?: number; weapon?: WeaponName; zone?: import('./hit-reactions').HitZone; volume?: number; packed?: number; duration?: number }
 export type EmitSound = (event: SoundEvent) => void
+/** What a hostage-mission guard can carry: never Dead Ink's Ink Rocket, a box-only launcher. */
+export type GuardWeapon = Exclude<WeaponName, 'rocket'>
 export type StationKind = 'radio' | 'release' | 'brake' | 'signal' | 'extract' | 'supply' | 'distraction' | 'hostage' | 'cameras' | 'alarm' | 'gate' | 'jeep' | 'rally'
 export type Station = { id: string; kind: StationKind; object: THREE.Object3D; point: THREE.Vector3; label: string }
-export type EnemySpec = { id: string; name: string; position: Vec3; patrol: Vec3[]; weapon: WeaponName; reserve?: boolean; alarmExit?: Vec3; facing?: number; role?: 'sniper' | 'guard'; patrolMode?: 'perimeter' }
+export type EnemySpec = { id: string; name: string; position: Vec3; patrol: Vec3[]; weapon: GuardWeapon; reserve?: boolean; alarmExit?: Vec3; facing?: number; role?: 'sniper' | 'guard'; patrolMode?: 'perimeter' }
 export type MissionWorld = { root: THREE.Group; stations: Station[]; enemies: EnemySpec[]; spawn: Vec3; lookAt: Vec3; bounds: { minX: number; maxX: number; minZ: number; maxZ: number }; rescue?: { gate: THREE.Group; jeep: THREE.Group; cameras: { id: string; pivot: THREE.Group; lamp: THREE.Mesh }[]; cellDoors: THREE.Group[] } }
 /** A player the guards can see, hear and shoot. `id` is the co-op number (the host, or a solo player, is 0). */
 export type PlayerSense = { feet: THREE.Vector3; eye: THREE.Vector3; velocity: THREE.Vector3; alive: boolean; radioEnabled: boolean; yaw?: number; id?: number }

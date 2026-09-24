@@ -1,6 +1,7 @@
 import { CoopLink as SharedCoopLink, type CoopStatus, type PlayerState } from '../shared/coop'
 import type { WeaponName } from '../types'
 import type { ZombieSnap } from './director'
+import type { BlastKind } from './blasts'
 import type { PowerupKind } from './rules'
 
 /**
@@ -53,7 +54,8 @@ export type CoopMessage =
   | { t: 'box'; a: 'spin' | 'take' | 'close' | 'move'; r?: { name: WeaponName; rarity: string; special?: 'rayGun' }; teddy?: boolean; by?: number; spot?: number }
   | { t: 'drop'; k: PowerupKind; p: [number, number, number] }
   | { t: 'grab'; k: PowerupKind; p: [number, number, number]; by: number }
-  | { t: 'boom'; p: [number, number, number]; r: number }
+  // `k`: how it looks and sounds (a rocket's, a Deadline round's); a frag's when missing.
+  | { t: 'boom'; p: [number, number, number]; r: number; k?: BlastKind }
   | { t: 'soul'; p: [number, number, number]; i: number }
   /** A teammate fired: the tracer from `o` to `e`, the gun (`raygun` for the Ink Ray) and its Pack-a-Punch level, to see and hear. */
   | { t: 'fire'; o: [number, number, number]; e: [number, number, number]; w: string; pk?: number }
@@ -63,7 +65,7 @@ export type CoopMessage =
   | { t: 'me'; me: PlayerState }
   | { t: 'shot'; o: [number, number, number]; d: [number, number, number]; range: number; damage: number; weapon: WeaponName; scale: number; pierce: number; pellet?: number }
   | { t: 'knife'; o: [number, number, number]; f: [number, number, number]; range: number; damage: number }
-  | { t: 'blast'; p: [number, number, number]; r: number; dmg: number }
+  | { t: 'blast'; p: [number, number, number]; r: number; dmg: number; k?: BlastKind }
   | { t: 'use'; what: 'gate'; id: string }
   | { t: 'use'; what: 'box'; guns: WeaponName[] }
   | { t: 'use'; what: 'box-take' }

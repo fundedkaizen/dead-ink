@@ -5,8 +5,14 @@ import type { CollisionWorld } from '../../player/collision'
  * Frag grenades, Call of Duty style: two at the start and two more each round, four at most, thrown
  * with Q (or G). They fly, bounce off walls and floors, roll to a stop and go off after their fuse.
  * This file is the physics; what the blast does belongs to the runtime.
+ *
+ * `damage` is fixed, as a frag's is in Call of Duty, and meets the director's falloff (half at the rim):
+ * about 1080 to a zombie standing over it, 600 at the edge. So a pack dies to it through round 5 (550
+ * health); from round 6 or 7 the ones at the edge live through it, and a survivor it hit hard enough can
+ * lose its legs and crawl; from round 11 a frag no longer kills on its own. Tuned to that description of
+ * Call of Duty, not taken from a source.
  */
-export const GRENADE = { start: 2, perRound: 2, max: 4, fuse: 2.2, speed: 13, lift: 3.6, radius: 5.5, cooldown: 0.8, selfRadius: 4, selfDamage: 60 } as const
+export const GRENADE = { start: 2, perRound: 2, max: 4, fuse: 2.2, speed: 13, lift: 3.6, radius: 5.5, damage: 1200, cooldown: 0.8, selfRadius: 4, selfDamage: 60 } as const
 
 type Live = { object: THREE.Object3D; velocity: THREE.Vector3; spin: THREE.Vector3; fuse: number; resting: boolean; restAge: number }
 
