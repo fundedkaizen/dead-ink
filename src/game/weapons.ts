@@ -52,6 +52,11 @@ const FEEL: Record<WeaponName, { kick: number; roll: number; shake: number; flas
 const DEATH_MACHINE_FEEL = { kick: 0.3, roll: 0.02, shake: 0.002, flash: 1.1 }
 /** Where a watch face points: up and toward the eye, so a glance at the wrist shows it. */
 const WATCH_FACE = new THREE.Vector3(-0.35, 0.75, 0.6).normalize()
+/**
+ * The charm's swing: the share of the hand's movement that carries it along (the rest swings it), how much
+ * of its speed it keeps each 60th of a second, and the furthest it swings off straight down (radians).
+ */
+const CHARM_SWING = { follow: 0.9, damping: 0.8, limit: 0.45 } as const
 /** Charms are drawn facing +Z; the eye sits behind the gun and off its +X side. */
 const CHARM_FACING = new THREE.Quaternion().setFromAxisAngle(up, 2.6)
 /** An upgraded shotgun loads this many shells per reload cycle, as in Call of Duty. */
@@ -1117,10 +1122,22 @@ export class FirstPersonWeapons {
     if (!charm.ready || this.frame.reducedMotion || charm.anchor.distanceTo(anchor) > 0.5) {
       charm.bob.copy(rest); charm.previous.copy(rest); charm.ready = true
     } else {
-      const velocity = charm.bob.clone().sub(charm.previous).multiplyScalar(Math.pow(0.9, dt * 60))
+      // Most of the hand's own movement carries the charm along: only what is left over swings it, so a
+      // sprint rocks it gently instead of flinging it back through the gun.
+      const carried = anchor.clone().sub(charm.anchor).multiplyScalar(CHARM_SWING.follow)
+      charm.bob.add(carried); charm.previous.add(carried)
+      const velocity = charm.bob.clone().sub(charm.previous).multiplyScalar(Math.pow(CHARM_SWING.damping, dt * 60))
       charm.previous.copy(charm.bob)
       charm.bob.add(velocity).addScaledVector(down, 9.8 * dt * dt)
       charm.bob.sub(anchor).setLength(CHARM_LENGTH).add(anchor)
+      // Never further than this off hanging straight down: past it, it would swing into the gun.
+      const offset = charm.bob.clone().sub(anchor)
+      if (offset.angleTo(down) > CHARM_SWING.limit) {
+        const axis = new THREE.Vector3().crossVectors(down, offset).normalize()
+        charm.bob.copy(anchor).addScaledVector(down.clone().applyAxisAngle(axis, CHARM_SWING.limit), CHARM_LENGTH)
+        // It stops there, and most of its speed with it.
+        charm.previous.lerp(charm.bob, 0.6)
+      }
     }
     charm.anchor.copy(anchor)
     const local = charm.pivot.worldToLocal(charm.bob.clone()).normalize()
