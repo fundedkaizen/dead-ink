@@ -46,7 +46,8 @@ export function rocketLoad(item: Pick<WeaponItem, 'name' | 'rarity' | 'packed' |
   return { packed, radius: packed ? ROCKET.packedRadius : ROCKET.radius, damage: ROCKET.damage * weaponRules(item).damage / WEAPON_RULES.rocket.damage }
 }
 
-type Flight = { model: Gun; flame: THREE.Mesh; direction: THREE.Vector3; speed: number; age: number; puff: number; load: RocketLoad }
+/** `drawn`: a teammate's rocket, only drawn here; its burst is theirs and arrives as a blast of its own. */
+type Flight = { model: Gun; flame: THREE.Mesh; direction: THREE.Vector3; speed: number; age: number; puff: number; load: RocketLoad; drawn: boolean }
 type Puff = { position: THREE.Vector3; velocity: THREE.Vector3; size: number; grow: number; age: number; life: number; tone: number; seed: number }
 
 export class InkRockets {
@@ -76,8 +77,11 @@ export class InkRockets {
   get inFlight() { return this.flights.map(f => ({ position: f.model.position, direction: f.direction, packed: f.load.packed, speed: f.speed })) }
   get trailPuffs() { return this.puffs.length + this.redPuffs.length }
 
-  /** A rocket leaves the tube at `origin` (the warhead's base), flying along `direction`. */
-  fire(origin: THREE.Vector3, direction: THREE.Vector3, load: RocketLoad) {
+  /**
+   * A rocket leaves the tube at `origin` (the warhead's base), flying along `direction`. `drawn`: a
+   * teammate's, seen flying here but bursting silently (co-op sends its burst as a blast).
+   */
+  fire(origin: THREE.Vector3, direction: THREE.Vector3, load: RocketLoad, drawn = false) {
     const model = buildRocketRound()
     model.name = load.packed ? 'Press Ram rocket' : 'Ink Rocket rocket'
     model.userData.noCollision = true
@@ -91,7 +95,7 @@ export class InkRockets {
     model.lookAt(this.look.copy(origin).add(heading))
     this.scene.add(model)
     // A first puff right at the mouth.
-    this.flights.push({ model, flame, direction: heading, speed: ROCKET.speed, age: 0, puff: ROCKET.puffEvery, load })
+    this.flights.push({ model, flame, direction: heading, speed: ROCKET.speed, age: 0, puff: ROCKET.puffEvery, load, drawn })
   }
 
   /** Fly, trail smoke and burst; returns the bursts of this frame. */
@@ -111,7 +115,7 @@ export class InkRockets {
         const travel = Math.min(reach, step)
         const at = from.clone().addScaledVector(direction, Math.max(0, travel - 0.08))
         this.trail(flight, travel)
-        bursts.push({ ...flight.load, at, direction: direction.clone() })
+        if (!flight.drawn) bursts.push({ ...flight.load, at, direction: direction.clone() })
         this.remove(flight)
         continue
       }

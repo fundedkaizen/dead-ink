@@ -3,7 +3,8 @@
 // Starts in the page and returns at once; poll window.__weaponsCheck for { done, results, error? }.
 // Dead Ink's weapons in the real game: a frag dropped on a pack kills it on round 3 and leaves crawlers on
 // round 8; the Ink Rocket taken from the Mystery Box flies, bursts, reloads itself, hurts you point blank
-// and becomes the Press Ram; the Magnum becomes the Deadline, two guns firing in turn, rounds that burst.
+// and becomes the Press Ram; the Magnum becomes the Deadline, two guns firing in turn, rounds that burst;
+// in co-op teammates see the rocket fly and the red rounds, and a guest's blasts go to the host.
 // Staged: the pack is held still (a long stagger) so the blast meets it where it was placed, the player is
 // invincible except where self-damage is measured, the box's landing gun is set to the launcher, and the
 // gore dice are seeded so the round 8 frag is repeatable.
@@ -255,6 +256,88 @@ const status = window.__weaponsCheck = { done: false, results }
   m.invincible = true
   m.state.health = 100
   check(sting >= 8 && sting <= 40, 'a round at your own feet hurts', `${sting} damage`)
+
+  // ---- 4. Co-op, the link stood in for (one tab): what teammates see, and a guest's blasts --------------
+  const sent = []
+  const realSend = m.coop.send.bind(m.coop), realRole = m.coop.role
+  const play = m.audio.play.bind(m.audio), trail = m.bulletTrails.emit.bind(m.bulletTrails)
+  const heard = [], drawn = []
+  m.coop.peers.add(1)
+  m.coop.role = 'host'
+  m.coop.send = (message, route) => sent.push({ message, route })
+  m.audio.play = event => { heard.push(event); return play(event) }
+  m.bulletTrails.emit = (...args) => { drawn.push(args); return trail(...args) }
+  const told = (t, test = () => true) => sent.filter(s => s.message.t === t && test(s.message, s.route))
+  try {
+    // Our rocket: teammates hear it fired, then see its burst.
+    m.director.clear()
+    m.weapons.restore({ slots: [{ id: 'co-rocket', name: 'rocket', magazine: 1, reserve: 10 }, null], selected: 0, pickups: [], nextId: 11 })
+    face(); await sleep(500)
+    m.weapons.trigger(true); await sleep(40); m.weapons.trigger(false)
+    check(await until(() => m.rockets.count === 0 && told('boom').length > 0, 4000), 'our rocket bursts')
+    check(told('fire', f => f.w === 'rocket').length === 1 && told('boom', b => b.k === 'rocket').length === 1, 'teammates are told our rocket was fired, then where it burst',
+      JSON.stringify([told('fire')[0]?.message.w, told('boom')[0]?.message.k]))
+    // A teammate's rocket: seen flying, not as a tracer; heard; bursting silently here (its blast comes on its own).
+    const side = new V(-ahead.z, 0, ahead.x)
+    const bystander = m.director.spawn(home.clone().addScaledVector(side, 2).addScaledVector(ahead, 9), 5000, 'walk', 0)
+    bystander.stagger = 999
+    await sleep(300)
+    const from = home.clone().addScaledVector(side, 2).setY(home.y + 1.5), to = bystander.actor.rig.bones.chest.getWorldPosition(new V())
+    const booms = told('boom').length
+    drawn.length = 0; heard.length = 0
+    m.coopMessage({ t: 'fire', o: [from.x, from.y, from.z], e: [to.x, to.y, to.z], w: 'rocket', pk: 1, from: 1 })
+    check(m.rockets.count === 1 && m.rockets.inFlight[0].packed && drawn.length === 0, "a teammate's rocket is seen flying, red once upgraded, with no tracer", `${m.rockets.count} ${drawn.length}`)
+    check(heard.some(h => h.kind === 'shot-rocket'), 'and heard leaving the tube')
+    check(await until(() => m.rockets.count === 0, 2000), 'it reaches the zombie')
+    await sleep(100)
+    check(bystander.state === 'chase' && bystander.health === 5000 && told('boom').length === booms, "and bursts silently here: its blast is the shooter's", `${bystander.health}`)
+    check(told('fire', (f, route) => f.w === 'rocket' && route?.skip === 1).length === 1, 'the host passes it on to the other teammates')
+    // A teammate's blasts, drawn and heard as theirs.
+    heard.length = 0
+    m.coopMessage({ t: 'boom', p: [to.x, to.y, to.z], r: 6, k: 'rocket', from: 0 })
+    m.coopMessage({ t: 'boom', p: [to.x, to.y, to.z], r: 1.75, k: 'round', from: 0 })
+    check(heard.some(h => h.kind === 'rocket-boom') && heard.some(h => h.kind === 'round-burst'), "a teammate's rocket and round go off with their own sound", heard.map(h => h.kind).join(','))
+    // A teammate's Deadline: its red tracer from the gun that fired, and its report.
+    drawn.length = 0; heard.length = 0
+    m.coopMessage({ t: 'fire', o: [from.x - 0.2, from.y, from.z], e: [to.x, to.y, to.z], w: 'magnum', pk: 1, from: 1 })
+    check(drawn.length === 1 && drawn[0][5] === 0xd4332a && heard.some(h => h.kind === 'shot-magnum' && h.packed === 1), "a teammate's Deadline shot draws red and is heard", `${drawn.length} ${drawn[0]?.[5]}`)
+    // The host takes a guest's Deadline round: the zombie it burst on dies, the guest is paid, the others see it.
+    m.director.clear()
+    const struck = m.director.spawn(home.clone().addScaledVector(ahead, 7), 250, 'walk', 0)
+    struck.stagger = 999
+    await sleep(300)
+    const chest = struck.actor.rig.bones.chest.getWorldPosition(new V())
+    sent.length = 0
+    m.coopMessage({ t: 'blast', p: [chest.x, chest.y, chest.z], r: 1.75, dmg: 400, k: 'round', from: 1 })
+    check(struck.state === 'dead', "the host does a guest's round's damage", struck.state)
+    check(told('award', (a, route) => route?.to === 1 && a.k === 1).length === 1 && told('boom', (b, route) => b.k === 'round' && route?.skip === 1).length === 1,
+      'pays the guest for the kill and shows the burst to the others', JSON.stringify(sent.filter(s => s.message.t !== 'tick').map(s => [s.message.t, s.route])))
+    // As a guest: our rounds and rockets go to the host as blasts.
+    m.director.clear()
+    m.coop.role = 'guest'
+    m.weapons.restore({ slots: [{ id: 'co-deadline', name: 'magnum', magazine: 12, reserve: 96, packed: true, packLevel: 1 }, { id: 'co-rocket-2', name: 'rocket', magazine: 1, reserve: 10 }], selected: 0, pickups: [], nextId: 12 })
+    face(); await sleep(600)
+    // Down at the yard some 7 m ahead: the round bursts on the floor there.
+    cam.rotation.set(-0.23, yaw, 0, 'YXZ'); e.invalidate()
+    await sleep(150)
+    sent.length = 0
+    m.weapons.trigger(true); await sleep(40); m.weapons.trigger(false)
+    await sleep(200)
+    const blast = told('blast')[0]?.message
+    check(told('shot', s => s.weapon === 'magnum').length === 1 && blast?.k === 'round' && blast.dmg === 400 && blast.r === 1.75, "a guest's Deadline round goes to the host as a shot and a blast", JSON.stringify(blast))
+    m.weapons.switchSlot(1)
+    await sleep(700)
+    cam.rotation.set(-0.19, yaw, 0, 'YXZ'); e.invalidate()
+    await sleep(150)
+    sent.length = 0
+    m.weapons.trigger(true); await sleep(40); m.weapons.trigger(false)
+    check(await until(() => m.rockets.count === 0 && told('blast').length > 0, 3000), "a guest's rocket bursts")
+    const rocketBlast = told('blast')[0]?.message
+    check(rocketBlast?.k === 'rocket' && rocketBlast.dmg === 2500 && rocketBlast.r === 6 && told('fire', f => f.w === 'rocket').length === 1, 'and goes to the host as a blast, after its fire', JSON.stringify(rocketBlast))
+  } finally {
+    m.coop.send = realSend; m.coop.peers.delete(1); m.coop.role = realRole
+    m.audio.play = play; m.bulletTrails.emit = trail
+  }
   m.emit = emit
   return { crawlers: status.crawlers, rocketHurt: hurt, roundHurt: sting }
 })().then(summary => Object.assign(status, summary, { done: true }), error => Object.assign(status, { done: true, error: String(error?.stack ?? error) }))

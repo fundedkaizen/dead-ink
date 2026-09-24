@@ -1469,7 +1469,9 @@ export class ZombiesRuntime {
       case 'fire': {
         // A teammate's shot: its tracer (green for the Ink Ray, red once upgraded) and its report where they stand.
         const o = toVector(m.o), e = toVector(m.e), ray = m.w === 'raygun'
-        this.bulletTrails.emit(o, e, ray ? 'pistol' : m.w as WeaponName, undefined, undefined, m.pk ? PACKED_TRACER : ray ? RAY_TRACER : undefined)
+        // Dead Ink weapons: a teammate's Ink Rocket is seen flying, not as a tracer (its burst comes as a blast).
+        if (m.w === 'rocket') this.rockets.fire(o, e.clone().sub(o), rocketLoad({ name: 'rocket', packed: !!m.pk }), true)
+        else this.bulletTrails.emit(o, e, ray ? 'pistol' : m.w as WeaponName, undefined, undefined, m.pk ? PACKED_TRACER : ray ? RAY_TRACER : undefined)
         this.audio.play({ kind: ray ? 'shot-raygun' : `shot-${m.w}`, position: o, radius: 55, packed: m.pk })
         if (this.coop.role === 'host' && m.from !== undefined) this.coop.send({ t: 'fire', o: m.o, e: m.e, w: m.w, pk: m.pk }, { skip: m.from })
         break

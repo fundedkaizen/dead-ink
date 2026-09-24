@@ -204,10 +204,16 @@ const crawling = () => director.zombies.filter(z => z.state === 'chase' && z.cra
   flown.length = 0
   for (let i = 0; i < 120 && !flown.length; i++) flown.push(...rockets.update(1 / 60))
   assert(flown.length === 1 && flown[0].at.distanceTo(chest) < 0.9 && flown[0].packed, `a rocket bursts on the zombie it hits (${flown[0]?.at.distanceTo(chest).toFixed(2)} m from its chest)`)
+  // A teammate's rocket (co-op): drawn flying the same way, gone at the same body, but its burst is theirs.
+  rockets.fire(eye, chest.clone().sub(eye).normalize(), ram, true)
+  flown.length = 0
+  let seen = 0
+  for (let i = 0; i < 120 && rockets.count; i++) { flown.push(...rockets.update(1 / 60)); seen++ }
+  assert(seen > 3 && rockets.count === 0 && flown.length === 0 && target.health === 5000, `a teammate's rocket is drawn flying and bursts silently (${seen} frames)`)
   rockets.update(1.6)
   rockets.dispose()
   director.clear()
-  pass(`The Ink Rocket flies (up to ${top.toFixed(0)} m/s), trails ink smoke and bursts on the first wall or zombie it touches`)
+  pass(`The Ink Rocket flies (up to ${top.toFixed(0)} m/s), trails ink smoke and bursts on the first wall or zombie it touches; a teammate's is drawn only`)
 }
 
 // ---- 4. Your own blast: a round at your feet hurts, one across the yard does not ------------------------
