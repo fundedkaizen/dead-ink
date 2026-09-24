@@ -31,8 +31,11 @@ import { INKWINGS, stormPack } from './rules'
 export const INKWING = {
   /** Its body against walls (m), and the generous spheres a bullet has to pass through: the body and wings, and the head. */
   radius: 0.22, hit: { body: 0.5, head: 0.21 },
-  /** Seconds it takes to form where its streak came down, and the gap between a group's streaks. */
-  form: 0.6, stagger: 0.22,
+  /**
+   * Its entrance: seconds for its streak of ink to fall from the sky, then to form out of the splash (the whole
+   * entrance `form`), and the gap between a group's streaks.
+   */
+  fall: 0.45, form: 1, stagger: 0.22,
   /** Circling and on its way (m/s), how hard it turns (m/s²), how far out and how high over its player's feet it circles, its body over the floor. */
   fly: { speed: 6.5, chase: 8.5, accel: 18, orbit: [3.8, 6.2], lift: [1.9, 3.1], body: 1.25 },
   /**
@@ -64,7 +67,8 @@ export type Inkwing = {
   mode: InkwingMode
   /** Seconds in this mode; below zero while a group's later streaks wait their turn. */
   clock: number
-  /** Its streak has come down (it is there). */
+  /** Its streak has started down from the sky; it has landed (it is there, and can be hit). */
+  struck: boolean
   arrived: boolean
   velocity: THREE.Vector3
   /** Whom it hunts (a target id). */
@@ -263,7 +267,7 @@ export class Inkwings {
     zombie.actor.restore('dead')
     zombie.actor.root.visible = false
     const f: Inkwing = {
-      zombie, mode: 'form', clock: 0, arrived: false, velocity: new THREE.Vector3(), target: '',
+      zombie, mode: 'form', clock: 0, struck: false, arrived: false, velocity: new THREE.Vector3(), target: '',
       side: Math.random() < 0.5 ? 1 : -1, angle: Math.random() * Math.PI * 2, radius: between(INKWING.fly.orbit), lift: between(INKWING.fly.lift), close: false,
       goal: at.clone(), sight: false, look: Math.random() * 0.2, routed: 0, cooldown: 0.8 + Math.random(),
       dir: new THREE.Vector3(0, 0, 1), left: 0, bit: false, slot: null, best: Infinity, since: 0, blocked: 0, floor: at.y - 3,
@@ -690,29 +694,40 @@ export class Inkwings {
     f.fold = 0; f.flare = 0
     f.mode = 'form'
     f.clock = 0
+    f.struck = false
     f.arrived = false
   }
 
-  /** Into a mode, with its sound: the screech of the tell, the rush of the dive, the bite landing, the snap's wind-up. */
+  /**
+   * Into a mode, with its sound (inkwing-sounds.ts): the screech of the tell and the hiss before a snap (each as long
+   * as its wind-up), the rush of the dive, the bite landing.
+   */
   private setMode(f: Inkwing, mode: InkwingMode) {
     f.mode = mode
     f.clock = 0
     const kind = mode === 'tell' ? 'inkwing-tell' : mode === 'dive' ? 'inkwing-dive' : mode === 'strike' ? 'inkwing-hit' : mode === 'snap' ? 'inkwing-snap' : null
-    if (kind) this.context.emit({ kind, position: f.zombie.position.clone(), radius: mode === 'tell' ? 48 : mode === 'dive' ? 30 : 20 })
+    const duration = mode === 'tell' ? INKWING.dive.tell : mode === 'snap' ? INKWING.snap.windup : undefined
+    if (kind) this.context.emit({ kind, position: f.zombie.position.clone(), radius: mode === 'tell' ? 48 : mode === 'dive' ? 30 : 20, duration })
   }
 
-  /** Its clock, and the moment its streak comes down. */
+  /** Its clock: the moment its streak starts down from the sky, and the moment it lands and the Inkwing forms. */
   private tick(f: Inkwing, dt: number) {
     f.clock += dt
-    if (f.mode !== 'form' || f.arrived || f.clock < 0) return
+    if (f.mode !== 'form' || f.clock < 0) return
+    const at = f.zombie.position
+    if (!f.struck) {
+      f.struck = true
+      // The streak of ink falling from the sky (or from the ceiling) to where it will form.
+      const top = this.context.world.raySurface(at, UP, 40)
+      this.look.streak(at, top ? top.point : s.a.copy(at).setY(at.y + 40))
+      this.context.emit({ kind: 'inkwing-arrive', position: at.clone(), radius: 50 })
+    }
+    if (f.arrived || f.clock < INKWING.fall) return
+    // It lands: the splash, and the Inkwing forms out of it.
     f.arrived = true
-    // The streak of ink from the sky (or from the ceiling), and the splash where it forms.
-    const at = f.zombie.position, top = this.context.world.raySurface(at, UP, 40)
-    this.look.streak(at, top ? top.point : s.a.copy(at).setY(at.y + 40))
     const floor = this.context.world.floor(at, 0.1, 40)
     this.context.gore.pop(at, 1.05, 0.3)
     this.context.gore.spray(at, UP, 16, Number.isFinite(floor) ? floor : at.y - 3, 2.4)
-    this.context.emit({ kind: 'inkwing-arrive', position: at.clone(), radius: 50 })
   }
 
   // ---------------------------------------------------------------- hits
@@ -804,7 +819,7 @@ export class Inkwings {
         if (zombie.state !== 'idle') zombie.state = 'idle'
         f = this.adopt(zombie, s.a.set(row[2], row[3], row[4]), 1)
         f.mode = mode
-        f.arrived = mode !== 'form'
+        f.struck = f.arrived = mode !== 'form'
         f.size = f.arrived ? 1 : 0
       } else if (mode !== f.mode && zombie.state === 'chase') this.setMode(f, mode)
       if (mode === 'form' && this.rowAge === 0) f.clock = INKWING.form - row[10]
@@ -816,14 +831,16 @@ export class Inkwings {
     }
     // Inkwings the host no longer has are gone (a dead one has burst already).
     for (const f of this.flock.values()) if (!held.has(f.zombie)) this.release(f)
-    const ease = 1 - Math.exp(-dt * 12), ahead = Math.min(this.rowAge, 0.25)
+    // Each flies on at the host's velocity, and what it is off from the host's place (carried on since that row) is
+    // taken up over a few frames: no lag behind a fast one, no jump when a row comes.
+    const ease = 1 - Math.exp(-dt * 12), ahead = Math.min(this.rowAge, 0.2)
     for (const f of this.flock.values()) {
       const z = f.zombie
       if (z.state !== 'chase') continue
       this.tick(f, dt)
       const goal = s.b.copy(f.row).addScaledVector(f.rowVelocity, ahead)
       if (z.position.distanceToSquared(goal) > 16) z.position.copy(goal)
-      else z.position.lerp(goal, ease)
+      else z.position.addScaledVector(f.rowVelocity, this.rowAge < 0.2 ? dt : 0).lerp(goal, ease)
       f.velocity.copy(f.rowVelocity)
       z.yaw = wrap(z.yaw + wrap(f.rowYaw - z.yaw) * ease)
     }
@@ -861,8 +878,8 @@ export class Inkwings {
     const flare = mode === 'tell' ? 0.3 + 0.7 * THREE.MathUtils.smoothstep(f.clock, 0, tell) : mode === 'dive' || mode === 'snap' ? 1 : mode === 'strike' ? 0.6 : 0
     f.flare += (flare - f.flare) * (1 - Math.exp(-dt * 12))
     if (mode === 'form') {
-      const t = THREE.MathUtils.clamp(f.clock / INKWING.form, 0, 1)
-      f.size = f.clock < 0 ? 0 : 1 + 2.7 * (t - 1) ** 3 + 1.7 * (t - 1) ** 2
+      const t = THREE.MathUtils.clamp((f.clock - INKWING.fall) / (INKWING.form - INKWING.fall), 0, 1)
+      f.size = f.arrived ? 1 + 2.7 * (t - 1) ** 3 + 1.7 * (t - 1) ** 2 : 0
     } else f.size = 1
     const flat = Math.hypot(v.x, v.z)
     const pitch = mode === 'tell' ? -0.5 : mode === 'dive' ? Math.atan2(-v.y, Math.max(flat, 0.01))
@@ -1050,7 +1067,8 @@ type Drop = { position: THREE.Vector3; velocity: THREE.Vector3; floor: number; a
 type Torn = { position: THREE.Vector3; velocity: THREE.Vector3; rotation: THREE.Quaternion; spin: THREE.Vector3; side: 1 | -1; floor: number; age: number }
 
 const MOST = { flyers: 40, streaks: 16, drops: 90, torn: 24, glows: 8 } as const
-const STREAK = { grow: 0.07, hold: 0.12, fade: 0.32 } as const
+/** The streak falls as long as the Inkwing's entrance says, lingers a moment, and dries away. */
+const STREAK = { grow: INKWING.fall, hold: 0.1, fade: 0.35 } as const
 const TORN = { life: 3.2, melt: 0.8 } as const
 
 class InkwingLook {

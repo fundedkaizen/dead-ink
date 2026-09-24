@@ -146,7 +146,7 @@ export const stormNumber = (round: number) => Math.max(1, Math.floor((Math.floor
  * `health` share of a zombie's, `perPlayer` more for each player past the first; they come in groups of
  * `group` (fewest, most).
  */
-export const INKWINGS = { flyers: 10, perStorm: 3, players: [1, 1.7, 2.3, 2.9], sprinters: 0.3, health: 0.5, perPlayer: 0.15, group: [2, 4] } as const
+export const INKWINGS = { flyers: 10, perStorm: 3, players: [1, 1.7, 2.3, 2.9], sprinters: 0.2, health: 0.5, perPlayer: 0.15, group: [2, 4] } as const
 export function stormPack(round: number, players: number) {
   const n = Math.min(4, Math.max(1, Math.floor(players)))
   const flyers = Math.round((INKWINGS.flyers + INKWINGS.perStorm * (stormNumber(round) - 1)) * INKWINGS.players[n - 1])

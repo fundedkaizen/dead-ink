@@ -139,7 +139,7 @@ places.push(['the zip line top', stand(zips[0].start.x, zips[0].start.y, zips[0]
     assert(Math.hypot(group[i].position.x - group[j].position.x, group[i].position.z - group[j].position.z) >= 2.5, 'spread apart')
   assert(group.every(z => z.health === 400 && z.state === 'chase' && flyers.get(z)!.mode === 'form'), 'forming, at full health')
   const arrivals: number[] = []
-  run(1.5, [target], 60, () => { if (sounds.length && sounds[sounds.length - 1].kind === 'inkwing-arrive' && arrivals.length < sounds.filter(s => s.kind === 'inkwing-arrive').length) arrivals.push(clock) })
+  run(1.5, [target], 60, () => { while (arrivals.length < sounds.filter(s => s.kind === 'inkwing-arrive').length) arrivals.push(clock) })
   assert.equal(arrivals.length, 3, 'each on its own streak of ink, heard where it lands')
   assert(arrivals[1] - arrivals[0] > 0.15 && arrivals[2] - arrivals[1] > 0.15, `one after another (${arrivals.map(f1).join(', ')} s)`)
   assert(sounds.filter(s => s.kind === 'inkwing-arrive').every(s => s.position), 'placed in the world')
@@ -237,6 +237,328 @@ const reach: string[] = []
   }
 }
 
-console.log(`dead ink flyers checks: sections 1-6 passed in ${f1((performance.now() - started) / 1000)} s`)
+/** A flyer of a fresh group round the yard, formed and flying. */
+function oneFlyer(health = 1e6) {
+  reset()
+  const target = player(yard.clone())
+  run(0.4, [target])
+  assert.equal(flyers.arrive(1, [target], health, seeded(41), 1), 1)
+  run(INKWING.form + 0.3, [target])
+  const flyer = inkwings()[0]
+  assert.equal(flyers.get(flyer)!.mode, 'fly')
+  return { flyer, target }
+}
+const shot = (from: THREE.Vector3, to: THREE.Vector3, damage: number): Shot =>
+  ({ origin: from.clone(), direction: to.clone().sub(from).normalize(), range: 200, damage, weapon: 'ak' })
+
+// ---- 7. Fighting them: bullets (headshots count), blasts, the knife, the Nuke, the Ink Doll -----------------------
+{
+  const { flyer } = oneFlyer()
+  const c = flyer.position.clone(), f = flyers.get(flyer)!
+  const forward = v(Math.sin(flyer.yaw) * Math.cos(f.pitch), -Math.sin(f.pitch), Math.cos(flyer.yaw) * Math.cos(f.pitch))
+  const side = v(Math.cos(flyer.yaw), 0, -Math.sin(flyer.yaw))
+  const body = director.hit(shot(c.clone().addScaledVector(side, 12), c, 10), 200, 1)
+  assert(body && body.zombie === flyer && body.reaction.zone === 'torso' && !body.lethal, 'a shot in flight hits the body')
+  const graze = director.hit(shot(c.clone().addScaledVector(side, 12).addScaledVector(forward, -0.4).setY(c.y + 0.1), c.clone().addScaledVector(forward, -0.4).setY(c.y + 0.1), 10), 200, 1)
+  assert(graze?.zombie === flyer, 'a generous body: 0.4 m off its middle still hits')
+  const head = c.clone().addScaledVector(forward, 0.2).setY(c.y + 0.05 + 0.2 * forward.y)
+  const headshot = director.hit(shot(head.clone().addScaledVector(forward, 10), head, 10), 200, 1)
+  assert.equal(headshot?.reaction.zone, 'head', 'headshots count')
+  assert(!director.hit(shot(c.clone().addScaledVector(side, 12).setY(c.y + 1.5), c.clone().setY(c.y + 1.5), 10), 200, 1), 'a clean miss over it misses')
+  assert(director.aimDistance(c.clone().addScaledVector(side, 12), side.clone().negate(), 50) < 12.5, 'rockets and Ray Gun bolts find it in flight')
+  // Killed: it bursts, and its place drops to the floor under it (where a Max Ammo from it lands).
+  sounds.length = 0
+  flyer.health = 5
+  const killing = director.hit(shot(c.clone().addScaledVector(side, 12), c, 10), 200, 1)
+  assert(killing?.lethal && flyer.state === 'dead', 'a lethal shot kills it')
+  assert(sounds.some(s => s.kind === 'inkwing-death' && s.position), 'with its burst heard where it was')
+  assert(director.gore.counts.drops > 20 && director.gore.counts.chunks > 3, 'the ink bursts out and falls')
+  assert(Math.abs(flyer.position.y - w.world.floor(c, 0.2, 20)) < 0.01, `its place is the floor under it (${f1(flyer.position.y)} m, it died ${f1(c.y)} m up)`)
+  run(INKWING.dead + 0.1, [])
+  assert(flyer.state === 'idle' && !flyers.owns(flyer), 'and its body goes back to the pool')
+}
+{
+  const { flyer } = oneFlyer()
+  const hits = director.blast(flyer.position.clone().add(v(1.5, -0.5, 0)), 3, 1e7)
+  assert(hits.some(h => h.zombie === flyer && h.lethal), 'a blast (a frag, a rocket, a Ray Gun bolt) kills it in the air')
+}
+{
+  const { flyer } = oneFlyer()
+  const c = flyer.position.clone(), out = v(1, 0, 0)
+  const hit = director.knife(c.clone().addScaledVector(out, 1.5), out.clone().negate(), 2.1, 1e7)
+  assert(hit?.zombie === flyer && hit.lethal, 'the knife gets one close by')
+}
+{
+  reset()
+  const target = player(yard.clone())
+  run(0.4, [target])
+  flyers.arrive(3, [target], 1e6, seeded(43), 1)
+  run(1.2, [target])
+  assert.equal(director.killAll(), 3, 'the Nuke takes them too')
+}
+{
+  // The Ink Doll: they circle it, close enough to go with it, and leave everyone alone meanwhile.
+  reset()
+  const target = player(yard.clone())
+  run(0.4, [target])
+  flyers.arrive(3, [target], 1e6, seeded(47), 1)
+  run(1.5, [target])
+  const doll: ZombieTarget = { id: 'doll-0', feet: yard.clone().add(v(6, 0, 4)), alive: true }
+  doll.feet.y = w.world.floor(doll.feet.clone().setY(1), 1, 2)
+  hurt.length = 0
+  let near = 0, frames = 0
+  run(DECOY.lure, [doll], 30, () => {
+    frames++
+    if (clock > 4 && inkwings().every(z => z.position.distanceTo(doll.feet) < DECOY.radius - 1)) near++
+  })
+  assert.equal(hurt.length, 0, 'nobody is hurt while they circle the doll')
+  assert(near > frames * 0.5, `they circle it, in its blast (${near} of ${frames} frames all within ${DECOY.radius - 1} m)`)
+  const blast = director.blast(doll.feet, DECOY.radius, 1e7)
+  assert.equal(blast.filter(h => h.lethal && flyers.owns(h.zombie)).length, 3, 'and go up with it')
+}
+
+// ---- 8. Co-op: the host's snapshot draws them on a guest, and its shots and kills show there -------------------
+{
+  reset()
+  const guestSounds: SoundEvent[] = []
+  const guest = new ZombieDirector({ scene: w.scene, world: w.world, doors: w.doors, graph: w.graph, emit: e => guestSounds.push(e), damagePlayer: () => {} })
+  await guest.init(director.capacity)
+  const target = player(yard.clone())
+  run(0.4, [target])
+  flyers.arrive(3, [target], 1e6, seeded(53), 1)
+  const zombie = director.spawn(pickSpawn(w.graph, w.world, { near: 14, far: 30, eyes: [] }, seeded(3))!, 1e6, 'run', 0)!
+  assert(zombie, 'a zombie as well, in the same rows')
+  let rows: ZombieSnap[] = [], send = 0, worst = 0, worstAt = '', flagsOk = true, frames = 0
+  const step = () => {
+    director.update(1 / 60, [target]); clock += 1 / 60
+    if ((send -= 1 / 60) <= 0) {
+      send = 1 / 15
+      rows = director.snapshot()
+      for (const row of rows) if (row[9] & FLYER_ROW.flag && (row[9] & ~(0x1f << 19))) flagsOk = false
+    }
+    guest.puppet(1 / 60, rows, target.feet)
+    frames++
+    for (let i = 0; i < director.zombies.length; i++) {
+      const host = director.zombies[i]
+      // A dive is 16 m/s: its first snapshot after it ends comes a tick late, by design (15 a second).
+      if (!flyers.owns(host) || host.state !== 'chase' || !flyers.get(host)!.arrived || flyers.get(host)!.mode === 'dive' || guest.flyers.get(guest.zombies[i])?.mode === 'dive') continue
+      const gap = host.position.distanceTo(guest.zombies[i].position)
+      if (gap > worst) { worst = gap; worstAt = `${flyers.get(host)!.mode} at ${f1(clock)} s, guest ${guest.flyers.get(guest.zombies[i])?.mode}` }
+    }
+  }
+  for (let i = 0; i < 60 * 10; i++) step()
+  assert(flagsOk, 'Inkwing rows use snapshot flag bits 19 to 23 only')
+  assert.equal(guest.zombies.filter(z => guest.flyers.owns(z)).length, 3, 'the guest has the three Inkwings')
+  assert(guest.zombies[director.zombies.indexOf(zombie)].state === 'chase' && !guest.flyers.owns(guest.zombies[director.zombies.indexOf(zombie)]), 'and the zombie, as a zombie')
+  assert(worst < 1.2, `smoothly where the host has them, out of a dive (${worst.toFixed(2)} m at worst, ${worstAt})`)
+  const heard = (kind: string) => guestSounds.filter(s => s.kind === kind).length, told = (kind: string) => sounds.filter(s => s.kind === kind).length
+  assert(heard('inkwing-arrive') === 3, 'the guest sees and hears them come out of the storm')
+  assert(told('inkwing-tell') > 0 && heard('inkwing-tell') >= told('inkwing-tell') - 1, `and hears each tell (${heard('inkwing-tell')} of ${told('inkwing-tell')})`)
+  assert(heard('inkwing-dive') >= told('inkwing-dive') - 1, 'and each dive')
+  assert(guest.flyers.drawCalls >= 3, 'drawn there')
+  // A guest's shot: the host works it out against its own (runtime.partnerShot) and the kill shows on the guest.
+  const i = director.zombies.findIndex(z => flyers.owns(z) && z.state === 'chase')
+  const victim = director.zombies[i], eye = target.feet.clone().setY(target.feet.y + 1.6)
+  assert(guest.aimDistance(eye, guest.zombies[i].position.clone().sub(eye).normalize(), 80) < 80, 'the guest\'s own aim finds the puppet (its rockets and bolts burst on it)')
+  // (Through any other in the way: a round that pierces, as the sniper's does.)
+  const hit = director.hitAll(shot(eye, victim.position, 1e7), 200, 1, false, 4)
+  assert(hit.some(h => h.zombie === victim && h.lethal), 'the guest\'s shot, on the host, kills it')
+  guestSounds.length = 0
+  for (let k = 0; k < 20; k++) step()
+  assert(guestSounds.some(s => s.kind === 'inkwing-death'), 'the guest sees it burst')
+  for (let k = 0; k < 60; k++) step()
+  assert(guest.zombies[i].state === 'idle' && !guest.flyers.owns(guest.zombies[i]), 'and its body is free there again')
+  guest.dispose()
+}
+
+// ---- 9. A whole storm round, as the runtime runs it: only its Inkwings and sprinters, and the Max Ammo ---------
+{
+  reset()
+  const feet = yard.clone(), target = player(feet), random = seeded(61), pack = new StormPack()
+  const state = newGame()
+  state.round = 5; state.timer = 0.01
+  const seen = new Map<number, { flyers: number; sprinters: number; others: number }>()
+  let lastKill: THREE.Vector3 | null = null, kill = 0, storm = false
+  const spawnOne = () => {
+    const tally = seen.get(state.round)!
+    if (storm) {
+      const group = pack.next(random, 1 + Math.min(state.toSpawn, MAX_ALIVE - 1 - director.aliveCount))
+      if (group) {
+        // runtime.spawnInkwings
+        state.toSpawn -= group - 1
+        const placed = flyers.arrive(group, [target], inkwingHealth(state.round, 1), random, stormNumber(state.round))
+        if (placed < group) { pack.back(group - placed); state.toSpawn += group - placed - (placed ? 0 : 1) }
+        tally.flyers += placed
+        return placed > 0
+      }
+    }
+    const spot = pickSpawn(w.graph, w.world, { near: 14, far: 42, eyes: [] }, random)
+    const zombie = spot && director.spawn(spot, zombieHealth(state.round) * (storm ? STORM.health : 1), storm ? 'sprint' : 'run', 0, true)
+    if (zombie) { if (storm) tally.sprinters++; else tally.others++ }
+    return !!zombie
+  }
+  for (let t = 0; t < 900 && state.round < 9; t += 1 / 30) {
+    const events = stepRounds(state, 1 / 30, director.aliveCount, 1, storm ? STORM.spawnDelay : 1)
+    if (events.roundStarted) {
+      storm = isStormRound(events.roundStarted)
+      seen.set(events.roundStarted, { flyers: 0, sprinters: 0, others: 0 })
+      if (storm) state.toSpawn = Math.max(0, pack.begin(events.roundStarted, 1) - events.spawn)
+    }
+    let failed = 0
+    for (let i = 0; i < events.spawn; i++) if (!spawnOne()) failed++
+    returnSpawns(state, failed)
+    if (events.roundEnded === 7) break
+    director.update(1 / 30, [target])
+    clock += 1 / 30
+    // A player who kills one every half second, the nearest first.
+    if ((kill -= 1 / 30) <= 0) {
+      kill = 0.5
+      const alive = director.zombies.filter(z => z.state === 'chase' && (!flyers.owns(z) || flyers.get(z)!.arrived))
+      const next = alive.sort((a, b) => a.position.distanceTo(feet) - b.position.distanceTo(feet))[0]
+      if (next) {
+        const hit = director.blast(next.position.clone().add(v(0, flyers.owns(next) ? 0 : 1.1, 0)), 0.3, 1e8).find(h => h.zombie === next)
+        if (hit?.lethal) lastKill = next.position.clone()
+      }
+    }
+  }
+  const pack7 = stormPack(7, 1)
+  assert.equal(seen.get(6)?.flyers, 0, 'no Inkwings in round 6')
+  assert.equal(seen.get(6)?.others, zombiesInRound(6, 1), 'round 6 is an ordinary round')
+  assert.equal(state.phase, 'break', 'the storm round ends')
+  assert.deepEqual(seen.get(7), { flyers: pack7.flyers, sprinters: pack7.sprinters, others: 0 }, `round 7 brings its pack: ${pack7.flyers} Inkwings and ${pack7.sprinters} sprinters`)
+  assert(lastKill && Math.abs(lastKill.y - w.world.floor(lastKill.clone().setY(lastKill.y + 2.2), 0.1, 3)) < 0.01,
+    'the last one fell where the Max Ammo drops, on the ground (runtime.stormReward drops it at the last kill)')
+  assert.equal(flyers.alive, 0, 'none left over')
+}
+{
+  // After the storm: round 8 has no Inkwings (the runtime's pack only runs on storm rounds).
+  for (let round = 1; round <= 40; round++) if (!isStormRound(round)) assert(![7, 14, 21, 28].includes(round), `round ${round}`)
+}
+
+// ---- 10. Twenty-four at once, and what they cost -----------------------------------------------------------
+let cost = ''
+{
+  reset()
+  const target = player(yard.clone())
+  run(0.4, [target])
+  let placed = 0
+  for (let g = 0; g < 8; g++) placed += flyers.arrive(3, [target], 1e6, seeded(70 + g), 1)
+  assert.equal(placed, 24, 'twenty-four come out')
+  run(2, [target])
+  const t0 = performance.now()
+  run(6, [target])
+  const ms = (performance.now() - t0) / (6 * 60)
+  assert.equal(flyers.alive, 24)
+  assert(flyers.drawCalls <= 6, `drawn in ${flyers.drawCalls} draw calls, all of them`)
+  assert(ms < 6, `a frame's thinking for 24 costs ${ms.toFixed(2)} ms`)
+  cost = `24 alive: ${ms.toFixed(2)} ms a frame, ${flyers.drawCalls} draw calls`
+}
+
+// ---- 11. Tuning: a storm against a scripted player -------------------------------------------------------------
+// The mess yard, an AK (Dead Ink's damage scale; Pack-a-Punched once by round 14 and twice by round 21, as a player
+// who has got that far has it), and a player who shoots the nearest thing in sight (hitting
+// less often the further and faster it is), reloads, gets health back after 3 s unhurt, and sidesteps a share
+// (`dodge`) of the dives it sees coming. Thick Ink or not. The storm must be a real threat and still fair.
+type Fight = { damage: number; downs: number; seconds: number; dives: number; dive: number; snap: number; swipe: number }
+function storm(round: number, dodge: number, thickInk: boolean, moving: boolean, seed: number): Fight {
+  const gun = round >= 21 ? 3.2 : round >= 14 ? 2 : 1
+  reset()
+  const random = seeded(seed), anchor = yard.clone(), feet = yard.clone(), target = player(feet)
+  const most = thickInk ? 250 : 100, eye = v(), step = v()
+  let health = most, lastHurt = -10, downs = 0, damage = 0, magazine = 30, reload = 0, cooldown = 0, stepLeft = 0, dives = 0, t = 0
+  const by = { dive: 0, snap: 0, swipe: 0 }
+  const state = newGame(), pack = new StormPack(), watched = new Set<Zombie>()
+  state.round = round - 1; state.timer = 0.01
+  const aimAt = (z: Zombie) => flyers.owns(z) ? z.position : z.position.clone().setY(z.position.y + 1.2)
+  for (; t < 240; t += 1 / 30) {
+    const events = stepRounds(state, 1 / 30, director.aliveCount, 1, STORM.spawnDelay)
+    if (events.roundStarted) state.toSpawn = Math.max(0, pack.begin(events.roundStarted, 1) - events.spawn)
+    let failed = 0
+    for (let i = 0; i < events.spawn; i++) {
+      const group = pack.next(random, 1 + Math.min(state.toSpawn, MAX_ALIVE - 1 - director.aliveCount))
+      if (group) {
+        state.toSpawn -= group - 1
+        const placed = flyers.arrive(group, [target], inkwingHealth(state.round, 1), random, stormNumber(state.round))
+        if (placed < group) { pack.back(group - placed); state.toSpawn += group - placed - (placed ? 0 : 1) }
+        if (!placed) failed++
+      } else {
+        const spot = pickSpawn(w.graph, w.world, { near: 14, far: 42, eyes: [] }, random)
+        if (!spot || !director.spawn(spot, zombieHealth(state.round) * STORM.health, 'sprint', 0, true)) failed++
+      }
+    }
+    returnSpawns(state, failed)
+    if (events.roundEnded) break
+    director.update(1 / 30, [target])
+    clock += 1 / 30
+    // Hurt: health back after 3 s unhurt; at nothing, down (counted) and straight back up to carry on.
+    for (const h of hurt.splice(0)) {
+      health -= h.amount; damage += h.amount; lastHurt = t
+      by[h.amount === INKWING.dive.damage ? 'dive' : h.amount === INKWING.snap.damage ? 'snap' : 'swipe'] += h.amount
+    }
+    if (health <= 0) { downs++; health = most }
+    if (t - lastHurt > 3) health = Math.min(most, health + 60 / 30)
+    // Dodging: a dive at us seen coming, sidestepped as it commits.
+    for (const z of director.zombies) {
+      const f = flyers.get(z)
+      if (!f || f.target !== 'p1') continue
+      if (f.mode === 'dive' && !watched.has(z)) {
+        watched.add(z); dives++
+        if (random() < dodge) { step.set(-f.dir.z, 0, f.dir.x).normalize().multiplyScalar(random() < 0.5 ? 1 : -1); stepLeft = 0.45 }
+      }
+      if (f.mode !== 'dive') watched.delete(z)
+    }
+    // A player on the move walks a slow circle round the spot; one who is not stands on it.
+    const round = anchor.clone().add(v(Math.cos(t * 0.6) * 3, 0, Math.sin(t * 0.6) * 3))
+    const home = moving ? round : anchor
+    const move = stepLeft > 0 ? step : feet.distanceTo(home) > 0.3 ? v().subVectors(home, feet).setY(0).normalize() : null
+    if (move) {
+      const next = feet.clone().addScaledVector(move, 4.2 / 30)
+      next.y = w.world.floor(next.clone().setY(next.y + 0.4), 0.2, 0.6, 0.28)
+      if (Number.isFinite(next.y)) feet.copy(next)
+    }
+    stepLeft -= 1 / 30
+    // Shooting: the AK, 0.12 s a round, 30 to a magazine, 2.3 s to reload.
+    if (reload > 0) { reload -= 1 / 30; continue }
+    if ((cooldown -= 1 / 30) > 0) continue
+    eye.copy(feet).setY(feet.y + 1.65)
+    const seen = director.zombies.filter(z => z.state === 'chase' && (!flyers.owns(z) || flyers.get(z)!.arrived)
+      && eye.distanceTo(aimAt(z)) < 45 && w.world.visible(eye, aimAt(z), z.actor.root))
+    const next = seen.sort((a, b) => eye.distanceTo(aimAt(a)) - eye.distanceTo(aimAt(b)))[0]
+    if (!next) continue
+    cooldown = 0.12
+    if (--magazine <= 0) { magazine = 30; reload = 2.3 }
+    const speed = flyers.owns(next) ? flyers.get(next)!.velocity.length() : 4
+    if (random() > THREE.MathUtils.clamp(0.62 - 0.012 * eye.distanceTo(aimAt(next)) - 0.02 * speed, 0.15, 0.62)) continue
+    director.hit({ origin: eye.clone(), direction: aimAt(next).clone().sub(eye).normalize(), range: 170, damage: (random() < 0.15 ? 34 * 2.2 : 34) * gun, weapon: 'ak' }, 170, 3.5)
+  }
+  return { damage, downs, seconds: t, dives, ...by }
+}
+const tuning: string[] = []
+{
+  const cases: [string, number, number, boolean, boolean][] = [
+    ['round 7, Thick Ink, moving and dodging', 7, 0.6, true, true], ['round 7, Thick Ink, standing still', 7, 0, true, false],
+    ['round 7, no perks, moving and dodging', 7, 0.6, false, true], ['round 14, Thick Ink, moving and dodging', 14, 0.6, true, true],
+    ['round 21, Thick Ink, moving and dodging', 21, 0.6, true, true],
+  ]
+  const results = new Map<string, Fight[]>()
+  for (const [label, round, dodge, thick, moving] of cases) {
+    const runs = [1, 2, 3, 4, 5].map(seed => storm(round, dodge, thick, moving, seed * 101))
+    results.set(label, runs)
+    const mean = (key: keyof Fight) => runs.reduce((sum, r) => sum + r[key], 0) / runs.length
+    tuning.push(`${label}: ${Math.round(mean('damage'))} damage taken, ${mean('downs').toFixed(1)} downs, cleared in ${Math.round(mean('seconds'))} s (${Math.round(mean('dives'))} dives at them, ${Math.round(100 * mean('dive') / INKWING.dive.damage / Math.max(1, mean('dives')))}% landed; from dives ${Math.round(mean('dive'))}, snaps ${Math.round(mean('snap'))}, sprinters ${Math.round(mean('swipe'))})`)
+  }
+  const mean = (label: string, key: keyof Fight) => results.get(label)!.reduce((sum, r) => sum + r[key], 0) / results.get(label)!.length
+  const landed = (label: string) => mean(label, 'dive') / INKWING.dive.damage / Math.max(1, mean(label, 'dives'))
+  const decent = 'round 7, Thick Ink, moving and dodging', camper = 'round 7, Thick Ink, standing still'
+  assert(results.get(decent)!.every(r => r.seconds < 90), 'a decent player clears the first storm')
+  assert(mean(decent, 'damage') >= 100, `and it hurts them, a real threat (${Math.round(mean(decent, 'damage'))} damage)`)
+  assert(landed(camper) > 0.7, `a player who never moves is hit by most dives (${Math.round(landed(camper) * 100)}%)`)
+  assert(landed(decent) < landed(camper) * 0.75, `moving and dodging makes most of them miss (${Math.round(landed(decent) * 100)}% land)`)
+  for (const round of [14, 21]) assert(results.get(`round ${round}, Thick Ink, moving and dodging`)!.every(r => r.seconds < 150), `round ${round}'s storm can be cleared`)
+  console.log(`tuning:\n  ${tuning.join('\n  ')}`)
+}
+
+console.log(`dead ink flyers checks passed in ${f1((performance.now() - started) / 1000)} s`)
 console.log(`reach: ${reach.join('; ')}`)
+console.log(cost)
 w.world.dispose()
