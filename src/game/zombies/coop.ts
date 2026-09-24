@@ -81,6 +81,8 @@ export type CoopMessage =
   // `k`: how it looks and sounds (a rocket's, a Deadline round's); a frag's when missing.
   | { t: 'boom'; p: [number, number, number]; r: number; k?: BlastKind }
   | { t: 'soul'; p: [number, number, number]; i: number }
+  /** A teammate fired: the tracer from `o` to `e`, the gun (`raygun` for the Ink Ray) and its Pack-a-Punch level, to see and hear. */
+  | { t: 'fire'; o: [number, number, number]; e: [number, number, number]; w: string; pk?: number }
   | { t: 'gameover' }
   | { t: 'start' }
   // guest -> host
