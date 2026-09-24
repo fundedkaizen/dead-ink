@@ -6,8 +6,8 @@ import { WorldMarker } from './zombies/markers'
 import { REVIVE_ICON, ReviveSyringe } from './zombies/last-stand'
 import { LAST_STAND_VIEW, SecondDraftRevive } from './zombies/revive'
 import { GuardPuppets } from './guard-puppets'
-import { GUEST_OFFSETS, LastStand, RESCUE_COOP, ReviveHold, applyMirror, canRevive, decodeHurt, doorBits, encodeHurt, escapeReady, escortLeaders, everyoneDown,
-  guardRows, mirrorMission, rescueInviteLink, type MissionMirror, type RescueIncoming, type RescueMessage } from './rescue-coop-rules'
+import { GUARD_STATES, GUEST_OFFSETS, LastStand, RESCUE_COOP, ReviveHold, applyMirror, canRevive, decodeHurt, doorBits, encodeHurt, escapeReady, escortLeaders,
+  everyoneDown, guardRows, mirrorMission, rescueInviteLink, type MissionMirror, type RescueIncoming, type RescueMessage } from './rescue-coop-rules'
 import { useStation } from './mission'
 import { setDoorOpen } from '../world/doors'
 import { EYE_HEIGHT } from '../player/body'
@@ -73,11 +73,16 @@ export class RescueCoop {
     this.syringe = new ReviveSyringe(camera)
     this.bar = new StandBar(hudRoot)
     this.puppets = new GuardPuppets(r.ai, event => r.emit(event, false))
-    // Opened from an invite: join at once and show the Co-op page, where the Jump in button is.
+    // Opened from an invite: join once the mission has loaded (its start stays this browser's own, to go back to
+    // if the host leaves, and the guest is placed after the load puts the player at the insertion point), and
+    // show the Co-op page, where the Jump in button is.
     const invite = new URLSearchParams(location.search).get('join')
     if (invite) {
-      this.link.open(invite)
-      void r.initialized.then(() => requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-menu-open="coop"]')?.click()))
+      void r.initialized.then(() => {
+        if (!r.ready) return
+        this.link.open(invite)
+        requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-menu-open="coop"]')?.click())
+      })
     }
   }
 
@@ -311,7 +316,8 @@ export class RescueCoop {
   idle(dt: number) {
     this.clock += dt
     const r = this.r, paired = this.paired
-    if (paired && r.state.phase === 'active' && this.stand.step(dt)) this.bledOut()
+    // No bleeding out once the jeep is on its way: a downed player rides along.
+    if (paired && r.state.phase === 'active' && !r.escape.active && this.stand.step(dt)) this.bledOut()
     // Down with nobody left to get you up: the rescue is lost.
     if (!paired && this.stand.down && r.state.phase === 'active') r.fail()
     const showing = paired && !r.escape.active
@@ -475,8 +481,10 @@ export class RescueCoop {
 
   // ---------------------------------------------------------------- the mission's turns
 
-  /** The host began (or resumed) play. */
+  /** Play began or paused: the host's first start begins the mission for everyone. */
   playing(playing: boolean) {
+    // A guest who pauses says so at once: a tab in the background sends nothing more, and the guards leave a paused player alone.
+    if (!playing && this.isGuest) this.link.send({ t: 'me', me: this.myState() })
     if (!playing || this.link.role !== 'host' || this.begun) return
     this.begun = true
     this.link.send({ t: 'start', by: this.name })
@@ -569,6 +577,9 @@ export class RescueCoop {
       case 'react': {
         const hit = this.puppets.react(m.g, m.c, !!m.l, toVector(m.d), m.tr, m.z, toVector(m.p), m.w, m.b)
         if (hit) r.blood.emitHit(hit)
+        // The last tick still has him standing: until the next one comes, he stays down and his fall plays on.
+        const row = hit?.lethal ? this.tick?.g.find(row => row[0] === m.g) : undefined
+        if (row) row[1] = GUARD_STATES.indexOf('dead')
         break
       }
       case 'hit':

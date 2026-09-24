@@ -303,6 +303,18 @@ installFakeDom()
   assert(s.sent.some(each => each.m.t === 'down' && (each.m as { dn: number }).dn === 2))
   s.message({ t: 'revive', by: 'Host' }, undefined)
   assert.equal(s.coop.stand.down, 2, 'no revive once bled out')
+  // Down when the jeep leaves: you ride along, and do not bleed out on the way.
+  const rider = stage('guest')
+  rider.coop.takeHit(100); rider.coop.goDown()
+  rider.r.escape.active = true
+  for (let i = 0; i < RESCUE_COOP.bleedSeconds + 5; i++) rider.coop.idle(1)
+  assert.equal(rider.coop.stand.down, 1, 'no bleeding out during the escape')
+  // A guest who pauses (the menu, or the tab in the background) tells the host at once.
+  const paused = stage('guest')
+  paused.r.player.playing = false
+  paused.coop.playing(false)
+  const last = paused.sent.at(-1)?.m as Extract<RescueMessage, { t: 'me' }> | undefined
+  assert(last?.t === 'me' && last.me.ps === 1, 'a pause goes to the host straight away')
   // A shot: the host works it out, so the direction goes precise enough for range.
   const g = stage('guest')
   const aimed = v(0.12345678, 0, 0.99235).normalize()
@@ -347,4 +359,34 @@ installFakeDom()
   s.coop.mates.get(1)!.avatar.feet.set(152, 0, 10)
   assert.equal(s.coop.jeepLabel(), 'Board jeep')
   console.log('PASS Host: a guest\'s shot resolved with its marker, reactions for all; panel uses checked and credited; the jeep waits or leaves')
+}
+{
+  // Guest: a guard who dies here between two ticks stays down. The last tick, from before his death, must not
+  // stand him up again (his fall plays on); the next ticks have him dead; a checkpoint later brings him back.
+  const host = await guards([[0, 0, 0]]), local = await guards([[0, 0, 0]])
+  const s = stage('guest', 1, { ai: local.ai })
+  const [hostGuard] = host.ai.enemies, [puppet] = local.ai.enemies, actor = puppet.actor as FakeActor
+  Object.assign(hostGuard, { state: 'combat', canSee: true, lastKnown: v(0, 0, 12) })
+  const state = initialMission()
+  const tick = (): RescueMessage => ({ t: 'tick', g: JSON.parse(JSON.stringify(guardRows(host.ai.enemies))), m: mirrorMission(state), d: '', players: [s.me({ id: 0, name: 'Host' })], h: [] })
+  s.message(tick(), 0)
+  for (let i = 0; i < 10; i++) s.coop.guestStep(1 / 60)
+  assert.equal(puppet.state, 'combat')
+  s.message({ t: 'react', g: 0, c: 'dieBody', l: 1, d: [0, 0, -1], tr: 1, z: 'torso', p: [0, 1.2, 0] }, 0)
+  const restores = actor.calls.restores.length
+  for (let i = 0; i < 20; i++) s.coop.guestStep(1 / 60)
+  assert.equal(puppet.state, 'dead', 'still down until the next tick')
+  assert.equal(actor.calls.restores.length, restores, 'never stood up again by the old tick')
+  assert.equal(actor.calls.update.at(-1)![1], 'dead', 'his fall plays on')
+  hostGuard.state = 'dead'
+  s.message(tick(), 0)
+  for (let i = 0; i < 5; i++) s.coop.guestStep(1 / 60)
+  assert.equal(puppet.state, 'dead'); assert.equal(actor.calls.restores.length, restores, 'the host\'s body needs no new pose')
+  // Back at the checkpoint the host has him on his feet: so has the guest.
+  hostGuard.state = 'patrol'
+  s.message(tick(), 0)
+  s.coop.guestStep(1 / 60)
+  assert.equal(puppet.state, 'patrol', 'up again once the host has him up')
+  host.dispose(); local.dispose()
+  console.log('PASS Guest: a guard who dies between ticks stays down and his fall plays on; a checkpoint brings him back')
 }
