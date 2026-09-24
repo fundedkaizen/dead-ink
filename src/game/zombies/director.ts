@@ -306,14 +306,16 @@ const reachSpot = new THREE.Vector3(), reachFrom = new THREE.Vector3(), NO_ONE =
  * Whether a body standing at `from` may be put on graph spot `spot`: never one behind the wall it stands
  * against (a player pressed to the warehouse wall was put on the spot inside it, and the horde went in
  * there). A knee-high sight line, and only for a spot not right underfoot. The flow field starts from
- * the players' spots by this rule, and each zombie finds its own by it.
+ * the players' spots by this rule, and each zombie finds its own by it. Sight passes wire, so the line
+ * must not cross a wire panel either: a spot across a wire fence had zombies clawing at the player from the
+ * wrong side of it.
  */
 export function spotInReach(graph: NavGraph, world: CollisionWorld, spot: number, from: THREE.Vector3) {
   const p = graph.point(spot, reachSpot)
   if ((p.x - from.x) ** 2 + (p.z - from.z) ** 2 < 0.36 && Math.abs(p.y - from.y) < 0.5) return true
   reachFrom.copy(from).y += 0.55
   p.y += 0.55
-  return world.visible(reachFrom, p, NO_ONE)
+  return world.visible(reachFrom, p, NO_ONE) && !world.crossesWire(reachFrom, p)
 }
 /** Do the flat segments p-q and a-b cross? */
 function crossesFlat(p: THREE.Vector3, q: THREE.Vector3, a: THREE.Vector3, b: THREE.Vector3) {

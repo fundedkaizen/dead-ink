@@ -131,7 +131,7 @@ export function geometryHash(scene: THREE.Object3D) {
 }
 
 type Edge = { to: number; link: NavLink; length: number; forward: boolean }
-type Gap = { masks: [number, number][]; raised: [number, number][]; edges: [number, Edge][] }
+type Gap = { masks: [number, number][]; raised: [number, number][]; edges: [number, Edge][]; heights?: [number, number][] }
 
 /**
  * Does the flat step p-q cross the gap a-b? A step that starts or ends exactly on it counts too: a spot can
@@ -337,12 +337,94 @@ export class NavGraph {
     return key
   }
 
+  /**
+   * Cut the graph round `solids`, props put in the world at run time that the bake never saw (Dead Ink's
+   * crates, barrels, sandbags, the car), by the bake's own tests: the ground spots a body no longer fits on go,
+   * and the steps a body no longer gets along (swept from knee height, else the guards' walker), where the
+   * solids are what stops it. A cut step that would strand a spot from where it was connected stays: from
+   * there zombies still squeeze past or claw at a player over the prop. Undone by openGap(key).
+   */
+  closeSolids(world: CollisionWorld, solids: THREE.Object3D) {
+    const cut: Gap = { masks: [], raised: [], edges: [], heights: [] }, was = this.regions().id
+    const box = new THREE.Box3(), a = new THREE.Vector3(), b = new THREE.Vector3(), q = new THREE.Vector3(), gone = new Set<number>()
+    const capsule = new Capsule(new THREE.Vector3(), new THREE.Vector3(), BODY_RADIUS)
+    const fits = (x: number, base: number, z: number, ignored: THREE.Object3D[]) => [[0, 0], [0.04, 0.03], [-0.03, -0.04]].every(([ox, oz]) => {
+      capsule.start.set(x + ox, base + BODY_RADIUS, z + oz); capsule.end.set(x + ox, base + BODY_HEIGHT - BODY_RADIUS, z + oz)
+      return world.fits(capsule, ignored)
+    })
+    const blocked = (x: number, base: number, z: number) => !fits(x, base, z, []) && fits(x, base, z, [solids])
+    const walker = new EnemyNavigation(world, [], () => {})
+    const walks = () => {
+      const start = walker.floor(a.clone()), end = walker.floor(b.clone())
+      return !!start && !!end && walker.segment(start, end)
+    }
+    const unlink = (index: number, d: number) => {
+      if (this.masks[index] & (1 << d)) { this.masks[index] &= ~(1 << d); cut.masks.push([index, d]) }
+    }
+    const areas: [number, number, number, number][] = []
+    for (const solid of solids.children) {
+      box.setFromObject(solid).expandByScalar(BODY_RADIUS + 0.05)
+      const area: [number, number, number, number] = [Math.floor((box.min.x - this.minX) / this.cell), Math.floor((box.max.x - this.minX) / this.cell),
+        Math.floor((box.min.z - this.minZ) / this.cell), Math.floor((box.max.z - this.minZ) / this.cell)]
+      areas.push(area)
+      for (let i = area[0]; i <= area[1]; i++) for (let k = area[2]; k <= area[3]; k++) {
+        const index = this.index(i, k)
+        if (!this.walkable(index) || gone.has(index)) continue
+        this.point(index, a)
+        if (!blocked(a.x, a.y + 0.024, a.z)) continue
+        gone.add(index)
+        cut.heights!.push([index, this.heights[index]])
+        for (let d = 0; d < 8; d++) {
+          const [di, dk] = DIRECTIONS[d], next = this.index(i + di, k + dk)
+          unlink(index, d)
+          if (next >= 0) unlink(next, DIRECTIONS.findIndex(([x, z]) => x === -di && z === -dk))
+        }
+      }
+    }
+    for (const [index] of cut.heights!) this.heights[index] = NaN
+    // The steps from each spot round a solid (one cell further out: a step is a cell long).
+    const steps: [number, number, number, number][] = []
+    for (const [i0, i1, k0, k1] of areas) for (let i = i0 - 1; i <= i1 + 1; i++) for (let k = k0 - 1; k <= k1 + 1; k++) {
+      const index = this.index(i, k)
+      if (!this.walkable(index)) continue
+      for (let d = 0; d < 8; d++) {
+        const [di, dk] = DIRECTIONS[d], next = this.index(i + di, k + dk)
+        if (!(this.masks[index] & (1 << d)) || !this.walkable(next)) continue
+        this.point(index, a); this.point(next, b)
+        const base = Math.max(a.y, b.y) + MAX_STEP * 0.7
+        if (![0.25, 0.5, 0.75].some(t => { q.copy(a).lerp(b, t); return blocked(q.x, base, q.z) }) || walks()) continue
+        const back = DIRECTIONS.findIndex(([x, z]) => x === -di && z === -dk)
+        unlink(index, d); unlink(next, back)
+        steps.push([index, d, next, back])
+      }
+    }
+    const now = this.regions().id, joined = new Map<number, number>()
+    const find = (r: number): number => { const up = joined.get(r); return up === undefined ? r : find(up) }
+    for (const [index, d, next, back] of steps) {
+      if (was[index] !== was[next] || find(now[index]) === find(now[next])) continue
+      this.masks[index] |= 1 << d; this.masks[next] |= 1 << back
+      joined.set(find(now[index]), find(now[next]))
+    }
+    for (const [from, edges] of this.edges) {
+      const keep = edges.filter(edge => {
+        if (!gone.has(from) && !gone.has(edge.to)) return true
+        cut.edges.push([from, edge])
+        return false
+      })
+      if (keep.length !== edges.length) this.edges.set(from, keep)
+    }
+    const key = this.nextGap++
+    this.gaps.set(key, cut)
+    return key
+  }
+
   /** Restore what closeGap(key) cut. */
   openGap(key: number) {
     const cut = this.gaps.get(key)
     if (!cut) return
     this.gaps.delete(key)
     for (const [index, d] of cut.masks) this.masks[index] |= 1 << d
+    for (const [index, height] of cut.heights ?? []) this.heights[index] = height
     for (const [slot, next] of cut.raised) this.raisedNext[slot] = next
     for (const [from, edge] of cut.edges) this.edges.get(from)?.push(edge) ?? this.edges.set(from, [edge])
   }

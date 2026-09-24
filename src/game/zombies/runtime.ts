@@ -505,6 +505,9 @@ export class ZombiesRuntime {
         ...this.traps.flatMap(trap => [trap.centre, trap.point]), ...this.wells.map(well => well.root.position)]
       try { this.undress = addDressing(this.scene, this.player.world, seeded(0xDEAD1), keepClear) }
       catch (error) { console.warn('Dead Ink: dressing failed', error) }
+      // Its solid props are not in the baked graph: zombies go round them, not into them.
+      const solids = this.scene.getObjectByName('Dead Ink dressing')?.userData.solids
+      if (solids) graph.closeSolids(this.player.world, solids)
       this.startGame()
       this.ready = true; this.hud.ready(); this.invalidate()
     } catch (error) {

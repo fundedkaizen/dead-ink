@@ -46,7 +46,8 @@ export function traversals(scene: THREE.Object3D, world: CollisionWorld): Traver
   scene.updateMatrixWorld(true)
   scene.traverse(object => {
     const data = object.userData
-    if (data.kind === 'ladder') {
+    // Not a ladder a mode has closed (Dead Ink's mess hall roof ladder), as PlayerActions skips it.
+    if (data.kind === 'ladder' && !data.closed) {
       const bottom = object.localToWorld(new THREE.Vector3(0, data.bottomHeight + 0.025, 0.44))
       const top = object.localToWorld(new THREE.Vector3(0, data.landingHeight + 0.025, -data.landingDepth - 0.18))
       const floor = world.floor(top, 0.7, 0.25)
@@ -88,13 +89,13 @@ export function playerReach(world: CollisionWorld, bounds: { minX: number; maxX:
     const i = Math.floor((x - minX) / s), k = Math.floor((z - minZ) / s)
     return i < 0 || k < 0 || i >= nx || k >= nz ? -1 : i * nz + k
   }
-  /** Every up-facing surface in a column, highest first, and whether a body stands on each. */
+  /** Every up-facing surface in a column, highest first, and whether a body stands on each (never a wire top, as PlayerBody). */
   const scan = (c: number) => {
     if (counted[c] >= 0) return counted[c]
     const x = cx(c), z = cz(c)
     let top = TOP, n = 0, above = Infinity
     while (n < LEVELS) {
-      const h = world.floor(probe.set(x, top, z), 0, top - BOTTOM)
+      const h = world.floor(probe.set(x, top, z), 0, top - BOTTOM, 0, true)
       if (!Number.isFinite(h)) break
       // Two sheets a few millimetres apart (the paper ground under a concrete apron) are one floor.
       if (above - h < 0.1) { top = h - 0.02; continue }
@@ -103,7 +104,7 @@ export function playerReach(world: CollisionWorld, bounds: { minX: number; maxX:
       // of a kerb), as PlayerBody does, not on what is exactly under its centre.
       let feet = h
       if (!fits(x, h + 0.002, z)) {
-        const support = world.floor(probe.set(x, h + PLAYER.step, z), 0, PLAYER.step * 2, PLAYER.radius + 0.04)
+        const support = world.floor(probe.set(x, h + PLAYER.step, z), 0, PLAYER.step * 2, PLAYER.radius + 0.04, true)
         if (Number.isFinite(support) && support > h + 0.01) feet = support
       }
       levels[c * LEVELS + n] = feet
@@ -272,7 +273,10 @@ export function sweepWorld(graphFile = 'public/nav/compound.json', dressed = tru
   // them), then the junk it scatters, its big props solid to players and zombies alike and not in the baked
   // graph. The runtime also keeps the junk off its stations, which the sweep does not place.
   const barriers = new Barriers(nav.scene, nav.world, graph)
-  if (dressed) addDressing(nav.scene, nav.world, seeded(0xDEAD1), [])
+  if (dressed) {
+    addDressing(nav.scene, nav.world, seeded(0xDEAD1), [])
+    graph.closeSolids(nav.world, nav.scene.getObjectByName('Dead Ink dressing')!.userData.solids)
+  }
   const doors = nav.doors.filter(door => !door.userData.missionLocked)
   const navigation = new EnemyNavigation(nav.world, doors, () => {})
   return { ...nav, doors, graph, zones, barriers, navigation, hash, ways: traversals(nav.scene, nav.world) }

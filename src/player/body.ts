@@ -62,8 +62,9 @@ export class PlayerBody {
     this.delta.copy(this.velocity).multiplyScalar(dt)
     this.candidate.copy(this.position).add(this.delta)
 
+    // Never onto the top of wire, a fence or a gate (see CollisionWorld.resolve).
     if (wasGrounded) {
-      const floor = this.world.floor(this.candidate, STEP_HEIGHT, STEP_HEIGHT, SUPPORT_RADIUS)
+      const floor = this.world.floor(this.candidate, STEP_HEIGHT, STEP_HEIGHT, SUPPORT_RADIUS, true)
       const rise = floor - this.position.y
       if (rise > 0.002 && rise <= STEP_HEIGHT) {
         this.candidate.y = floor + 0.002
@@ -78,12 +79,12 @@ export class PlayerBody {
     this.position.add(this.delta)
     this.placeCapsule()
     const downwardSpeed = Math.max(0, -this.velocity.y)
-    this.grounded = this.world.resolve(this.capsule, this.velocity)
+    this.grounded = this.world.resolve(this.capsule, this.velocity, true)
     this.position.copy(this.capsule.start).y -= RADIUS
 
     // Follow descending stairs while grounded; jumping and free falls retain gravity.
     if (wasGrounded && this.velocity.y <= 0) {
-      const floor = this.world.floor(this.position, 0.025, STEP_HEIGHT, SUPPORT_RADIUS)
+      const floor = this.world.floor(this.position, 0.025, STEP_HEIGHT, SUPPORT_RADIUS, true)
       if (floor >= this.position.y - STEP_HEIGHT && floor <= this.position.y + 0.025) {
         this.candidate.copy(this.position).y = floor + 0.002
         if (this.world.fits(this.placeCapsule(this.candidate))) {
