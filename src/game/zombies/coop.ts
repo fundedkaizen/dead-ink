@@ -44,7 +44,7 @@ export type CoopMessage =
   // host -> guest
   | { t: 'sync'; gates: string[]; power: boolean; box: number; seed: number; difficulty: string }
   // `bd`: the Brute's chunks in flight, [id, origin x y z, launch velocity x y z, age] (brute.ts).
-  | { t: 'tick'; z: ZombieSnap[]; r: number; ph: 'break' | 'active'; players: PlayerState[]; storm: boolean; pw: 0 | 1; pk: 0 | 1; w?: WorldState; bd?: number[][] }
+  | { t: 'tick'; z: ZombieSnap[]; r: number; ph: 'break' | 'active'; players: PlayerState[]; storm: boolean; /** The host's co-op pause setting: 1 a pause stops everyone. */ fz?: 0 | 1; pw: 0 | 1; pk: 0 | 1; w?: WorldState; bd?: number[][] }
   | { t: 'shield' }
   | { t: 'award'; n: number; k?: number; h?: number }
   | { t: 'hit'; pt: [number, number, number]; dealt: number; id: string; head: 0 | 1; lethal: 0 | 1 }

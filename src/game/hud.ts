@@ -149,6 +149,8 @@ export class MissionHUD {
   ready() { this.menu.ready() }
   showMap() { this.menu.showMap() }
   setPlaying(playing: boolean) { this.menu.setPlaying(playing) }
+  /** Co-op: a teammate's pause is holding the game (null when nobody's is). */
+  setPausedBy(name: string | null) { this.menu.pausedBy = name }
   error(message: string) { this.menu.error(message) }
   notify(message: string, duration = 5, visible = false) {
     this.caption.textContent = message

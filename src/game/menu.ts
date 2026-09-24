@@ -1,6 +1,7 @@
 import './menu.css'
 import { missionObjective, type MissionState } from './mission'
 import { DEAD_INK_ART, HOSTAGE_ART } from './mode-art'
+import { exportSave, importSave } from './save-transfer'
 import { BLOOD_LABELS, QUALITY, SETTING_LIMITS, getSettings, prefersReducedMotion, setSettings, type Blood, type Quality, type Settings } from './settings'
 
 /** The built-in pages, plus any a mode adds through `MenuCopy.pages`. */
@@ -101,6 +102,8 @@ export class MissionMenu {
   private hasPlayed = false
   private wasPlaying = false
   private loaded = false
+  /** Co-op: the teammate whose pause is holding the game, named in the title. */
+  pausedBy: string | null = null
   private loadError = ''
   /** After a game over, the player chose Main menu: the home page is the title screen again. */
   private mainMenu = false
@@ -194,7 +197,7 @@ export class MissionMenu {
         ${back}
         <h2 id="settings-page-title">Settings</h2>
         <div class="settings-groups">
-          <fieldset class="settings-group mission-settings"><legend>Game</legend>${minimap ? toggle('settings-minimap', 'Mini map', getSettings().minimap) : ''}</fieldset>
+          <fieldset class="settings-group mission-settings"><legend>Game</legend>${minimap ? toggle('settings-minimap', 'Mini map', getSettings().minimap) + toggle('settings-coop-pause', 'Co-op: pausing pauses everyone', getSettings().coopPause) : ''}</fieldset>${minimap ? `<fieldset class="settings-group save-transfer"><legend>Transfer progress</legend><p>Moving to a new link or another device? Copy your save code here and load it there.</p><button type="button" id="save-copy">Copy save code</button> <button type="button" id="save-load">Load save code</button> <span id="save-status" role="status"></span></fieldset>` : ''}
           <fieldset class="settings-group"><legend>Look</legend>
             ${slider('settings-fov', 'Field of view', SETTING_LIMITS.fov.min, SETTING_LIMITS.fov.max, SETTING_LIMITS.fov.step)}
             ${slider('settings-sensitivity', 'Mouse sensitivity', SETTING_LIMITS.sensitivity.min, SETTING_LIMITS.sensitivity.max, SETTING_LIMITS.sensitivity.step)}
@@ -333,6 +336,20 @@ export class MissionMenu {
     invertY.addEventListener('change', () => setSettings({ invertY: invertY.checked }), options)
     const minimap = this.card.querySelector<HTMLInputElement>('#settings-minimap')
     minimap?.addEventListener('change', () => setSettings({ minimap: minimap.checked }), options)
+    const coopPause = this.card.querySelector<HTMLInputElement>('#settings-coop-pause')
+    coopPause?.addEventListener('change', () => setSettings({ coopPause: coopPause.checked }), options)
+    const saveStatus = this.card.querySelector<HTMLElement>('#save-status')
+    this.card.querySelector('#save-copy')?.addEventListener('click', () => {
+      const code = exportSave()
+      navigator.clipboard?.writeText(code).then(() => { if (saveStatus) saveStatus.textContent = 'Copied. Paste it into Load save code on the other link.' },
+        () => window.prompt('Copy your save code:', code))
+    }, options)
+    this.card.querySelector('#save-load')?.addEventListener('click', () => {
+      const code = window.prompt('Paste your save code. This replaces the progress on this link.')
+      if (!code) return
+      if (importSave(code)) location.reload()
+      else if (saveStatus) saveStatus.textContent = 'That is not a save code. Copy it again from the other link.'
+    }, options)
     const mute = this.element<HTMLInputElement>('#mission-mute'), motion = this.element<HTMLInputElement>('#mission-motion')
     mute.addEventListener('change', () => setSettings({ muted: mute.checked }), options)
     motion.addEventListener('change', () => setSettings({ reducedMotion: motion.checked }), options)
@@ -429,7 +446,7 @@ export class MissionMenu {
     }
     const dead = state.phase === 'dead', complete = state.phase === 'complete', title = this.titleScreen
     this.card.dataset.title = String(title)
-    this.title.textContent = title ? this.copy.title : dead ? this.copy.deadTitle : complete ? this.copy.completeTitle : this.hasPlayed ? 'Paused.' : this.copy.title
+    this.title.textContent = title ? this.copy.title : dead ? this.copy.deadTitle : complete ? this.copy.completeTitle : this.hasPlayed ? (this.pausedBy ? `${this.pausedBy} paused.` : 'Paused.') : this.copy.title
     this.premise.hidden = dead && !title && !this.copy.deadPremise
     this.premise.textContent = title ? this.copy.premise : dead && this.copy.deadPremise ? this.copy.deadPremise(state) : complete ? this.copy.completePremise : this.hasPlayed ? this.copy.objective(state) : this.copy.premise
     this.start.hidden = dead || complete

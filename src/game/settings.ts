@@ -31,12 +31,14 @@ export type Settings = {
   reducedMotion: boolean | null
   /** Dead Ink's mini map in the top-left corner. */
   minimap: boolean
+  /** Dead Ink co-op (the host's choice): a player's pause menu pauses the game for everyone, not only them. */
+  coopPause: boolean
 }
 
 /** What the game used before settings existed: 75 degrees walking, 55% volume, full resolution, red blood. */
 export const DEFAULT_SETTINGS: Readonly<Settings> = {
   fov: 75, sensitivity: 1, adsSensitivity: 1, controllerSensitivity: 1, invertY: false, blood: 'red', quality: 'high',
-  masterVolume: 55, musicVolume: 100, effectsVolume: 100, muted: false, reducedMotion: null, minimap: true,
+  masterVolume: 55, musicVolume: 100, effectsVolume: 100, muted: false, reducedMotion: null, minimap: true, coopPause: true,
 }
 export const SETTING_LIMITS = {
   fov: { min: 60, max: 110, step: 1 },
@@ -83,6 +85,7 @@ export function sanitizeSettings(raw: unknown): Settings {
     muted: typeof data.muted === 'boolean' ? data.muted : d.muted,
     reducedMotion: typeof data.reducedMotion === 'boolean' ? data.reducedMotion : null,
     minimap: typeof data.minimap === 'boolean' ? data.minimap : d.minimap,
+    coopPause: typeof data.coopPause === 'boolean' ? data.coopPause : d.coopPause,
   }
 }
 

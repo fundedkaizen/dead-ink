@@ -112,3 +112,7 @@ body[data-mission="true"] .walk-card .menu-gameover-actions button { width: 100%
   .menu-mode-art { height: 60px; }
   .menu-mode.is-other .menu-mode-art { max-height: 120px; }
 }
+body[data-mission="true"] .walk-card .save-transfer p { margin: 0 0 8px; }
+body[data-mission="true"] .walk-card .save-transfer button { min-height: 36px; padding: 6px 12px; border: 1.5px solid var(--ink); background: var(--paper); color: var(--ink); font: 600 13px/1 var(--notes); cursor: pointer; }
+body[data-mission="true"] .walk-card .save-transfer button:hover, body[data-mission="true"] .walk-card .save-transfer button:focus-visible { background: var(--ink); color: var(--paper); }
+body[data-mission="true"] .walk-card .save-transfer #save-status { display: block; margin-top: 6px; font-size: 13px; }

@@ -697,6 +697,21 @@ export class ZombiesRuntime {
   }
 
   private isActive() { return this.ready && this.state.phase === 'active' && this.player.enabled && this.player.playing && !this.player.immersive }
+  /** In a game with the pause menu open. */
+  private menuOpenInGame() { return this.ready && this.state.phase === 'active' && this.player.enabled && !this.player.playing && !this.player.immersive }
+  /** Co-op pausing pauses everyone, as the host set it (the guests follow the host's setting). */
+  private pauseEveryone() { return this.coop.role === 'host' ? getSettings().coopPause : this.lastTick?.fz !== 0 }
+  /** With pausing for everyone off, the host's pause menu pauses only the host: the world runs on for the others. */
+  private hostMenuKeepsWorld() { return this.coop.role === 'host' && this.paired && !this.pauseEveryone() && this.menuOpenInGame() }
+  /**
+   * A teammate paused: with pausing for everyone on, so does this player, so nobody plays on while time stands
+   * still for the zombies. Resuming while they are still paused pauses again.
+   */
+  private followPause() {
+    const pauser = this.paired && this.pauseEveryone() ? this.matesHere().find(mate => mate.state.ps === 1) : undefined
+    this.hud.setPausedBy(pauser?.state.name ?? null)
+    if (pauser && this.isActive()) this.player.pause()
+  }
   private cancelInput() { this.aiming = false; this.weapons.cancel() }
 
   private keyDown = (event: KeyboardEvent) => {
@@ -1123,7 +1138,7 @@ export class ZombiesRuntime {
     for (const kind of Object.keys(PERKS) as PerkKind[]) if (!this.perks.has(kind)) this.grantPerk(kind)
     const at = position.clone(), floor = this.player.world.floor(at.clone().setY(at.y + 2.2), 0.1, 3)
     if (Number.isFinite(floor)) at.y = floor
-    this.powerups.spawn('maxAmmo', at)
+    this.dropPowerup('maxAmmo', at)
     if (!this.hud.reducedMotion) this.zombieHud.flash()
     this.shout('The Last Edition is printed', 6, 'powerup')
     this.hud.notify('You finished Dead Ink\'s story. Every perk is yours.', 6)
@@ -1179,7 +1194,7 @@ export class ZombiesRuntime {
     return { id: this.coop.id, p: vec(body.position), yaw: Math.round(e.y * 100) / 100, pitch: Math.round(e.x * 100) / 100, w: this.weapons.current?.name ?? null,
       mv: Math.hypot(body.velocity.x, body.velocity.z) > 0.6 ? 1 : 0, dn: this.down, pts: this.state.points, kills: this.state.kills, name: this.playerName,
       rv: this.reviving > 0 ? Math.round(this.reviving / this.reviveTime() * 100) / 100 : 0, rt: this.reviving > 0 ? this.revivingId : undefined,
-      air: this.player.body.grounded ? undefined : 1 }
+      air: this.player.body.grounded ? undefined : 1, ps: this.menuOpenInGame() ? 1 : undefined }
   }
 
   /** The host tells a guest (or all of them) how the world stands: open gates, the power, the box's place. */
@@ -1256,7 +1271,7 @@ export class ZombiesRuntime {
     this.sendTimer = 1 / COOP.sendRate
     if (this.coop.role === 'host') {
       const debris = this.director?.brutes.debris.rows() ?? []
-      this.coop.send({ t: 'tick', z: this.director?.snapshot() ?? [], r: this.rounds.round, ph: this.rounds.phase, players: [this.myState(), ...this.matesHere().map(mate => mate.state)],
+      this.coop.send({ t: 'tick', fz: getSettings().coopPause ? 1 : 0, z: this.director?.snapshot() ?? [], r: this.rounds.round, ph: this.rounds.phase, players: [this.myState(), ...this.matesHere().map(mate => mate.state)],
         storm: this.storm, pw: this.power ? 1 : 0, pk: this.packBuilt ? 1 : 0, w: this.worldState(), ...(debris.length ? { bd: debris } : {}) })
     } else this.coop.send({ t: 'me', me: this.myState() })
   }
@@ -1437,7 +1452,7 @@ export class ZombiesRuntime {
         else if (m.a === 'move' && m.spot !== undefined && this.boxSpots[m.spot]) { box.place(this.boxSpots[m.spot]); this.makeSolid(box.root, [1.44, 0.66, 0.64], [0, 0.33, 0]) }
         break
       }
-      case 'drop': this.powerups.spawn(m.k, toVector(m.p)); break
+      case 'drop': this.powerups.spawn(m.k, toVector(m.p)); this.emit({ kind: 'powerup-drop', position: toVector(m.p), radius: 40 }); break
       case 'grab': this.powerups.removeNear(m.k, toVector(m.p)); this.activate(m.k, m.by === this.coop.id ? 'me' : 'partner'); break
       case 'boom': this.blastLook(toVector(m.p), m.r, m.k); break
       case 'gameover': if (this.state.phase === 'active') this.gameOver(); break
@@ -2125,8 +2140,7 @@ export class ZombiesRuntime {
       credit(BOSS.points)
       const at = position.clone(), floor = this.player.world.floor(at.clone().setY(at.y + 2.2), 0.1, 3)
       if (Number.isFinite(floor)) at.y = floor
-      this.powerups.spawn('maxAmmo', at)
-      this.emit({ kind: 'powerup-drop', position: at.clone(), radius: 40 })
+      this.dropPowerup('maxAmmo', at)
       this.shout('The Brute is down', 3)
       return
     }
@@ -2135,8 +2149,14 @@ export class ZombiesRuntime {
     // On the surface, even for one shot while still climbing out of the ground.
     const at = position.clone(), floor = this.player.world.floor(at.clone().setY(at.y + 2.2), 0.1, 3)
     if (Number.isFinite(floor)) at.y = floor
+    this.dropPowerup(kind, at)
+  }
+
+  /** A power-up appears (on the host): here, with its sound, and on every guest's screen. */
+  private dropPowerup(kind: PowerupKind, at: THREE.Vector3) {
     this.powerups.spawn(kind, at)
     this.emit({ kind: 'powerup-drop', position: at.clone(), radius: 40 })
+    if (this.coop.role === 'host') this.coop.send({ t: 'drop', k: kind, p: vec(at) })
   }
 
   /** A power-up was walked into (on the host): its effects here, and the guests hear who took it. */
@@ -2509,8 +2529,7 @@ export class ZombiesRuntime {
     const at = (this.lastKillAt ?? this.player.body.position).clone()
     const floor = this.player.world.floor(at.clone().setY(at.y + 2.2), 0.1, 3)
     if (Number.isFinite(floor)) at.y = floor
-    this.powerups.spawn('maxAmmo', at)
-    this.emit({ kind: 'powerup-drop', position: at.clone(), radius: 40 })
+    this.dropPowerup('maxAmmo', at)
     this.setStorm(false)
   }
 
@@ -2585,7 +2604,8 @@ export class ZombiesRuntime {
     const allLures = [...lures.map(doll => doll.position), ...this.partnerLures.map(lure => lure.position)]
     const target = (): readonly ZombieTarget[] => allLures.length ? allLures.map((feet, i) => ({ id: `doll-${i}`, feet, alive: true }))
       : this.playerTargets()
-    if (active && this.director) {
+    this.followPause()
+    if ((active || this.hostMenuKeepsWorld()) && this.director) {
       this.state.elapsed += dt
       const body = this.player.body
       const b = this.world.bounds
