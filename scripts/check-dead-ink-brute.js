@@ -3,7 +3,7 @@
 // Starts in the page and returns at once; poll window.__bruteCheck for { done, results, error? }.
 // The Brute in the real game: it arrives on round 5 with its health bar, the round ends with it alive and it
 // hunts on into round 6 with a line saying so; it charges, slams (the ink wave runs out), throws a chunk,
-// enrages below a third of its health, and dies to a frag for its points and a Max Ammo.
+// loses its mask to head shots in stages, enrages below its threshold, and dies to a frag for its points and a Max Ammo.
 // Staged: rounds are hurried (their timers shortened, the round's own zombies cleared), the player is put
 // where each attack fits and its other attacks are held back, and hits on the player are recorded with the
 // health topped up so nobody dies. The attacks themselves are the Brute's own choice once allowed.
@@ -112,6 +112,30 @@ const status = window.__bruteCheck = { done: false, results }
   check(await until(() => m.director.brutes.debris.flying.length > 0, 2500), 'and throws it')
   check(await until(() => m.director.brutes.debris.flying.length === 0 && sounds.includes('debris-crash'), 4000), 'the chunk lands and bursts')
   await until(() => brute.brute.move !== 'throw', 3000)
+
+  // ---- Head shots work its mask loose in stages until it breaks off; then the head is a weak spot.
+  allow()
+  const b = brute.brute, wears = new Set()
+  const headShot = () => {
+    const face = brute.actor.rig.bones.head.localToWorld(new V(0, 0.18, 0))
+    const from = face.clone().add(new V(Math.sin(brute.yaw) * 8, 0.3, Math.cos(brute.yaw) * 8))
+    return m.director.hit({ origin: from, direction: face.clone().sub(from).normalize(), range: 60, damage: 40, weapon: 'ak' }, 60, 1)
+  }
+  let shots = 0, clangs = 0
+  while (b.mask > 0 && shots < 300) {
+    const hit = headShot(); shots++
+    if (hit?.reaction.zone === 'head') clangs++
+    wears.add(b.wear); brute.health = brute.maxHealth
+    if (shots % 10 === 0) await sleep(16)
+  }
+  check(clangs > 0 && sounds.includes('brute-clang'), 'head shots clang off its mask', `${clangs}/${shots}`)
+  check(wears.has(1) && wears.has(2), 'it works loose in stages', [...wears].join(','))
+  check(b.mask <= 0 && !look.mask.visible && sounds.includes('brute-mask-break'), 'and breaks off', `${shots} shots`)
+  check(b.move === 'stun' && b.cause === 'mask', 'it reels')
+  await until(() => b.move !== 'stun', 3000)
+  const bare = brute.health, bareHit = headShot()
+  check(bareHit?.reaction.zone === 'head' && bare - brute.health > 40, 'its bare head is a weak spot', `${bare - brute.health}`)
+  brute.health = brute.maxHealth
 
   // ---- Enraged below a third of its health.
   allow()

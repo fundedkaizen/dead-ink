@@ -85,8 +85,8 @@
       allow('slam')
       await until(() => brute.brute.move === 'slam', 3000)
       await until(() => brute.brute.struck, 2000)
-      place(ahead(brute.position, yaw + 0.5, 12.5), brute.position, 0.6)
-      await sleep(330)
+      place(ahead(brute.position, yaw + 0.5, 8.5), brute.position, 0.9)
+      await sleep(220)
       freeze()
       return { name, waves: m.director.brutes.waves.count }
     }
