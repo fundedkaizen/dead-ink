@@ -1272,9 +1272,15 @@ export class ZombieDirector {
    * across then down (as startClimb lays it out), chest-high lines clear all the way.
    */
   private clearClimb(from: THREE.Vector3, to: THREE.Vector3) {
-    const corner = to.y > from.y ? from.clone().lerp(to, 0.45).setY(to.y) : from.clone().lerp(to, 0.55).setY(from.y)
+    const up = to.y > from.y
+    const corner = up ? from.clone().lerp(to, 0.45).setY(to.y) : from.clone().lerp(to, 0.55).setY(from.y)
     const chest = (p: THREE.Vector3) => p.clone().setY(p.y + 1.1)
-    return this.context.world.visible(chest(from), chest(corner), NO_ONE) && this.context.world.visible(chest(corner), chest(to), NO_ONE)
+    if (!this.context.world.visible(chest(from), chest(corner), NO_ONE) || !this.context.world.visible(chest(corner), chest(to), NO_ONE)) return false
+    // The body too, along the level leg (wire fences let sight lines through, not bodies).
+    const [a, b] = up ? [corner, to] : [from, corner]
+    const steps = Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) / 0.2)
+    for (let i = 1; i <= steps; i++) if (!this.navigation.fitsPlanned(a.clone().lerp(b, i / steps).setY(a.y + 0.05))) return false
+    return true
   }
 
   /** Standing room for a zombie at `goal`'s height, 0.7 to 1.05 m from it, nothing between; the one nearest `from`. */

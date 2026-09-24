@@ -133,11 +133,16 @@ export function geometryHash(scene: THREE.Object3D) {
 type Edge = { to: number; link: NavLink; length: number; forward: boolean }
 type Gap = { masks: [number, number][]; raised: [number, number][]; edges: [number, Edge][] }
 
-/** Do the flat segments p-q and a-b cross? */
+/**
+ * Does the flat step p-q cross the gap a-b? A step that starts or ends exactly on it counts too: a spot can
+ * stand right on the line of a fence the bake never saw (Dead Ink's zone fences go up at run time), and a
+ * step from there must not lead through it.
+ */
 function crosses(p: { x: number; z: number }, q: { x: number; z: number }, a: { x: number; z: number }, b: { x: number; z: number }) {
   const side = (o: { x: number; z: number }, u: { x: number; z: number }, v: { x: number; z: number }) => (u.x - o.x) * (v.z - o.z) - (u.z - o.z) * (v.x - o.x)
   const d1 = side(a, b, p), d2 = side(a, b, q), d3 = side(p, q, a), d4 = side(p, q, b)
-  return d1 * d2 < 0 && d3 * d4 < 0
+  const onP = Math.abs(d1) < 1e-9, onQ = Math.abs(d2) < 1e-9
+  return (d1 * d2 < 0 || onP !== onQ) && d3 * d4 < 0
 }
 
 export class NavGraph {
@@ -691,12 +696,16 @@ export class NavGraph {
       if (!Number.isFinite(top) || top - ground < WALL_CLIMB.low || findRaised(index, top) >= 0) return
       if (bodyFits(cx, top + 0.024, cz) && footing(cx, top, cz)) addRaised(index, new THREE.Vector3(cx, top, cz))
     }
+    // Cells and levels already searched for furniture and ledges.
+    const furnished = new Set<number>()
+    const furnishedKey = (index: number, y: number) => index * 64 + Math.round(y * 2) + 32
     for (let i = 0; i < nx; i++) for (let k = 0; k < nz; k++) {
       let ground = heights[i * nz + k]
       if (Number.isNaN(ground)) {
         for (const [di, dk] of DIRECTIONS) { const h = at(i + di, k + dk); if (!Number.isNaN(h)) { ground = h; break } }
         if (Number.isNaN(ground)) continue
       }
+      furnished.add(furnishedKey(i * nz + k, ground))
       furnish(i * nz + k, ground)
     }
     // Floors the ground grid cannot see: where a ground spot's neighbour holds a floor beyond the grid's
@@ -705,6 +714,15 @@ export class NavGraph {
     // whole basement under the guardroom) and joins the grid again where it comes back up.
     const seedFloorsOffGrid = () => {
       const found = new Set<number>(), here = new THREE.Vector3()
+      const seed = (next: number, there: THREE.Vector3, index: number) => {
+        let r = findRaised(next, there.y)
+        if (r < 0) {
+          if (!connects(here, there)) return
+          r = addRaised(next, there)
+          found.add(r)
+        } else if (!connects(here, new THREE.Vector3(raised[r].x, raised[r].y, raised[r].z))) return
+        joins.push([r, index])
+      }
       for (let index = 0; index < nx * nz; index++) {
         const h = heights[index]
         if (Number.isNaN(h)) continue
@@ -716,30 +734,29 @@ export class NavGraph {
           const next = ii * nz + kk, grid = heights[next]
           // A neighbour on the grid at about this level has nothing new to show.
           if (!Number.isNaN(grid) && Math.abs(grid - h) <= MAX_STEP) continue
+          // Another level than the grid's: beyond its probe window, or over or under the grid spot there.
           const there = standAt(ii, kk, h + 0.3)
-          if (!there || Math.abs(there.y - h) > MAX_CLIMB) continue
-          const beyond = there.y < GRID_WINDOW.low - 0.02 || there.y > GRID_WINDOW.high + 0.02
-          // The same floor as the grid's, or the ground beside a wall that only hides the cell's centre.
-          if (Number.isNaN(grid) ? !beyond && Math.abs(there.y - h) < 0.35 : Math.abs(there.y - grid) < 0.35) continue
-          let r = findRaised(next, there.y)
-          if (r < 0) {
-            if (!connects(here, there)) continue
-            r = addRaised(next, there)
-            found.add(r)
-          } else if (!connects(here, new THREE.Vector3(raised[r].x, raised[r].y, raised[r].z))) continue
-          joins.push([r, index])
+          if (there && Math.abs(there.y - h) <= MAX_CLIMB) {
+            const beyond = there.y < GRID_WINDOW.low - 0.02 || there.y > GRID_WINDOW.high + 0.02
+            if (!(Number.isNaN(grid) ? !beyond && Math.abs(there.y - h) < 0.35 : Math.abs(there.y - grid) < 0.35)) seed(next, there, index)
+          }
+          // This level where only the cell's centre is blocked: a strip between a fence and a wall too narrow
+          // for the grid, a nook behind a counter. Players hide in them; the walk-out follows them along.
+          if (Number.isNaN(grid)) {
+            const beside = standAt(ii, kk, h + 0.3, undefined, MAX_STEP - 0.25)
+            if (beside && Math.abs(beside.y - h) < 0.35) seed(next, beside, index)
+          }
         }
       }
       return found
     }
     // Those floors get what the ground gets: furniture and ledges to climb (the bunks in the cells).
-    const furnished = new Set<number>()
     const furnishFloor = (r: number) => {
       const spot = raised[r], i = Math.floor(spot.cell / nz), k = spot.cell % nz
       for (const [di, dk] of [[0, 0], ...DIRECTIONS]) {
         const ii = i + di, kk = k + dk
         if (ii < 0 || kk < 0 || ii >= nx || kk >= nz) continue
-        const key = (ii * nz + kk) * 64 + Math.round(spot.y * 2) + 32
+        const key = furnishedKey(ii * nz + kk, spot.y)
         if (furnished.has(key)) continue
         furnished.add(key)
         furnish(ii * nz + kk, spot.y)
@@ -816,10 +833,12 @@ export class NavGraph {
       for (let h = ground.y + 0.5; h < top.y; h += 0.6) if (!bodyFits(foot.x, h, foot.z)) return null
       if (!bodyFits(foot.x, top.y + 0.05, foot.z)) return null
       // Over the edge onto the top, with nothing in the way at that height (the climb has no collision: a
-      // counter behind a wall was climbed onto from outside, straight through the wall).
+      // counter behind a wall was climbed onto from outside, straight through the wall, and a wire fence,
+      // which sight lines pass, was climbed through onto the slab behind it).
       for (let t = 0.15; t <= 2.4; t += 0.15) {
         const p = new THREE.Vector3(foot.x + ux * t, top.y, foot.z + uz * t)
         if (!seen(foot.clone().setY(top.y + 0.6), p.clone().setY(top.y + 0.6)) || !seen(foot.clone().setY(top.y + 1.3), p.clone().setY(top.y + 1.3))) return null
+        if (!bodyFits(p.x, top.y + 0.05, p.z)) return null
         const floor = world.floor(p, 0.5, 0.5, BODY_RADIUS * 0.8)
         if (Number.isFinite(floor) && Math.abs(floor - top.y) < 0.3 && bodyFits(p.x, floor + 0.024, p.z) && footing(p.x, floor, p.z))
           return [foot.x, ground.y + 0.024, foot.z, foot.x, top.y + 0.05, foot.z, p.x, floor + 0.024, p.z]
@@ -945,7 +964,32 @@ export class NavGraph {
       }
       if (!connected) log(`  region ${region} (${sizes[region]} spots) could not be linked after ${tried.length} tries; ${pairs.length} candidate pairs`)
     }
-    return graph
+    return graph.connectedWhole(log)
+  }
+
+  /**
+   * The graph without whatever no way leads into: only the one connected whole (at bake time, with every
+   * door and gate open, that is the whole map). A pocket nothing walks into (the inside of a fuel tank or
+   * a container, which a body only "fits" because their walls stop things from outside only; a roof no
+   * ladder or wall reaches) is worse than no spot at all: a player standing on it would start the flow
+   * field in it, and no zombie could come. Off the graph, the flow starts from the spots around them.
+   */
+  private connectedWhole(log: (message: string) => void) {
+    const { id, sizes } = this.regions()
+    const main = sizes.indexOf(Math.max(...sizes))
+    const heights = this.heights.slice(), masks = this.masks.slice()
+    for (let s = 0; s < this.cells; s++) if (id[s] !== main) { heights[s] = NaN; masks[s] = 0 }
+    const renumber = new Int32Array(this.size).fill(-1)
+    for (let s = 0; s < this.cells; s++) if (id[s] === main) renumber[s] = s
+    const raised: RaisedSpot[] = []
+    this.raised.forEach((spot, r) => {
+      if (id[this.cells + r] !== main) return
+      renumber[this.cells + r] = this.cells + raised.length
+      raised.push({ ...spot })
+    })
+    const links = this.links.filter(l => renumber[l.a] >= 0 && renumber[l.b] >= 0).map(l => ({ ...l, a: renumber[l.a], b: renumber[l.b] }))
+    log(`kept the connected whole: ${sizes[main]} of ${sizes.reduce((x, y) => x + y, 0)} spots, dropped ${sizes.length - 1} pockets`)
+    return new NavGraph(this.cell, this.minX, this.minZ, this.nx, this.nz, heights, masks, links, this.geometry, raised)
   }
 }
 

@@ -13,7 +13,8 @@ import { NavGraph, geometryHash, type NavData } from '../src/game/zombies/navgra
 import { pickSpawn } from '../src/game/zombies/spawn'
 import { SEALED, ZoneGates } from '../src/game/zombies/zones'
 import { setDoorOpen, updateDoors } from '../src/world/doors'
-import type { Random } from '../src/game/shared/random'
+import { seeded, type Random } from '../src/game/shared/random'
+import { addDressing } from '../src/game/zombies/dressing'
 import { buildNavScene } from './nav-scene'
 
 // The player's body and moves (src/player/body.ts, src/player/actions.ts).
@@ -258,12 +259,15 @@ export function playerReach(world: CollisionWorld, bounds: { minX: number; maxX:
 // ---------------------------------------------------------------- the zombies' side
 
 /** Dead Ink's compound as the runtime sets it up: every door open but the sealed exits, the baked graph, the zone gates. */
-export function sweepWorld(graphFile = 'public/nav/compound.json') {
+export function sweepWorld(graphFile = 'public/nav/compound.json', dressed = true) {
   const nav = buildNavScene()
   // The map's fingerprint as the runtime takes it (every door open), then the sealed exits shut.
   const hash = geometryHash(nav.scene)
   for (const door of nav.doors) if (SEALED.some(seal => seal.door === door.name)) { setDoorOpen(door, false, true); door.userData.missionLocked = true }
   nav.world.refresh()
+  // The junk the runtime scatters, its big props solid to players and zombies alike, and not in the baked
+  // graph. The runtime also keeps it off its stations, which the sweep does not place.
+  if (dressed) addDressing(nav.scene, nav.world, seeded(0xDEAD1), [])
   const graph = NavGraph.fromData(JSON.parse(readFileSync(graphFile, 'utf8')) as NavData)
   const zones = new ZoneGates(nav.scene, nav.world, graph)
   const doors = nav.doors.filter(door => !door.userData.missionLocked)
@@ -346,6 +350,8 @@ export type SimResult = {
 }
 
 const RISE_SECONDS = 1.9, RUN = 4.4
+/** A zombie at a boarded window (tearing boards, climbing through) is busy there, off the graph by design. */
+const atWindow = (zombie: Zombie) => !!(zombie as Zombie & { window?: unknown }).window
 
 /**
  * The real director, a few zombies rising where the game would raise them (pickSpawn with the runtime's
@@ -384,7 +390,7 @@ export function simulate(w: SweepWorld, sim: SweepDirector, place: Standing, ran
       z.travelled += Math.hypot(zombie.position.x - z.last.x, zombie.position.z - z.last.z)
       z.last.copy(zombie.position)
       const flat = Math.hypot(zombie.position.x - feet.x, zombie.position.z - feet.z)
-      const busy = zombie.rise > 0 || !!zombie.climb || zombie.moving || zombie.swing > 0 || zombie.recover > 0 || flat < ATTACK.range + 0.6
+      const busy = atWindow(zombie) || zombie.rise > 0 || !!zombie.climb || zombie.moving || zombie.swing > 0 || zombie.recover > 0 || flat < ATTACK.range + 0.6
       z.still = busy ? 0 : z.still + dt
       idle = Math.max(idle, z.still)
     }
@@ -409,7 +415,8 @@ export function simulate(w: SweepWorld, sim: SweepDirector, place: Standing, ran
   const flatOf = (p: THREE.Vector3) => Math.hypot(p.x - feet.x, p.z - feet.z)
   const close = zombies.find(z => flatOf(z.zombie.position) <= ATTACK.range + 0.3 && Math.abs(z.zombie.position.y - feet.y) < 1.5)
   if (close) return { verdict: 'cannot hit', ...result, note: `a zombie stood at ${at(close.zombie.position)} and never landed a swipe` }
-  const best = zombies.reduce((a, b) => (flatOf(b.zombie.position) < flatOf(a.zombie.position) ? b : a))
+  const judged = zombies.some(z => !atWindow(z.zombie)) ? zombies.filter(z => !atWindow(z.zombie)) : zombies
+  const best = judged.reduce((a, b) => (flatOf(b.zombie.position) < flatOf(a.zombie.position) ? b : a))
   const recent = best.trail.filter(s => s.t >= t - 4)
   const where = `closest zombie at ${at(best.zombie.position)}, ${f1(flatOf(best.zombie.position))} m short`
   if (recent.length >= 4) {
