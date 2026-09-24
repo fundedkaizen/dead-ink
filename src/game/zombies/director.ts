@@ -1279,6 +1279,9 @@ export class ZombieDirector {
     if (!options.length) return -1
     const current = graph.distance(here)
     const point = new THREE.Vector3()
+    // Only the best way toward the player is counted each time (see below): with two refusing, counting
+    // both would take turns resetting the count, and neither would ever come out.
+    let counted = false
     for (const option of options) {
       // A ladder or a ledge is not walked, so a first step toward it proves nothing.
       if (graph.linkKind(here, option.index) === 'climb') { zombie.probeFail = -1; zombie.probeFails = 0; return option.index }
@@ -1287,7 +1290,8 @@ export class ZombieDirector {
       if (!probe || !this.navigation.fitsPlanned(probe)) {
         // A link toward the player that keeps refusing the first step is not really there: after a few
         // tries, delete it so the flow field routes everyone around instead of shuffling on the spot.
-        if (option.distance < current) {
+        if (option.distance < current && !counted) {
+          counted = true
           zombie.probeFails = zombie.probeFail === option.index ? zombie.probeFails + 1 : 1
           zombie.probeFail = option.index
           if (zombie.probeFails >= 3) {
@@ -1298,7 +1302,10 @@ export class ZombieDirector {
         }
         continue
       }
-      zombie.probeFail = -1; zombie.probeFails = 0
+      // A step toward the player clears the count; an escape keeps it, or a link that refuses the first step
+      // would never come out while there is anywhere else to step (runtime-only things the bake never saw,
+      // an open zone gate's leaves, solid props, and the zombie shuttles back and forth in front of them).
+      if (option.distance < current) { zombie.probeFail = -1; zombie.probeFails = 0 }
       // Taking a step away from the player is an escape: do not turn straight back next time.
       if (option.distance >= current) { zombie.blocked = here; zombie.avoidTimer = 3 }
       return option.index

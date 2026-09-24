@@ -409,7 +409,8 @@ export function simulate(w: SweepWorld, sim: SweepDirector, place: Standing, ran
     if (t >= nextStrand) {
       nextStrand += 0.5
       for (const z of zombies) {
-        if (z.zombie.state !== 'chase' || !z.zombie.stranded) continue
+        // As relocateStranded: never the Brute (vanishing and reappearing reads as a glitch).
+        if (z.zombie.state !== 'chase' || !z.zombie.stranded || z.zombie.boss) continue
         if (w.world.visible(eye, z.zombie.position.clone().setY(z.zombie.position.y + 1.2), z.zombie.actor.root)) continue
         const spot = pickSpawn(graph, w.world, { near: 12, far: 32, eyes: [eye] }, random)
         if (spot && director.relocate(z.zombie, spot)) { relocated++; z.last.copy(z.zombie.position); z.trail.length = 0 }
