@@ -8,8 +8,34 @@ import { cosmeticKey, type CosmeticItem } from './catalogue'
 const GOLD = RARITY_INFO.legendary.css
 const stroke = 'fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"'
 const paper = 'fill="var(--paper, #fff)" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"'
+/** Mythic: the rarity's pink, pink-gold metal and a deep violet ink. The classes animate in armory.css. */
+const PINK = RARITY_INFO.mythic.css, ROSE = '#e9a6a1', VIOLET = '#1c0a24'
+
+/** A gear centred on (x, y) that turns (class mythic-spin, or mythic-spin-back for the one meshing against it). */
+function gear(x: number, y: number, r: number, teeth: number, back: boolean) {
+  const cogs = Array.from({ length: teeth }, (_, i) => {
+    const a = i * Math.PI * 2 / teeth
+    return `M${(x + Math.sin(a) * r).toFixed(2)} ${(y - Math.cos(a) * r).toFixed(2)}L${(x + Math.sin(a) * (r + 1.6)).toFixed(2)} ${(y - Math.cos(a) * (r + 1.6)).toFixed(2)}`
+  }).join('')
+  const spokes = [0, 1, 2].map(i => { const a = i * Math.PI * 2 / 3; return `M${x} ${y}L${(x + Math.sin(a) * r).toFixed(2)} ${(y - Math.cos(a) * r).toFixed(2)}` }).join('')
+  return `<g class="${back ? 'mythic-spin-back' : 'mythic-spin'}"><path d="${cogs}" stroke="${ROSE}" stroke-width="1.5"/>
+    <circle cx="${x}" cy="${y}" r="${r}" fill="none" stroke="${ROSE}" stroke-width="1.3"/><path d="${spokes}" stroke="${ROSE}" stroke-width="0.8"/>
+    <circle cx="${x}" cy="${y}" r="1.1" fill="${PINK}"/></g>`
+}
+
+/** Mythic watch: a pink-gold skeleton, its gears turning through the open dial. */
+const skeleton = () => `<rect x="17" y="2" width="14" height="44" rx="3" fill="${ROSE}" stroke="currentColor" stroke-width="2.2"/>
+    <path d="M17 9h14M17 15h14M17 33h14M17 39h14" stroke="currentColor" stroke-width="1.2"/>
+    <circle cx="24" cy="24" r="14" fill="${ROSE}" stroke="currentColor" stroke-width="2.2"/>
+    <circle cx="24" cy="24" r="10.5" fill="${VIOLET}" stroke="currentColor" stroke-width="1.4"/>
+    ${gear(20.5, 26, 4.2, 10, false)}${gear(28, 21.5, 3, 8, true)}${gear(25.5, 30.2, 2, 6, true)}
+    <path d="M24 24l-5.5-3.5M24 24l6.5-5.5" stroke="#ffd6ea" stroke-width="1.6" stroke-linecap="round"/>
+    <path d="M38 22v4" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>`
+
+const HEART = 'M24 42C11 33 7 24 9.5 18.5 12 13 20 12 24 18.5 28 12 36 13 38.5 18.5 41 24 37 33 24 42z'
 
 function watch(id: string) {
+  if (id === 'skeleton') return skeleton()
   const metal = id === 'president' || id === 'diamond' ? GOLD : 'var(--paper, #fff)'
   const dial = id === 'tactical' || id === 'diver' ? '#333' : id === 'president' || id === 'diamond' ? '#f2dca0' : 'var(--paper, #fff)'
   const hands = id === 'tactical' || id === 'diver' ? '#fff' : 'currentColor'
@@ -27,6 +53,10 @@ function watch(id: string) {
 }
 
 const CHARMS: Record<string, string> = {
+  'ink-heart': `<path d="${HEART}" fill="${PINK}" class="mythic-halo" transform="translate(24 27) scale(1.3) translate(-24 -27)"/>
+    <path d="M24 3v9" ${stroke}/><path d="${HEART}" fill="${ROSE}" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/>
+    <path d="${HEART}" fill="${VIOLET}" transform="translate(24 28) scale(0.68) translate(-24 -28)"/>
+    <path d="${HEART}" fill="${PINK}" class="mythic-pulse" transform="translate(24 29) scale(0.36) translate(-24 -29)"/>`,
   skull: `<path d="M24 4v6" ${stroke}/><path d="M13 24a11 11 0 1 1 22 0c0 4-2 6-4 7v5H17v-5c-2-1-4-3-4-7z" ${paper}/>
     <circle cx="19.5" cy="25" r="3" fill="currentColor"/><circle cx="28.5" cy="25" r="3" fill="currentColor"/><path d="M22 36v-3M26 36v-3" ${stroke}/>`,
   dice: `<path d="M24 3v7" ${stroke}/><rect x="9" y="12" width="17" height="17" rx="3" transform="rotate(-12 17 20)" ${paper}/>
@@ -46,6 +76,16 @@ const CHARMS: Record<string, string> = {
 }
 
 const CAMOS: Record<string, string> = {
+  nebula: `<defs><clipPath id="camo-n"><rect x="4" y="8" width="40" height="32" rx="3"/></clipPath>
+      <radialGradient id="camo-n-pink" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="${PINK}"/><stop offset="1" stop-color="${PINK}" stop-opacity="0"/></radialGradient>
+      <radialGradient id="camo-n-violet" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#6a1fd0"/><stop offset="1" stop-color="#6a1fd0" stop-opacity="0"/></radialGradient></defs>
+    <g clip-path="url(#camo-n)"><rect x="4" y="8" width="40" height="32" fill="#0d0418"/>
+    <g class="mythic-swirl"><circle cx="16" cy="18" r="15" fill="url(#camo-n-violet)"/><circle cx="32" cy="30" r="13" fill="url(#camo-n-pink)"/>
+      <path d="M6 30c6-10 18-12 22-4s-6 10-10 5 4-12 14-10 10 8 8 12" fill="none" stroke="${PINK}" stroke-width="2.4" stroke-linecap="round" opacity="0.9"/>
+      <path d="M10 14c8-4 16 2 22-2s10 2 12 6" fill="none" stroke="#b58cff" stroke-width="1.6" stroke-linecap="round" opacity="0.8"/></g>
+    <g class="camo-glint" fill="#fff"><path d="M13 14l.9 2.4 2.4.9-2.4.9-.9 2.4-.9-2.4-2.4-.9 2.4-.9z"/><path d="M36 17l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/><path d="M24 33l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/></g>
+    <circle cx="9" cy="35" r="0.7" fill="#fff"/><circle cx="29" cy="12" r="0.6" fill="#fff"/><circle cx="41" cy="36" r="0.7" fill="#fff"/><circle cx="20" cy="24" r="0.5" fill="#fff"/></g>
+    <rect x="4" y="8" width="40" height="32" rx="3" fill="none" stroke="currentColor" stroke-width="1.2"/>`,
   stripes: `<defs><clipPath id="camo-a"><rect x="4" y="8" width="40" height="32" rx="3"/></clipPath></defs><g clip-path="url(#camo-a)"><rect x="4" y="8" width="40" height="32" fill="#fff"/>
     <path d="M2 20c6-2 8 4 14 0M8 34c6-3 10 3 16-2M20 14c5 2 9-3 14 0M26 28c6-3 9 3 16-1M30 42c4-2 8 2 14-1" stroke="#111" stroke-width="4" fill="none" stroke-linecap="round"/></g>`,
   woodland: `<defs><clipPath id="camo-b"><rect x="4" y="8" width="40" height="32" rx="3"/></clipPath></defs><g clip-path="url(#camo-b)"><rect x="4" y="8" width="40" height="32" fill="#fff"/>
@@ -85,6 +125,11 @@ const CAMOS: Record<string, string> = {
 export const camoSwatch = (camo: string) => `<svg viewBox="0 4 48 40" aria-hidden="true">${CAMOS[camo] ?? ''}</svg>`
 
 const KNIVES: Record<string, string> = {
+  heartline: `<circle cx="9" cy="32" r="5" fill="var(--paper, #fff)" stroke="${ROSE}" stroke-width="3"/><circle cx="9" cy="32" r="6.4" fill="none" stroke="currentColor" stroke-width="1"/>
+    <path d="M13 30l12-3 2 6-12 3z" ${paper}/>
+    <path d="M27 33c7 0 11 1 15 6" fill="none" stroke="${PINK}" stroke-width="6" stroke-linecap="round" class="mythic-halo"/>
+    <path d="M26 27c8-2 14 2 16 12-4-5-8-6-15-6z" fill="${VIOLET}" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/>
+    <path d="M27.5 33.2c7 0 10.5 1.3 14 5" fill="none" stroke="${PINK}" stroke-width="2" stroke-linecap="round" class="mythic-pulse"/>`,
   combat: `<path d="M4 30h14v6H4z" ${paper}/><path d="M18 27v12" ${stroke}/><path d="M20 30h18l6-4v-2c-6 1-14 2-24 2z" ${paper}/><path d="M8 30v6M12 30v6" stroke="currentColor" stroke-width="1.2"/>`,
   bayonet: `<path d="M2 30h13v6H2z" ${paper}/><path d="M15 25v14" ${stroke}/><circle cx="15" cy="22" r="3" ${paper}/><path d="M17 30h24l5 3-5 3H17z" ${paper}/><path d="M20 33h20" stroke="currentColor" stroke-width="1.4"/>`,
   cleaver: `<path d="M4 34h12v5H4z" ${paper}/><path d="M16 22h26v18H16z" ${paper}/><circle cx="37" cy="27" r="2.4" ${paper}/><path d="M16 38h26" stroke="currentColor" stroke-width="1.2"/>`,

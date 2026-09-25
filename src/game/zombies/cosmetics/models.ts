@@ -29,6 +29,13 @@ const HATCH_DENSE = applyPenMaterial(paperLike(penPalette.paper), { density: 0.7
  * shimmer) would repaint the charm too. Its paper is a separate material that looks the same.
  */
 const CHARM_PAPER = paperLike(penPalette.paper)
+/** Mythic pink-gold, the dark violet under a skeleton dial, and the pink that glows (pulsed by animateCosmetics). */
+const ROSE = paperLike(0xe9a6a1)
+const VIOLET_DARK = paperLike(0x1c0a24)
+const MYTHIC_PINK = new THREE.Color(RARITY_INFO.mythic.color), MYTHIC_PALE = new THREE.Color(0xffb8dc)
+const GLOW = paperLike(RARITY_INFO.mythic.color)
+/** The halo behind the Ink Heart: no outline, just light. */
+const HALO = new THREE.MeshBasicMaterial({ color: RARITY_INFO.mythic.color, transparent: true, opacity: 0.35, depthWrite: false, side: THREE.DoubleSide, toneMapped: false })
 
 /** Parts named here are recoloured after batching; the batcher itself draws every face as paper. */
 function tint(model: Gun, materials: Record<string, THREE.Material>) {
@@ -144,7 +151,27 @@ function butterfly(): Gun {
   return tint(model, { handleA: HATCH, handleB: HATCH })
 }
 
-export const KNIFE_BUILDERS: Record<KnifeId, () => Gun> = { combat, bayonet, cleaver, karambit, butterfly }
+/** Mythic: a karambit in dark violet steel whose cutting edge glows pink, with a pink-gold finger ring. */
+function heartline(): Gun {
+  const model = gun('pistol', 'pistol', false, [0, -0.07, 0.14], [0, 0, 0], (g, parts) => {
+    const handle = group(parts, 'handle', g)
+    handle.add(box(0.022, 0.03, 0.1, [0, 0, -0.01], metal, [-8, 0, 0]))
+    ribs(handle, -0.045, 0.02, 4, 0.022, 0.03)
+    const ring = group(parts, 'ring', g, [0, 0.004, -0.083])
+    ring.add(part(new THREE.TorusGeometry(0.021, 0.0055, 8, 22), metal, [0, 0, 0], [0, 90, 0]))
+    // The whole blade glows; a dark spine laid over it leaves only the inner curve (the edge) showing.
+    const edge = group(parts, 'edge', g)
+    edge.add(plate([[0.036, 0.015], [0.078, 0.013], [0.113, -0.004], [0.134, -0.034], [0.139, -0.078],
+      [0.121, -0.046], [0.103, -0.023], [0.076, -0.009], [0.036, -0.013]], 0.004))
+    const spine = group(parts, 'spine', g)
+    spine.add(plate([[0.036, 0.016], [0.078, 0.014], [0.114, -0.004], [0.135, -0.034], [0.137, -0.066],
+      [0.126, -0.042], [0.107, -0.018], [0.077, -0.004], [0.036, -0.008]], 0.0048))
+    g.add(line([[0.0026, 0.006, 0.05], [0.0026, 0.005, 0.09], [0.0026, -0.006, 0.114]], 121, 1.1))
+  }, 'cosmetic:knife:heartline')
+  return tint(model, { handle: HATCH_DENSE, ring: ROSE, edge: GLOW, spine: VIOLET_DARK })
+}
+
+export const KNIFE_BUILDERS: Record<KnifeId, () => Gun> = { combat, bayonet, cleaver, karambit, butterfly, heartline }
 
 // ---------------------------------------------------------------- watches
 
@@ -204,10 +231,38 @@ function watch(id: WatchId): Gun {
     if (id === 'two-tone') { band(g, parts, 'strap', true, 'gold'); watchHead(g, parts, { caseTo: 'case', dialTo: 'dial', bezel: 'fluted' }) }
     if (id === 'president') { band(g, parts, 'gold', true); watchHead(g, parts, { caseTo: 'goldCase', dialTo: 'dial', bezel: 'fluted' }) }
     if (id === 'diamond') { band(g, parts, 'gold', true); watchHead(g, parts, { caseTo: 'goldCase', dialTo: 'dial', bezel: 'gems' }) }
+    if (id === 'skeleton') { band(g, parts, 'rose', true); watchHead(g, parts, { caseTo: 'roseCase', dialTo: 'dial', bezel: 'fluted' }); skeletonGears(parts) }
   }, `cosmetic:watch:${id}`)
+  // Inner parts first: tinting the case would otherwise paint the dial and gears inside it too.
+  if (id === 'skeleton') return tint(model, { gearA: ROSE, gearB: ROSE, gearC: ROSE, jewels: GLOW, dial: VIOLET_DARK, roseCase: ROSE, rose: ROSE })
   const dial = id === 'tactical' || id === 'diver' ? STEEL_DARK : id === 'president' || id === 'diamond' ? GOLD_PALE : metal
   return tint(model, { strap: id === 'tactical' ? HATCH_DENSE : metal, gold: GOLD, goldCase: GOLD, case: id === 'tactical' ? HATCH_DENSE : metal,
     dial, gems: GEM })
+}
+
+/** One flat gear: a rim, teeth and spokes, centred on its part's origin so it can turn in place. */
+function gearInto(target: THREE.Object3D, radius: number, teeth: number) {
+  target.add(part(new THREE.RingGeometry(radius * 0.72, radius, 20), metal, [0, 0, 0]))
+  for (let i = 0; i < teeth; i++) {
+    const a = i * Math.PI * 2 / teeth
+    target.add(part(new THREE.PlaneGeometry(radius * 0.32, radius * 0.34), metal, [Math.sin(a) * radius * 1.12, Math.cos(a) * radius * 1.12, 0], [0, 0, -a * THREE.MathUtils.RAD2DEG]))
+  }
+  for (let i = 0; i < 3; i++) {
+    const a = i * Math.PI * 2 / 3
+    target.add(line([[0, 0, 0.0001], [Math.sin(a) * radius * 0.74, Math.cos(a) * radius * 0.74, 0.0001]], 330 + teeth + i, 0.7))
+  }
+}
+
+/** The skeleton's movement, seen through its open dial: three meshing gears on pink jewels. */
+function skeletonGears(parts: Record<string, THREE.Object3D>) {
+  const head = parts.roseCase
+  const z = 0.0049
+  const gears: [string, number, number, number, number][] = [['gearA', -0.0048, -0.003, 0.0055, 12], ['gearB', 0.0058, 0.0028, 0.0042, 9], ['gearC', 0.0014, -0.0092, 0.003, 7]]
+  const jewels = group(parts, 'jewels', head)
+  for (const [name, x, y, r, teeth] of gears) {
+    gearInto(group(parts, name, head, [x, y, z]), r, teeth)
+    jewels.add(part(new THREE.CircleGeometry(0.0011, 8), metal, [x, y, z + 0.0002]))
+  }
 }
 
 export const buildWatch = (id: WatchId) => watch(id)
@@ -217,6 +272,14 @@ export const buildWatch = (id: WatchId) => watch(id)
 /** Every charm hangs this far below its ring; the pendulum swings about the ring. */
 const CHARM_SCALE = 1.5
 export const CHARM_LENGTH = 0.034 * CHARM_SCALE
+
+/** A heart outline as [Z, Y] points, `size` tall, centred on the origin. */
+function heartPoints(size: number, count: number): [number, number][] {
+  return Array.from({ length: count }, (_, i) => {
+    const t = i / count * Math.PI * 2, k = size / 30
+    return [16 * Math.sin(t) ** 3 * k, (13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t) + 2.5) * k] as [number, number]
+  })
+}
 
 function charm(id: CharmId): Gun {
   const model = gun('pistol', 'pistol', false, [0, 0, 0], [0, 0, 0], (g, parts) => {
@@ -262,6 +325,12 @@ function charm(id: CharmId): Gun {
       wing.rotation.y = Math.PI / 2; wing.rotation.x = -0.5
       g.add(wing)
     }
+    if (id === 'ink-heart') {
+      // A pink-gold locket, a heart of ink set in it and, in the ink, a heart of glowing pink.
+      group(parts, 'rose', g).add(plate(heartPoints(0.011, 24), 0.005, [0, y, 0]))
+      group(parts, 'ink', g).add(plate(heartPoints(0.0078, 24), 0.0058, [0, y + 0.0004, 0]))
+      group(parts, 'core', g).add(plate(heartPoints(0.0042, 20), 0.0064, [0, y + 0.0008, 0]))
+    }
     if (id === 'golden-bullet') {
       const bullet = group(parts, 'gold', g)
       bullet.add(part(new THREE.CylinderGeometry(0.0045, 0.0045, 0.017, 12), metal, [0, y - 0.002, 0]))
@@ -271,8 +340,19 @@ function charm(id: CharmId): Gun {
   }, `cosmetic:charm:${id}`)
   // Drawn at real size a charm is a speck at arm's length; half as big again reads without crowding the gun.
   model.scale.setScalar(CHARM_SCALE)
-  tint(model, { ink: INK, hatch: HATCH, gold: GOLD })
+  tint(model, { core: GLOW, ink: INK, hatch: HATCH, gold: GOLD, rose: ROSE })
   model.traverse(object => { if (object instanceof THREE.Mesh && object.material === metal) object.material = CHARM_PAPER })
+  if (id === 'ink-heart') {
+    // The glow: a soft heart of light behind the locket, seen from both sides, no ink line. animateCosmetics pulses it.
+    const shape = new THREE.Shape(heartPoints(0.017, 32).map(([z, y]) => new THREE.Vector2(-z, y)))
+    const halo = new THREE.Mesh(new THREE.ShapeGeometry(shape), HALO)
+    halo.rotation.y = Math.PI / 2
+    const holder = new THREE.Group()
+    holder.position.set(0, -0.034, 0)
+    holder.add(halo)
+    model.add(holder)
+    model.userData.parts.halo = holder
+  }
   return model
 }
 
@@ -281,7 +361,7 @@ export const buildCharm = (id: CharmId) => charm(id)
 // ---------------------------------------------------------------- camos
 
 const CAMO_CODE: Record<CamoId, number> = { stripes: 0, woodland: 1, digital: 2, obsidian: 3, gold: 4,
-  crosshatch: 5, blueprint: 6, 'red-ink': 7, 'black-gold': 8, diamond: 9 }
+  crosshatch: 5, blueprint: 6, 'red-ink': 7, 'black-gold': 8, diamond: 9, nebula: 10 }
 const camoMaterials = new Map<CamoId, THREE.MeshBasicMaterial>()
 /**
  * Seconds for the animated camos (Diamond's glints), shared by every copy. Advanced as the material draws,
@@ -383,6 +463,23 @@ export function camoMaterial(id: CamoId) {
             float g = 1.0 - smoothstep(0.01, 0.026, vein);
             g = max(g, (1.0 - smoothstep(0.005, 0.012, fine)) * 0.75);
             return mix(lacquer, camoGold * 1.08, g);
+          #elif CAMO == 10
+            // Ink Nebula: violet ink swirled through with pink, drifting slowly, pricked with twinkling stars.
+            float t = camoTime * 0.12;
+            vec2 w = p * 18.0;
+            vec2 warp = vec2(camoFbm(w + vec2(t, -t * 0.7)), camoFbm(w * 1.3 - vec2(t * 0.8, t) + 4.7));
+            float swirl = camoFbm(w * 0.9 + warp * 2.6 + vec2(-t * 0.5, t * 0.3));
+            float wisp = camoFbm(w * 2.2 - warp * 1.8 + 9.1);
+            vec3 c = mix(vec3(0.012, 0.002, 0.03), vec3(0.16, 0.02, 0.42), smoothstep(0.3, 0.62, swirl));
+            c = mix(c, vec3(0.75, 0.02, 0.27), smoothstep(0.52, 0.72, wisp) * smoothstep(0.35, 0.6, swirl));
+            c += vec3(1.0, 0.55, 0.8) * pow(smoothstep(0.66, 0.8, wisp), 2.0) * 0.35;
+            vec2 sq = p / 0.009;
+            vec2 si = floor(sq), sf = fract(sq) - 0.5;
+            float star = step(0.9, camoHash(si + 2.3));
+            float twinkle = 0.35 + 0.65 * pow(max(0.0, sin(camoTime * (1.2 + camoHash(si) * 2.5) + camoHash(si + 7.7) * 6.2831)), 6.0);
+            float dotStar = 1.0 - smoothstep(0.04, 0.16, length(sf));
+            float rays = (1.0 - smoothstep(0.0, 0.03, min(abs(sf.x), abs(sf.y)))) * (1.0 - smoothstep(0.0, 0.42, length(sf)));
+            return c + vec3(1.0, 0.9, 0.97) * star * twinkle * max(dotStar, rays * 0.8);
           #else
             // Diamond: cut facets (the nearest of scattered points), each its own shade of ice, dark
             // girdle lines between them, glints that flash facet by facet and a slow sweep of light.
@@ -417,9 +514,26 @@ export function camoMaterial(id: CamoId) {
           + camoPattern(vCamoPosition.xy + 0.71) * camoWeights.z;`)
   }
   material.customProgramCacheKey = () => `dead-ink-camo:${id}`
-  if (id === 'diamond') material.onBeforeRender = () => { camoTime.value = reducedMotion() ? 1.2 : performance.now() / 1000 % 1000 }
+  if (id === 'diamond' || id === 'nebula') material.onBeforeRender = () => { camoTime.value = reducedMotion() ? 1.2 : performance.now() / 1000 % 1000 }
   camoMaterials.set(id, material)
   return material
+}
+
+/**
+ * The Mythic cosmetics' motion, once a frame: the skeleton watch's gears turn, the Ink Heart's glow and
+ * the Heartline's edge pulse. `seconds` is a clock; pass a constant under reduced motion to hold them still.
+ */
+export function animateCosmetics(seconds: number, models: readonly (THREE.Object3D | null | undefined)[]) {
+  const pulse = 0.5 + 0.5 * Math.sin(seconds * 2.2)
+  GLOW.color.copy(MYTHIC_PINK).lerp(MYTHIC_PALE, pulse * 0.6)
+  HALO.opacity = 0.18 + 0.3 * pulse
+  for (const model of models) {
+    const parts = model?.userData.parts as Record<string, THREE.Object3D> | undefined
+    if (!parts) continue
+    // Meshing gears turn against each other, the smaller ones faster.
+    if (parts.gearA) { parts.gearA.rotation.z = seconds * 0.9; parts.gearB.rotation.z = -seconds * 0.9 * 12 / 9; parts.gearC.rotation.z = -seconds * 0.9 * 12 / 7 }
+    if (parts.halo) parts.halo.scale.setScalar(0.9 + 0.25 * pulse)
+  }
 }
 
 /** Paint a gun's paper faces with a camo. Returns false when the gun has no plain paper to paint. */

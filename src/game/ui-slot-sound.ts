@@ -134,9 +134,26 @@ export function playReelWin(rarity: Rarity) {
       osc.start(start); osc.stop(start + win.hold + 0.4)
     }
   }
-  // Purple and gold: a sparkle of quick high notes running up over the chord.
+  // Mythic: before the bells, a rising pink swoosh (a bright buzz swept up through a band-pass), and after
+  // them a longer sparkle, so the top of the ladder sounds like nothing else the reel plays.
+  if (rarity === 'mythic') {
+    for (const detune of [-14, 14]) {
+      const osc = context.createOscillator(), gain = context.createGain(), band = context.createBiquadFilter()
+      osc.type = 'sawtooth'
+      osc.frequency.setValueAtTime(hz(-14), t0); osc.frequency.exponentialRampToValueAtTime(hz(10), t0 + 0.55)
+      osc.detune.value = detune
+      band.type = 'bandpass'; band.Q.value = 3
+      band.frequency.setValueAtTime(500, t0); band.frequency.exponentialRampToValueAtTime(5200, t0 + 0.55)
+      gain.gain.setValueAtTime(0, t0)
+      gain.gain.linearRampToValueAtTime(0.09, t0 + 0.4)
+      gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.75)
+      osc.connect(band).connect(gain).connect(out)
+      osc.start(t0); osc.stop(t0 + 0.8)
+    }
+  }
+  // Purple, gold and pink: a sparkle of quick high notes running up over the chord.
   if (win.sparkle) {
-    const count = rarity === 'epic' ? 6 : 12
+    const count = rarity === 'epic' ? 6 : rarity === 'mythic' ? 18 : 12
     for (let i = 0; i < count; i++) {
       const start = t0 + 0.12 + win.step * (win.notes.length - 1) + i * 0.045
       const osc = context.createOscillator(), gain = context.createGain()

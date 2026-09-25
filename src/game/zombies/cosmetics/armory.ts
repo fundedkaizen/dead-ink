@@ -1,6 +1,6 @@
 import '../menu-skin.css'
 import './armory.css'
-import { RARITIES, RARITY_INFO } from '../../loot'
+import { RARITY_INFO } from '../../loot'
 import type { MenuExtraPage } from '../../menu'
 import type { WeaponName } from '../../types'
 import { playReelTick, playReelWin, synthContext } from '../../ui-slot-sound'
@@ -8,7 +8,7 @@ import { tallySvg } from '../hud'
 import { CATALOGUE, cosmeticKey, type CamoId, type ChallengeCamoId, type CosmeticItem, type CosmeticKind, type EquippedCosmetics } from './catalogue'
 import { ACCOUNT_CHALLENGES, CHALLENGE_WEAPONS, WEAPON_LABELS, WEAPON_TIERS, accountProgress, masteredCount, tierProgress, weaponMastered, type ChallengeState } from './challenges'
 import { camoSwatch, cosmeticIcon } from './icons'
-import { CASE, CASE_WEIGHTS, casePool, equippedCosmetics, loadProfile, onProfileChange, openCase, ownsCamo, toggleEquip, type Profile } from './profile'
+import { CASE, caseOdds, equippedCosmetics, loadProfile, onProfileChange, openCases, ownsCamo, toggleEquip, type CaseOpening, type Profile } from './profile'
 
 /**
  * The Armory page of the Dead Ink menu (open cases, wear what you own) and the home page's record of
@@ -25,6 +25,12 @@ const GUNS: { name: WeaponName; label: string }[] = [
   { name: 'magnum', label: 'Magnum' }, { name: 'lmg', label: 'LMG' },
 ]
 const TILE = 120
+/** The x5 reels are stacked, so their tiles are smaller (64 px wide plus a 6 px gap). */
+const SMALL_TILE = 70
+/** How many cases the multi-open button opens. */
+const MULTI = 5
+/** Spin lengths in ms: one reel; the first of five, each next one stopping STAGGER later; reduced motion. */
+const SINGLE_SPIN = 3000, MULTI_SPIN = 2400, STAGGER = 300, SHORT_SPIN = 350
 const reducedMotion = () => document.body.dataset.reducedMotion === 'true'
 const ink = (value: number) => value.toLocaleString('en-GB')
 const escape = (text: string) => text.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!)
@@ -88,11 +94,13 @@ function isEquipped(item: CosmeticItem, equipped: EquippedCosmetics, gun: Weapon
 const tile = (item: CosmeticItem) => `<div class="armory-tile" style="--rarity:${RARITY_INFO[item.rarity].css}">
   ${cosmeticIcon(item)}<span>${escape(item.name)}</span></div>`
 
+/** One reel of an opening: its strip, how far it travels and whether it has stopped. */
+type Spin = { opening: CaseOpening; reel: HTMLElement; strip: HTMLElement; tile: number; width: number; distance: number; end: number
+  animation: Animation | null; done: boolean }
+
 /** Share of each rarity in a case, for the odds line under the case. */
 function odds() {
-  const present = RARITIES.filter(rarity => casePool().some(entry => entry.rarity === rarity))
-  const total = present.reduce((sum, rarity) => sum + CASE_WEIGHTS[rarity], 0)
-  return present.map(rarity => `<span style="--rarity:${RARITY_INFO[rarity].css}">${RARITY_INFO[rarity].label} ${(CASE_WEIGHTS[rarity] / total * 100).toFixed(CASE_WEIGHTS[rarity] / total < 0.1 ? 1 : 0)}%</span>`).join('')
+  return caseOdds().map(({ rarity, share }) => `<span style="--rarity:${RARITY_INFO[rarity].css}">${RARITY_INFO[rarity].label} ${(share * 100).toFixed(share < 0.1 ? 1 : 0)}%</span>`).join('')
 }
 
 class Armory {
@@ -100,10 +108,11 @@ class Armory {
   private kind: Tab = 'watch'
   private gun: WeaponName = 'ak'
   private spinning = false
-  private strip!: HTMLElement
-  private reel!: HTMLElement
+  private reels!: HTMLElement
   private result!: HTMLElement
+  private results!: HTMLElement
   private openButton!: HTMLButtonElement
+  private openManyButton!: HTMLButtonElement
   private balance!: HTMLElement
 
   build(body: HTMLElement) {
@@ -118,22 +127,33 @@ class Armory {
       <section class="armory-case" aria-label="${CASE.name}">
         <div class="armory-case-head">
           <div><h3>${CASE.name}</h3><p class="armory-odds">${odds()}</p></div>
-          <button class="armory-open" type="button">Open · ${CASE.price} Ink</button>
+          <div class="armory-buttons">
+            <button class="armory-open" type="button">Open · ${CASE.price} Ink</button>
+            <button class="armory-open armory-open-many" type="button">Open ${MULTI} · ${CASE.price * MULTI} Ink</button>
+          </div>
         </div>
-        <div class="armory-reel" hidden><div class="armory-strip"></div><i class="armory-marker" aria-hidden="true"></i></div>
+        <div class="armory-reels" hidden></div>
         <p class="armory-result" role="status"></p>
+        <div class="armory-results" hidden></div>
       </section>
       <div class="armory-tabs" role="tablist">${KINDS.map(({ kind, label }) => `<button type="button" role="tab" data-kind="${kind}">${label}</button>`).join('')}</div>
       <div class="armory-guns" hidden>${GUNS.map(({ name, label }) => `<button type="button" data-gun="${name}">${label}</button>`).join('')}</div>
       <p class="armory-hint"></p>
       <div class="armory-grid"></div>
       <div class="armory-challenges" hidden></div>`
-    this.strip = body.querySelector('.armory-strip')!
-    this.reel = body.querySelector('.armory-reel')!
+    this.reels = body.querySelector('.armory-reels')!
     this.result = body.querySelector('.armory-result')!
+    this.results = body.querySelector('.armory-results')!
     this.openButton = body.querySelector('.armory-open')!
+    this.openManyButton = body.querySelector('.armory-open-many')!
     this.balance = body.querySelector('.armory-ink strong')!
-    this.openButton.addEventListener('click', () => this.open())
+    this.openButton.addEventListener('click', () => this.open(1))
+    this.openManyButton.addEventListener('click', () => this.open(MULTI))
+    this.results.addEventListener('click', event => {
+      const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-wear]')
+      const item = button && CATALOGUE.find(entry => entry.id === button.dataset.wear)
+      if (item && !isEquipped(item, loadProfile().equipped, this.gun)) toggleEquip(item.id, this.gun)
+    })
     body.querySelectorAll<HTMLElement>('[data-kind]').forEach(button => button.addEventListener('click', () => { this.kind = button.dataset.kind as Tab; this.render() }))
     body.querySelectorAll<HTMLElement>('[data-gun]').forEach(button => button.addEventListener('click', () => { this.gun = button.dataset.gun as WeaponName; this.render() }))
     body.querySelector('.armory-grid')!.addEventListener('click', event => {
@@ -150,6 +170,15 @@ class Armory {
     this.balance.textContent = ink(profile.ink)
     this.openButton.disabled = this.spinning || profile.ink < CASE.price
     this.openButton.title = profile.ink < CASE.price ? `You need ${CASE.price - profile.ink} more Ink` : ''
+    this.openManyButton.disabled = this.spinning || profile.ink < CASE.price * MULTI
+    this.openManyButton.title = profile.ink < CASE.price * MULTI ? `You need ${CASE.price * MULTI - profile.ink} more Ink for ${MULTI} cases` : ''
+    // The x5 results' Wear buttons follow what is worn now.
+    this.results.querySelectorAll<HTMLButtonElement>('[data-wear]').forEach(button => {
+      const item = CATALOGUE.find(entry => entry.id === button.dataset.wear)!
+      const worn = isEquipped(item, profile.equipped, this.gun)
+      button.textContent = worn ? 'Worn' : 'Wear'
+      button.setAttribute('aria-pressed', String(worn))
+    })
     this.body.querySelectorAll<HTMLElement>('[data-kind]').forEach(button => button.setAttribute('aria-selected', String(button.dataset.kind === this.kind)))
     const guns = this.body.querySelector<HTMLElement>('.armory-guns')!
     guns.hidden = this.kind !== 'camo' && this.kind !== 'challenges'
@@ -182,62 +211,107 @@ class Armory {
     }).join('')
   }
 
-  /** Spend the Ink, then let the strip run: fast at first, easing to a stop on the item already won. */
-  private open() {
+  /**
+   * Spend the Ink for `count` cases, then let their strips run: fast at first, easing to a stop on the items
+   * already won. Several reels stop one after another; a tap on a spinning reel stops it at once.
+   */
+  private open(count: number) {
     if (this.spinning) return
-    const opening = openCase()
-    if (!opening) return
+    const openings = openCases(count)
+    if (!openings) return
     this.spinning = true
     this.render()
-    const { item, strip, winIndex, duplicate, refund } = opening
-    this.reel.hidden = false
-    this.reel.classList.remove('won')
-    this.reel.style.setProperty('--rarity', RARITY_INFO[item.rarity].css)
+    const multi = openings.length > 1, size = multi ? SMALL_TILE : TILE
+    this.reels.hidden = false
+    this.reels.classList.toggle('multi', multi)
     this.result.textContent = ''
-    this.strip.innerHTML = strip.map(tile).join('')
-    const width = this.reel.clientWidth || 600
-    // Land somewhere inside the winning tile, not always dead centre, as a real reel would.
-    const jitter = (Math.random() - 0.5) * TILE * 0.6
-    const distance = winIndex * TILE + TILE / 2 - width / 2 + jitter
-    const duration = reducedMotion() ? 350 : 5200
+    this.results.hidden = true
+    this.results.innerHTML = ''
+    this.body.querySelector('.armory-case')!.classList.remove('mythic-win')
+    this.reels.innerHTML = openings.map(({ item, strip }) => `<div class="armory-reel" style="--rarity:${RARITY_INFO[item.rarity].css}" title="Tap to stop">
+      <div class="armory-strip">${strip.map(tile).join('')}</div><i class="armory-marker" aria-hidden="true"></i><i class="armory-burst" aria-hidden="true"></i></div>`).join('')
     // The Open click is the user gesture that lets the page make sound.
     synthContext()
-    let ticking = true
-    const finish = () => {
-      ticking = false
-      playReelWin(item.rarity)
-      this.strip.style.transform = `translateX(${-distance}px)`
-      this.strip.children[winIndex]?.classList.add('winner')
-      this.reel.classList.add('won')
+    const start = performance.now()
+    const spins = openings.map((opening, i): Spin => {
+      const reel = this.reels.children[i] as HTMLElement, strip = reel.querySelector<HTMLElement>('.armory-strip')!
+      const width = reel.clientWidth || 600
+      // Land somewhere inside the winning tile, not always dead centre, as a real reel would.
+      const jitter = (Math.random() - 0.5) * size * 0.6
+      const distance = opening.winIndex * size + size / 2 - width / 2 + jitter
+      const duration = reducedMotion() ? SHORT_SPIN + i * 60 : multi ? MULTI_SPIN + i * STAGGER : SINGLE_SPIN
+      const animation = strip.animate?.([{ transform: 'translateX(0px)' }, { transform: `translateX(${-distance}px)` }],
+        { duration, easing: 'cubic-bezier(0.06, 0.72, 0.14, 1)', fill: 'forwards' }) ?? null
+      return { opening, reel, strip, tile: size, width, distance, end: start + duration, animation, done: false }
+    })
+    for (const spin of spins) {
+      if (!spin.animation) { this.stopReel(spin, spins); continue }
+      spin.animation.onfinish = () => this.stopReel(spin, spins)
+      // Skip: the reel jumps to its result (a finished animation fires onfinish, which does the rest).
+      spin.reel.addEventListener('pointerdown', () => { if (!spin.done) { spin.end = 0; spin.animation!.finish() } })
+    }
+    if (spins.some(spin => !spin.done)) this.tickReels(spins)
+  }
+
+  /** One reel has stopped on its item: light it up, play its win, and wrap up once the last one stops. */
+  private stopReel(spin: Spin, spins: Spin[]) {
+    if (spin.done) return
+    spin.done = true
+    const { item } = spin.opening
+    playReelWin(item.rarity)
+    spin.strip.style.transform = `translateX(${-spin.distance}px)`
+    spin.strip.children[spin.opening.winIndex]?.classList.add('winner')
+    spin.reel.classList.add('won')
+    spin.reel.removeAttribute('title')
+    if (item.rarity === 'mythic') {
+      spin.reel.classList.add('mythic')
+      this.body.querySelector('.armory-case')!.classList.add('mythic-win')
+    }
+    if (spins.every(s => s.done)) this.finishOpening(spins.map(s => s.opening))
+  }
+
+  private finishOpening(openings: CaseOpening[]) {
+    this.spinning = false
+    if (openings.length === 1) {
+      const { item, duplicate, refund } = openings[0]
       const info = RARITY_INFO[item.rarity]
-      this.result.innerHTML = `<strong style="color:${info.css}">${info.label}</strong> ${escape(item.name)}${duplicate ? ` · already yours, ${refund} Ink back` : ''}
+      this.result.innerHTML = `<strong class="armory-result-rarity" data-rarity="${item.rarity}" style="color:${info.css}">${info.label}</strong> ${escape(item.name)}${duplicate ? ` · already yours, ${refund} Ink back` : ''}
         ${duplicate ? '' : '<button type="button" class="armory-equip">Wear it</button>'}`
       this.result.querySelector('.armory-equip')?.addEventListener('click', () => {
         if (!isEquipped(item, loadProfile().equipped, this.gun)) toggleEquip(item.id, this.gun)
         this.kind = item.kind
         this.render()
       })
-      this.spinning = false
-      this.render()
+    } else {
+      const refunds = openings.reduce((sum, opening) => sum + opening.refund, 0)
+      const fresh = openings.filter(opening => !opening.duplicate).length
+      this.result.textContent = `${fresh} new${refunds ? ` · ${refunds} Ink back for duplicates` : ''}`
+      this.results.innerHTML = openings.map(({ item, duplicate, refund }) => {
+        const info = RARITY_INFO[item.rarity]
+        return `<div class="armory-won" data-rarity="${item.rarity}" style="--rarity:${info.css}" title="${escape(item.blurb)}">
+          ${cosmeticIcon(item)}<b>${escape(item.name)}</b><small style="color:${info.css}">${info.label}</small>
+          ${duplicate ? `<span class="armory-won-refund">+${refund} Ink</span>` : `<span class="armory-won-new">NEW</span><button type="button" class="armory-equip" data-wear="${item.id}">Wear</button>`}
+        </div>`
+      }).join('')
+      this.results.hidden = false
     }
-    const animation = this.strip.animate?.([{ transform: 'translateX(0px)' }, { transform: `translateX(${-distance}px)` }],
-      { duration, easing: 'cubic-bezier(0.06, 0.72, 0.14, 1)', fill: 'forwards' })
-    if (animation) {
-      animation.onfinish = finish
-      this.tickReel(width, () => ticking)
-    } else finish()
+    this.render()
   }
 
   /**
-   * A slot machine's click for every tile that slides under the marker, read off the strip as it
-   * moves, so the ticks slow with the reel. At most one every 28 ms while the strip is a blur.
+   * A slot machine's click for every tile that slides under the marker, read off the strip as it moves, so
+   * the ticks slow with the reel. Several reels would click into noise, so there is one tick stream, taken
+   * from the reel furthest from stopping. At most one tick every 28 ms while the strip is a blur.
    */
-  private tickReel(width: number, running: () => boolean) {
-    let last = -1, lastX = 0, lastTime = performance.now(), lastTick = 0
+  private tickReels(spins: Spin[]) {
+    let source: Spin | null = null, last = -1, lastX = 0, lastTime = performance.now(), lastTick = 0
     const frame = (now: number) => {
-      if (!running()) return
-      const x = -new DOMMatrixReadOnly(getComputedStyle(this.strip).transform).m41
-      const tile = Math.floor((x + width / 2) / TILE)
+      const running = spins.filter(spin => !spin.done && spin.end > 0)
+      if (!running.length) return
+      const spin = running.reduce((a, b) => b.end > a.end ? b : a)
+      const x = -new DOMMatrixReadOnly(getComputedStyle(spin.strip).transform).m41
+      const tile = Math.floor((x + spin.width / 2) / spin.tile)
+      if (spin !== source) { source = spin; last = tile; lastX = x; lastTime = now }
       const speed = Math.abs(x - lastX) / Math.max(1, now - lastTime)
       if (last >= 0 && tile !== last && now - lastTick >= 28) { playReelTick(Math.min(1, speed / 2.5)); lastTick = now }
       last = tile; lastX = x; lastTime = now

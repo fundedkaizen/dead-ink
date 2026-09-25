@@ -7,7 +7,7 @@ import { createMissionGun } from './weapon-models'
 import { RARITY_INFO, weaponRules } from './loot'
 import { createRarityBeam } from '../render/ink'
 import type { EquippedCosmetics, KnifeId } from './zombies/cosmetics/catalogue'
-import { CHARM_ANCHORS, CHARM_LENGTH, KNIFE_BUILDERS, applyCamo, buildCharm, buildWatch, removeCamo } from './zombies/cosmetics/models'
+import { CHARM_ANCHORS, CHARM_LENGTH, KNIFE_BUILDERS, animateCosmetics, applyCamo, buildCharm, buildWatch, removeCamo } from './zombies/cosmetics/models'
 import { applyDragonSkin, removeDragonSkin } from './zombies/mythic'
 import { Offhand, firingHand, isAkimbo, type Kick } from './akimbo'
 export { WEAPON_RULES } from './balance'
@@ -1029,6 +1029,7 @@ export class FirstPersonWeapons {
     this.placeArm(this.arms[1], left, shoulders[1])
     this.placeWatch(left)
     this.swingCharm(dt)
+    if (this.cosmetics) animateCosmetics(this.frame.reducedMotion ? 1 : performance.now() / 1000 % 1000, [this.watch, this.charm?.model, this.knifeModel])
   }
 
   /**
@@ -1164,7 +1165,7 @@ export class FirstPersonWeapons {
       parts.blade.rotation.x = Math.PI * closed
       parts.handleB.rotation.x = -0.9 * Math.sin(Math.PI * closed)
       m.rotation.z += 0.25 * Math.sin(s * 5)
-    } else if (id === 'karambit') {
+    } else if (id === 'karambit' || id === 'heartline') {
       // Two turns around the finger ring, the way a karambit is spun.
       const ring = parts.ring.position
       this.knifeSpin.position.copy(ring)
