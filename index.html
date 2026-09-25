@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en" data-loading>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#ffffff" />
+    <link rel="icon" type="image/svg+xml" href="/dead-ink/favicon-dead-ink.svg" />
+    <script>/* The mode's own icon before the game loads: Dead Ink or the hostage mission. */ if (new URLSearchParams(location.search).get('mode') !== 'zombies') document.querySelector('link[rel="icon"]').href = '/favicon-hostage.svg'</script>
+    <title>Operation Safe Return — Stickman</title>
+    <script>if (new URLSearchParams(location.search).get('mode') === 'zombies') document.title = 'Dead Ink'</script>
+    <!-- Every enemy and the hostage need the model; fetch it alongside the scripts instead of after they run. -->
+    <link rel="preload" href="/dead-ink/models/stickman.glb" as="fetch" crossorigin />
+    <style>html{background:#fff}html[data-loading] body>:not(#boot){visibility:hidden}html:not([data-loading]) #boot{display:none}#boot{color:#000;text-align:center;place-content:center;justify-items:center;gap:18px;padding:24px;display:grid;position:fixed;inset:0}#boot h1{letter-spacing:-.02em;margin:0;font:600 clamp(30px,6vw,44px)/1.08 Bradley Hand,Segoe Print,Comic Sans MS,cursive}#boot p{margin:0;font:13px/1.5 Trebuchet MS,Segoe UI,sans-serif}#boot i{transform-origin:0;background:#000;border-radius:2px;width:132px;height:2.2px;animation:1.4s ease-in-out infinite boot-stroke;display:block}@keyframes boot-stroke{0%{transform:scaleX(0)}60%{opacity:1;transform:scaleX(1)}to{opacity:0;transform:scaleX(1)}}@media (prefers-reduced-motion:reduce){#boot i{animation:none}}</style>
+    <script type="module" crossorigin src="/dead-ink/assets/main-Cb5boWwi.js"></script>
+    <link rel="modulepreload" crossorigin href="/dead-ink/assets/preload-helper-sXglA3gU.js">
+    <link rel="modulepreload" crossorigin href="/dead-ink/assets/main-38a7Zgi_.js">
+    <link rel="modulepreload" crossorigin href="/dead-ink/assets/blood-stamps-Yv2G7haW.js">
+    <link rel="modulepreload" crossorigin href="/dead-ink/assets/three-zzwj8OBq.js">
+    <link rel="modulepreload" crossorigin href="/dead-ink/assets/rig-C96Ocoll.js">
+    <link rel="modulepreload" crossorigin href="/dead-ink/assets/player-Dq3oQkM0.js">
+    <link rel="modulepreload" crossorigin href="/dead-ink/assets/clips-DDBu4Hxv.js">
+    <link rel="modulepreload" crossorigin href="/dead-ink/assets/hang-B-LbNCYn.js">
+    <link rel="modulepreload" crossorigin href="/dead-ink/assets/postures-DGVuKH0D.js">
+  </head>
+  <body>
+    <div id="boot" role="status">
+      <h1>Operation Safe Return</h1>
+      <i aria-hidden="true"></i>
+      <p>Loading…</p>
+    </div>
+    <canvas id="world" tabindex="0" aria-label="Explore the military compound in first person. Click Start walking, mouse to look, WASD to walk, Shift to sprint, Space to jump, F to open doors or climb nearby ladders, Escape to pause, R to return to the entrance. Inspect map switches to the inspection camera."></canvas>
+    <button id="walk-mode" class="mode-button" hidden>Walk the map <span>↗</span></button>
+    <section id="walk-hud" hidden aria-label="First-person controls">
+      <div class="walk-heading"><span class="walk-eyebrow">COMPOUND / EXPLORATION</span><span id="walk-status">On foot</span></div>
+      <button id="inspect-mode" class="mode-button">Inspect map <span>↗</span></button>
+      <div class="crosshair" aria-hidden="true"></div>
+      <div id="action-marker" aria-hidden="true" hidden></div>
+      <div id="action-prompt" role="status" hidden><kbd>F</kbd><strong id="action-label"></strong></div>
+      <div class="walk-controls"><span><kbd>W A S D</kbd> Walk</span><span><kbd>Shift</kbd> Sprint</span><span><kbd>Space</kbd> Jump</span><span><kbd>F</kbd> Interact</span><span><kbd>Esc</kbd> Pause</span></div>
+      <div id="walk-pause">
+        <div class="walk-card">
+          <span class="walk-eyebrow">A DIFFERENT PERSPECTIVE</span>
+          <h1>Boots on the ground.</h1>
+          <p>Take the ladder ahead to the mess hall roof and head downstairs. Follow the EXIT sign through the dining hall to reach the compound yard.</p>
+          <div class="walk-instructions"><span><kbd>W A S D</kbd> Walk</span><span><kbd>Mouse</kbd> Look around</span><span><kbd>Shift</kbd> Sprint</span><span><kbd>Space</kbd> Jump</span><span><kbd>F</kbd> Doors &amp; ladders</span><span><kbd>R</kbd> Back to entrance</span></div>
+          <button id="walk-start">Start walking <span>→</span></button>
+          <small>Look for the blinking symbol. Press F when you’re within reach.<br>Esc pauses and releases your mouse.</small>
+        </div>
+      </div>
+    </section>
+    <section id="vr-panel" aria-label="VR walkthrough experiment" hidden>
+      <span class="walk-eyebrow">META QUEST / VR EXPERIMENT</span>
+      <button id="vr-enter" disabled>Checking VR support…</button>
+      <p id="vr-status" role="status">Checking whether this browser can enter immersive VR.</p>
+      <p>Left stick: walk · Right stick: snap turn<br>Look + trigger: doors / ladders · B: entrance</p>
+    </section>
+    <details class="inspection-help">
+      <summary>Explore the camp</summary>
+      <p>Drag to orbit · right-drag to pan · scroll to zoom</p>
+      <p>Click a door to open / close · <kbd>O</kbd> door ahead</p>
+      <p><kbd>V</kbd> free camera · <kbd>W A S D</kbd> move<br><kbd>Q / E</kbd> lower / raise · <kbd>Shift</kbd> faster</p>
+      <p><kbd>6</kbd> roof · <kbd>7</kbd> mess hall · <kbd>8</kbd> office<br><kbd>9</kbd> water tower · <kbd>0</kbd> watchtower</p>
+      <p><kbd>I</kbd> interior cutaway · <kbd>1</kbd> overview<br><kbd>2–5</kbd> other views · <kbd>R</kbd> reset</p>
+    </details>
+  </body>
+</html>
