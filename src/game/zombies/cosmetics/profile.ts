@@ -152,12 +152,21 @@ function commitEquip(profile: Profile, equipped: EquippedCosmetics) {
 // ---------------------------------------------------------------- cases
 
 /**
- * One case holds every item except the starting knife. Weights are relative: roughly one case in sixty
- * is legendary, which keeps a gold item worth showing off.
+ * One case holds every item except the starting knife. Weights are relative (they sum to 100.4): roughly
+ * one case in sixty is legendary, which keeps a gold item worth showing off, and one in about 250 is
+ * Mythic, the pink top of the ladder.
  */
 export const CASE = { name: 'Ink Case', price: 250, duplicateRefund: 75 } as const
-export const CASE_WEIGHTS: Record<Rarity, number> = { common: 50, uncommon: 28, rare: 14, epic: 6.4, legendary: 1.6, mythic: 0 }
+export const CASE_WEIGHTS: Record<Rarity, number> = { common: 50, uncommon: 28, rare: 14, epic: 6.4, legendary: 1.6, mythic: 0.4 }
 export const casePool = () => CATALOGUE.filter(entry => !STARTING_ITEMS.includes(entry.id) && !entry.challenge)
+
+/** Each rarity's share of a case (0..1), rarest last, for the odds line under the case. */
+export function caseOdds() {
+  const pool = casePool()
+  const present = RARITIES.filter(rarity => pool.some(entry => entry.rarity === rarity))
+  const total = present.reduce((sum, rarity) => sum + CASE_WEIGHTS[rarity], 0)
+  return present.map(rarity => ({ rarity, share: CASE_WEIGHTS[rarity] / total }))
+}
 
 /** `random` returns [0, 1); pass a seeded one in checks. */
 export function rollCaseItem(random: () => number = Math.random): CosmeticItem {
@@ -182,14 +191,27 @@ export type CaseOpening = { item: CosmeticItem; duplicate: boolean; refund: numb
 
 /** Spend Ink on a case. Null when the player cannot afford one. The item is saved before the strip spins. */
 export function openCase(random: () => number = Math.random): CaseOpening | null {
+  return openCases(1, random)?.[0] ?? null
+}
+
+/**
+ * Open `count` cases in one go, all or nothing: null (and nothing spent) unless the player can afford every
+ * one. The Ink is spent and the items saved in a single commit. An item already owned, or won earlier in
+ * the same batch, is a duplicate and refunds as usual.
+ */
+export function openCases(count: number, random: () => number = Math.random): CaseOpening[] | null {
   const profile = loadProfile()
-  if (profile.ink < CASE.price) return null
-  const item = rollCaseItem(random)
-  const duplicate = profile.owned.includes(item.id)
-  const refund = duplicate ? CASE.duplicateRefund : 0
-  commit({ ...profile, ink: profile.ink - CASE.price + refund, opened: profile.opened + 1,
-    owned: duplicate ? profile.owned : [...profile.owned, item.id] })
-  return { item, duplicate, refund, strip: caseStrip(item, random), winIndex: STRIP_WIN_INDEX }
+  if (!Number.isInteger(count) || count < 1 || profile.ink < CASE.price * count) return null
+  const owned = [...profile.owned]
+  const openings = Array.from({ length: count }, (): CaseOpening => {
+    const item = rollCaseItem(random)
+    const duplicate = owned.includes(item.id)
+    if (!duplicate) owned.push(item.id)
+    return { item, duplicate, refund: duplicate ? CASE.duplicateRefund : 0, strip: caseStrip(item, random), winIndex: STRIP_WIN_INDEX }
+  })
+  const refunds = openings.reduce((sum, opening) => sum + opening.refund, 0)
+  commit({ ...profile, ink: profile.ink - CASE.price * count + refunds, opened: profile.opened + count, owned })
+  return openings
 }
 
 /** Checks only: forget the cached profile so the next load reads storage again. */

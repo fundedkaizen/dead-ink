@@ -3,16 +3,17 @@ import * as THREE from 'three'
 import { CollisionWorld } from '../src/player/collision'
 import { FirstPersonWeapons } from '../src/game/weapons'
 import { CATALOGUE, CHALLENGE_CAMOS, cosmeticKey } from '../src/game/zombies/cosmetics/catalogue'
-import { buildCharm, camoMaterial } from '../src/game/zombies/cosmetics/models'
+import { KNIFE_BUILDERS, animateCosmetics, buildCharm, buildWatch, camoMaterial } from '../src/game/zombies/cosmetics/models'
 import { metal } from '../src/lab/weapons/models/common'
-import { CASE, STRIP_WIN_INDEX, awardGame, casePool, inkForGame, loadProfile, openCase, resetProfileCache, rollCaseItem, toggleEquip } from '../src/game/zombies/cosmetics/profile'
+import { CASE, CASE_WEIGHTS, STRIP_WIN_INDEX, awardGame, caseOdds, casePool, inkForGame, loadProfile, openCase, openCases, resetProfileCache, rollCaseItem, toggleEquip } from '../src/game/zombies/cosmetics/profile'
 import { CHALLENGE_WEAPONS, WEAPON_TIERS, challengeCamoUnlocked, countKill, diamondUnlocked, freshChallenges, masteredCount, sanitizeChallenges, settle, type KillRecord } from '../src/game/zombies/cosmetics/challenges'
 import { beginGame, lastReport, recordGameEnd, recordKill, recordRound } from '../src/game/zombies/cosmetics/progression'
 import type { WeaponFrame, WeaponItem } from '../src/game/types'
 import { readFileSync } from 'node:fs'
-import { RARITIES } from '../src/game/loot'
+import { RARITIES, RARITY_INFO } from '../src/game/loot'
 import { getSettings, resetSettingsCache, setSettings, volumeFor } from '../src/game/settings'
 import { REEL_WINS, playReelTick, playReelWin, synthOutput } from '../src/game/ui-slot-sound'
+import { cosmeticIcon } from '../src/game/zombies/cosmetics/icons'
 
 let failures = 0
 function test(name: string, run: () => void) {
@@ -102,7 +103,7 @@ test('Equipping needs ownership; camos are per gun and toggle off', () => {
   assert.equal(loadProfile().equipped.camos.ak, undefined)
   assert(toggleEquip('camo:gold', 'shotgun'))
   assert.equal(loadProfile().equipped.camos.shotgun, null)
-  assert.equal(CATALOGUE.filter(item => item.kind === 'watch').length, 5)
+  assert.equal(CATALOGUE.filter(item => item.kind === 'watch').length, 6)
 })
 
 // ---------------------------------------------------------------- viewmodel
@@ -447,10 +448,129 @@ test('The case reel ticks and wins in sound, at the saved effects volume, silent
   assert(/synthContext\(\)/.test(armory) && /playReelTick\(/.test(armory) && /playReelWin\(item\.rarity\)/.test(armory), 'the Armory reel is wired to its sounds')
 })
 
-test('Mythic never turns up in a case', () => {
-  assert(!CATALOGUE.some(item => item.rarity === 'mythic'), 'no cosmetic is Mythic')
-  const random = seeded(11)
-  for (let i = 0; i < 5000; i++) assert.notEqual(rollCaseItem(random).rarity, 'mythic')
+// ---------------------------------------------------------------- mythics and opening five
+
+test('Every kind has one Mythic in the case, at about one case in 250, and the odds line shows it', () => {
+  const mythics = casePool().filter(item => item.rarity === 'mythic')
+  assert.deepEqual(mythics.map(item => item.kind).sort(), ['camo', 'charm', 'knife', 'watch'])
+  assert.equal(CATALOGUE.filter(item => item.rarity === 'mythic').length, 4)
+  assert.equal(CASE_WEIGHTS.mythic, 0.4)
+  const odds = caseOdds()
+  assert.deepEqual(odds.map(o => o.rarity), [...RARITIES], 'every rarity, Mythic last')
+  assert(Math.abs(odds.reduce((sum, o) => sum + o.share, 0) - 1) < 1e-9)
+  const mythic = odds.find(o => o.rarity === 'mythic')!.share
+  assert(1 / mythic > 240 && 1 / mythic < 260, `one Mythic in ${Math.round(1 / mythic)} cases`)
+  assert.equal((mythic * 100).toFixed(1), '0.4', 'the line reads Mythic 0.4%')
+  for (let i = 1; i < odds.length; i++) assert(odds[i].share < odds[i - 1].share, `${odds[i].rarity} rarer than ${odds[i - 1].rarity}`)
+  const random = seeded(19)
+  let count = 0
+  for (let i = 0; i < 100000; i++) if (rollCaseItem(random).rarity === 'mythic') count++
+  assert(count > 300 && count < 500, `${count} Mythics in 100,000 cases`)
+  // Each has a drawn icon, and the icons move.
+  for (const item of mythics) assert(cosmeticIcon(item).length > 300, `${item.id} has an icon`)
+  assert(cosmeticIcon(mythics.find(i => i.kind === 'watch')!).includes('mythic-spin'), 'the skeleton watch icon turns its gears')
+  assert(cosmeticIcon(mythics.find(i => i.kind === 'camo')!).includes('camo-glint'), 'Ink Nebula sparkles')
+})
+
+test('A seeded roll can produce a Mythic, and openCase with that seed wins and saves it', () => {
+  // The rarity roll comes first: a draw at the very top of [0, 1) lands in Mythic, the last band.
+  const draws = [0.9999, 0.5]
+  assert.equal(rollCaseItem(() => draws.length ? draws.shift()! : 0.3).rarity, 'mythic')
+  let seed = 0, found = null
+  for (; seed < 5000 && !found; seed++) { const rolled = rollCaseItem(seeded(seed)); if (rolled.rarity === 'mythic') found = rolled }
+  assert(found, 'some seed rolls a Mythic first time')
+  store.clear(); resetProfileCache()
+  loadProfile().ink = 10000
+  const opening = openCase(seeded(seed - 1))!
+  assert.equal(opening.item.id, found!.id, 'openCase with that seed wins it')
+  assert.equal(opening.strip[STRIP_WIN_INDEX].id, found!.id, 'the strip stops on it')
+  assert(loadProfile().owned.includes(found!.id))
+  assert.equal(RARITY_INFO[opening.item.rarity].css, '#e0268f')
+})
+
+test('Opening five spends 1,250 Ink once, saves all five, and counts duplicates within the batch', () => {
+  store.clear(); resetProfileCache()
+  loadProfile().ink = 2000
+  let saves = 0
+  const write = store.set.bind(store)
+  store.set = (key: string, value: string) => { saves++; return write(key, value) }
+  // Always the same draw, so always the same item: the first is new, the next four duplicates of it.
+  const openings = openCases(5, () => 0)!
+  store.set = write
+  assert.equal(saves, 1, 'one save for the whole batch')
+  assert.equal(openings.length, 5)
+  assert(openings.every(o => o.item.id === openings[0].item.id))
+  assert.deepEqual(openings.map(o => o.duplicate), [false, true, true, true, true])
+  assert.deepEqual(openings.map(o => o.refund), [0, 75, 75, 75, 75])
+  resetProfileCache()
+  const after = loadProfile()
+  assert.equal(after.ink, 2000 - 5 * CASE.price + 4 * CASE.duplicateRefund)
+  assert.equal(after.opened, 5)
+  assert.equal(after.owned.filter(id => id === openings[0].item.id).length, 1, 'owned once')
+  for (const o of openings) assert.equal(o.strip[STRIP_WIN_INDEX].id, o.item.id, 'each strip stops on its item')
+  // A mixed batch with exactly the Ink for five: duplicates are what was owned or won earlier in the batch.
+  store.clear(); resetProfileCache()
+  const rich = loadProfile()
+  rich.ink = 5 * CASE.price
+  rich.owned.push('camo:stripes', 'charm:dice', 'charm:ink-drop', 'watch:tactical')
+  const owned = new Set(rich.owned)
+  const mixed = openCases(5, seeded(5))!
+  for (const o of mixed) { assert.equal(o.duplicate, owned.has(o.item.id), o.item.id); owned.add(o.item.id) }
+  resetProfileCache()
+  const saved = loadProfile()
+  assert.equal(saved.ink, mixed.reduce((sum, o) => sum + o.refund, 0), 'only the refunds are left')
+  for (const id of owned) assert(saved.owned.includes(id), `${id} saved`)
+  assert.equal(saved.owned.length, owned.size)
+})
+
+test('It never opens more cases than the Ink pays for, and spends nothing when it refuses', () => {
+  store.clear(); resetProfileCache()
+  loadProfile().ink = 5 * CASE.price - 1
+  assert.equal(openCases(5), null)
+  assert.equal(loadProfile().ink, 5 * CASE.price - 1, 'nothing spent')
+  assert.equal(loadProfile().opened, 0)
+  for (const count of [0, -2, 2.5, NaN]) assert.equal(openCases(count), null, `${count} cases`)
+  assert(openCases(4, seeded(1)), 'four is affordable')
+  assert.equal(loadProfile().opened, 4)
+})
+
+test('Mythic models: the gears turn, the heart glows, the Heartline spins like a karambit, Ink Nebula animates', () => {
+  const watch = buildWatch('skeleton')
+  const gear = watch.userData.parts.gearA
+  assert(gear, 'the skeleton has gears')
+  animateCosmetics(0, [watch]); const a = gear.rotation.z
+  animateCosmetics(1, [watch]); assert.notEqual(gear.rotation.z, a, 'gears turn with time')
+  assert.notEqual(Math.sign(watch.userData.parts.gearB.rotation.z), Math.sign(gear.rotation.z), 'meshing gears turn against each other')
+  const heart = buildCharm('ink-heart')
+  const halo = heart.userData.parts.halo
+  animateCosmetics(0, [heart]); const s0 = halo.scale.x
+  animateCosmetics(0.7, [heart]); assert.notEqual(halo.scale.x, s0, 'the glow pulses')
+  const knife = KNIFE_BUILDERS.heartline()
+  assert(knife.userData.parts.ring && knife.userData.parts.edge, 'a finger ring to spin on and a glowing edge')
+  const weapons = readFileSync('src/game/weapons.ts', 'utf8')
+  assert(/id === 'karambit' \|\| id === 'heartline'/.test(weapons), 'the Heartline flourish spins on its ring')
+  const nebula = camoMaterial('nebula')
+  assert.equal(nebula.customProgramCacheKey(), 'dead-ink-camo:nebula')
+  assert.equal(nebula.defines!.CAMO, 10)
+  const r = rig([{ id: 'a', name: 'ak', magazine: 30, reserve: 90 }])
+  r.weapons.setCosmetics({ watch: 'skeleton', charm: 'ink-heart', camos: { ak: 'nebula' }, knife: 'heartline' })
+  r.step(0.2)
+  assert(materials(r.gun()).includes(nebula), 'the AK wears Ink Nebula')
+  assert(r.scene.getObjectByName('Watch: skeleton') && r.gun().getObjectByName('Gun charm: ink-heart'))
+  r.weapons.dispose(); r.world.dispose()
+})
+
+test('The Armory opens five reels with staggered stops, one tick stream, skip on tap and a Mythic reveal', () => {
+  const armory = readFileSync('src/game/zombies/cosmetics/armory.ts', 'utf8')
+  const css = readFileSync('src/game/zombies/cosmetics/armory.css', 'utf8')
+  assert(/Open \$\{MULTI\} · \$\{CASE\.price \* MULTI\} Ink/.test(armory) && /const MULTI = 5/.test(armory), 'an Open 5 button priced at five cases')
+  assert(/openCases\(count\)/.test(armory), 'both buttons go through openCases')
+  assert(/SINGLE_SPIN = 3000/.test(armory), 'one reel spins about 3 s')
+  assert(/MULTI_SPIN \+ i \* STAGGER/.test(armory), 'each of the five stops a little after the one before')
+  assert(/reducedMotion\(\) \? SHORT_SPIN/.test(armory), 'reduced motion keeps the short spin')
+  assert(/pointerdown[^\n]*animation!?\.finish\(\)/.test(armory), 'a tap on a spinning reel skips to its result')
+  assert(/running\.reduce\(\(a, b\) => b\.end > a\.end/.test(armory), 'ticks come from the one reel furthest from stopping')
+  assert(/armory-reel\.mythic \.armory-burst/.test(css) && /mythic-win/.test(armory), 'a Mythic gets its own burst')
 })
 
 if (failures) { console.error(`${failures} cosmetics check(s) failed`); process.exit(1) }

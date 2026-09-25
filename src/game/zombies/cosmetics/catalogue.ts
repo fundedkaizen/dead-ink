@@ -12,13 +12,13 @@ export type CosmeticKind = 'watch' | 'charm' | 'camo' | 'knife'
 /** `challenge`: earned only from challenges (never in a case), and owned per gun rather than outright. */
 export type CosmeticItem = { id: string; kind: CosmeticKind; name: string; rarity: Rarity; blurb: string; challenge?: true }
 
-export const WATCHES = ['diver', 'president', 'two-tone', 'tactical', 'diamond'] as const
-export const CHARMS = ['skull', 'dice', 'ink-drop', 'teddy', 'crane', 'golden-bullet'] as const
-export const CASE_CAMOS = ['stripes', 'woodland', 'digital', 'obsidian', 'gold'] as const
+export const WATCHES = ['diver', 'president', 'two-tone', 'tactical', 'diamond', 'skeleton'] as const
+export const CHARMS = ['skull', 'dice', 'ink-drop', 'teddy', 'crane', 'golden-bullet', 'ink-heart'] as const
+export const CASE_CAMOS = ['stripes', 'woodland', 'digital', 'obsidian', 'gold', 'nebula'] as const
 /** Challenge camos, Tier 1 to Tier 4 of each gun's challenges, then Diamond for mastering every gun. */
 export const CHALLENGE_CAMOS = ['crosshatch', 'blueprint', 'red-ink', 'black-gold', 'diamond'] as const
 export const CAMOS = [...CASE_CAMOS, ...CHALLENGE_CAMOS] as const
-export const KNIVES = ['combat', 'bayonet', 'cleaver', 'karambit', 'butterfly'] as const
+export const KNIVES = ['combat', 'bayonet', 'cleaver', 'karambit', 'butterfly', 'heartline'] as const
 export type WatchId = typeof WATCHES[number]
 export type CharmId = typeof CHARMS[number]
 export type CamoId = typeof CAMOS[number]
@@ -48,17 +48,20 @@ export const CATALOGUE: readonly CosmeticItem[] = [
   item('watch', 'two-tone', 'Half Measures', 'rare', 'Two-tone steel and gold'),
   item('watch', 'president', 'The Oyster', 'epic', 'Solid gold, fluted bezel, three-link bracelet'),
   item('watch', 'diamond', 'Ice Bezel', 'legendary', 'Gold case, a bezel set with diamonds'),
+  item('watch', 'skeleton', 'Rose Skeleton', 'mythic', 'Open pink-gold case, every gear turning on show'),
   item('charm', 'dice', 'Loaded Dice', 'common', 'A pair of dice on a chain'),
   item('charm', 'ink-drop', 'Last Drop', 'common', 'A drop of ink, never dry'),
   item('charm', 'crane', 'Paper Crane', 'uncommon', 'Folded from a page of the notebook'),
   item('charm', 'teddy', 'Little Ted', 'rare', 'A tiny teddy bear'),
   item('charm', 'skull', 'Old Friend', 'epic', 'A grinning skull'),
   item('charm', 'golden-bullet', 'Golden Bullet', 'legendary', 'The one with your name on it'),
+  item('charm', 'ink-heart', 'Ink Heart', 'mythic', 'A locket holding a heart of ink that glows'),
   item('camo', 'stripes', 'Tiger Ink', 'common', 'Hand-drawn tiger stripes'),
   item('camo', 'woodland', 'Woodland Ink', 'uncommon', 'Blotted woodland pattern'),
   item('camo', 'digital', 'Pixel Grid', 'rare', 'Squared-off digital pattern'),
   item('camo', 'obsidian', 'Obsidian', 'epic', 'Black glass with pale veins'),
   item('camo', 'gold', 'Gold Leaf', 'legendary', 'Every paper face gilded'),
+  item('camo', 'nebula', 'Ink Nebula', 'mythic', 'Pink and violet ink swirling, full of stars'),
   challengeCamo('crosshatch', 'Crosshatch', 'uncommon', 'Dense pen hatching, drawn over and over'),
   challengeCamo('blueprint', 'Blueprint', 'rare', 'White construction lines on blue paper'),
   challengeCamo('red-ink', 'Red Ink', 'epic', 'Paper soaked through with red'),
@@ -69,6 +72,7 @@ export const CATALOGUE: readonly CosmeticItem[] = [
   item('knife', 'cleaver', 'Cleaver', 'rare', 'Heavy square blade'),
   item('knife', 'karambit', 'Karambit', 'epic', 'Curved claw blade with a finger ring'),
   item('knife', 'butterfly', 'Butterfly', 'legendary', 'Two handles that flip open'),
+  item('knife', 'heartline', 'Heartline', 'mythic', 'A karambit whose edge glows pink'),
 ]
 
 /** Owned from the first game, so the Armory is never empty and the knife always has a skin. */
