@@ -1650,8 +1650,8 @@ export class ZombiesRuntime {
     else if (s.kind === 'connecting') body = '<p>Connecting…</p>'
     else if (s.kind === 'waiting') body = `<p><strong>Send this link to your friend:</strong></p><div class="coop-link"><input readonly value="${escapeHtml(s.link)}" aria-label="Invite link"><button type="button" class="coop-copy">Copy</button></div><p>Waiting for them to open it… <button type="button" class="coop-cancel">Cancel</button></p>`
     else if (s.kind === 'paired') body = (s.role === 'host'
-      ? `<div class="coop-link"><input readonly value="${escapeHtml(s.link)}" aria-label="Invite link"><button type="button" class="coop-copy">Copy</button></div><div class="coop-players"></div><p>Up to four players. Start when everyone is here.</p><button type="button" class="coop-start">Start</button>`
-      : '<div class="coop-players"></div><p class="coop-wait">Waiting for the host to start.</p><button type="button" class="coop-start">Jump in</button>')
+      ? `<p><strong>Invite link</strong> (send it to your friends):</p><div class="coop-link"><input readonly value="${escapeHtml(s.link)}" aria-label="Invite link"><button type="button" class="coop-copy">Copy</button></div><div class="coop-players"></div><p class="coop-wait">Everyone here? Only you, the host, can start.</p><button type="button" class="coop-start">Start game</button>`
+      : '<div class="coop-players"></div><p class="coop-wait"></p><button type="button" class="coop-start" hidden>Join the game</button>')
     else if (s.kind === 'alone') body = '<p>Joined. Waiting for your friend\'s game…</p>'
     else body = `<p class="coop-error">${escapeHtml(s.reason)}</p><button type="button" class="coop-invite">Try again</button>`
     panel.innerHTML = `<h3>Co-op</h3>${name}${body}`
@@ -1679,15 +1679,30 @@ export class ZombiesRuntime {
     if (!list) return
     const players = [{ id: this.coop.id, name: this.playerName, me: true }, ...this.matesHere().map(mate => ({ id: mate.id, name: mate.state.name, me: false }))]
       .sort((a, b) => a.id - b.id)
-    const key = players.map(player => `${player.id}:${player.name}`).join('|') + `|${this.coop.peers.size}`
+    // A guest can join once the host's game is running (its ticks are arriving); until then it waits for the host.
+    const hostMate = this.matesHere().find(mate => mate.id === 0)
+    const hostStarted = this.coop.role !== 'host' && !!this.lastTick && ((this.lastTick.r ?? 0) > 0 || hostMate?.state.ps === 0)
+    const key = players.map(player => `${player.id}:${player.name}`).join('|') + `|${this.coop.peers.size}|${hostStarted}`
     if (key === this.lobbyKey) return
     this.lobbyKey = key
     const clean = (text: string) => text.replace(/[<>&"]/g, '')
     // Guests who joined but have not said their name yet still count.
     const waiting = this.coop.role === 'host' ? Math.max(0, this.coop.peers.size - (players.length - 1)) : 0
-    list.innerHTML = `<strong>Players ${players.length + waiting} of 4</strong><ul>${players.map(player =>
+    // A guest hears the host's name only once the game runs; until then the host still has their line.
+    const hostMissing = this.coop.role !== 'host' && !players.some(player => player.id === 0)
+    const empty = Math.max(0, 4 - players.length - waiting - (hostMissing ? 1 : 0))
+    list.innerHTML = `<strong>Players ${players.length + waiting + (hostMissing ? 1 : 0)} of 4</strong><ul>${players.map(player =>
       `<li style="--tag: ${PLAYER_CSS[player.id] ?? PLAYER_CSS[0]}">${clean(player.name)}${player.id === 0 ? ' (host)' : ''}${player.me ? ' · you' : ''}</li>`).join('')}${
-      Array.from({ length: waiting }, () => '<li class="joining">Joining…</li>').join('')}</ul>`
+      Array.from({ length: waiting }, () => '<li class="joining">Friend connected</li>').join('')}${
+      hostMissing ? `<li style="--tag: ${PLAYER_CSS[0]}">The host (host)</li>` : ''}${
+      Array.from({ length: empty }, () => '<li class="joining">Waiting for a friend…</li>').join('')}</ul>`
+    if (this.coop.role !== 'host') {
+      const host = players.find(player => player.id === 0)?.name ?? 'the host'
+      const wait = this.coopPanel?.querySelector<HTMLElement>('.coop-wait')
+      const join = this.coopPanel?.querySelector<HTMLButtonElement>('.coop-start')
+      if (wait) wait.textContent = hostStarted ? `${clean(host)} started. Join them!` : `Waiting for ${clean(host)} to start the game…`
+      if (join) join.hidden = !hostStarted
+    }
   }
 
   private removeSolid(owner: THREE.Object3D) {
