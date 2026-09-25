@@ -711,13 +711,19 @@ export class ZombiesRuntime {
   private hostMenuKeepsWorld() { return this.coop.role === 'host' && this.paired && !this.pauseEveryone() && this.menuOpenInGame() }
   /**
    * A teammate paused: with pausing for everyone on, so does this player, so nobody plays on while time stands
-   * still for the zombies. Resuming while they are still paused pauses again.
+   * still for the zombies. Only the moment they pause counts: resuming always wins (see below).
    */
   private followPause() {
     const pauser = this.paired && this.pauseEveryone() ? this.matesHere().find(mate => mate.state.ps === 1) : undefined
     this.hud.setPausedBy(pauser?.state.name ?? null)
-    if (pauser && this.isActive()) this.player.pause()
+    // Follow a teammate's pause only at the moment they pause. Never pause again after this player resumes: two
+    // players who both sit in the menu (at the start of a game) would otherwise pause each other forever.
+    const paused = new Set(this.matesHere().filter(mate => mate.state.ps === 1).map(mate => mate.state.name))
+    const fresh = [...paused].some(name => !this.matesPaused.has(name))
+    this.matesPaused = paused
+    if (pauser && fresh && this.isActive()) this.player.pause()
   }
+  private matesPaused = new Set<string>()
   private cancelInput() { this.aiming = false; this.weapons.cancel() }
 
   private keyDown = (event: KeyboardEvent) => {
