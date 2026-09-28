@@ -40,7 +40,7 @@ export type RescueMessage =
   | { t: 'mission'; id: string; d: Difficulty; s: number }
   /** A ping (either way; the host passes a guest's on to the others). */
   | PingMessage
-  | { t: 'tick'; g: GuardRow[]; m: MissionMirror; d: string; players: PlayerState[]; h: HostageMotion[] }
+  | { t: 'tick'; g: GuardRow[]; m: MissionMirror; d: string; players: PlayerState[]; h: HostageMotion[]; k?: number[][] }
   /** A guard struck: the reaction it played (`c`), lethal, the round's direction, its shotgun travel, zone, point, weapon, bone. */
   | { t: 'react'; g: number; c: string; l: 0 | 1; d: V; tr: number; z: HitZone; p: V; w?: WeaponName; b?: string }
   /** Your round struck a guard (the hit marker), and whether it killed him. */

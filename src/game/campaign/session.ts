@@ -117,6 +117,8 @@ export class CampaignSession {
     r.security.configure(this.cameraRigs(), { detectionDwell: rules.cameraDwell, secondWaveDelay: rules.secondWave, reserveLimit: rules.reinforcements })
     r.escape.configure(extraction.route, extraction.camera.target, extraction.camera.offset, extraction.kind !== 'jeep', extraction.heading)
     r.weapons.restore({ slots: campaignLoadout(), selected: 0, pickups: [], nextId: 1000 })
+    const tiers = rules.tiers
+    r.dogs?.setup(mission.dogs.map(id => this.map.dogs[id]).filter(dog => dog && (!dog.tier || tiers.includes(dog.tier))), rules.smell)
     this.stones = mission.tools.pebbles
     this.charges = mission.tools.charges
     this.boosting = null; this.hold = null; this.summary = null; this.recorded = false

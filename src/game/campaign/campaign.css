@@ -84,7 +84,7 @@ body[data-mission="true"] .walk-card .campaign-detail p { margin: 0 0 10px; font
 .campaign-home .campaign-now { font-size: 13px; color: var(--ink-muted); }
 .campaign-home .campaign-now b { color: var(--ink); font-weight: 600; }
 .campaign-summary { display: grid; gap: 8px; margin-top: 8px; }
-.campaign-summary .stars { font-size: 26px; letter-spacing: 2px; }
+body[data-mission="true"] .walk-card .campaign-summary .stars { font-size: 26px; letter-spacing: 2px; margin: 0; line-height: 1.2; color: var(--ink); }
 .campaign-summary .stars .off { color: #cfcfcf; }
 .campaign-summary ul { margin: 0; padding-left: 18px; font-size: 13px; }
 @media (max-width: 640px) {
@@ -92,3 +92,5 @@ body[data-mission="true"] .walk-card .campaign-detail p { margin: 0 0 10px; font
   .campaign-mission { grid-template-columns: 26px 1fr; }
   .campaign-mission .stars { grid-column: 2; }
 }
+/* The campaign's home slot (the mission in play, the win summary) shows on every home page, not only the title. */
+.menu-card[data-title="false"] .menu-home-extra:has(.campaign-home) { display: block; }

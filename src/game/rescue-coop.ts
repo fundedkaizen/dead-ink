@@ -213,6 +213,7 @@ export class RescueCoop {
     if (r.state.phase === 'active') r.state.elapsed += dt
     this.puppets.update(dt, tick?.g ?? [])
     r.escort.follow(dt, r.state, tick?.h ?? [])
+    if (r.dogs) { r.dogs.listener.copy(this.camera.position); r.dogs.follow(dt, tick?.k) }
     r.security.sync(r.state)
   }
 
@@ -355,7 +356,7 @@ export class RescueCoop {
     this.sendTimer = 1 / RESCUE_COOP.sendRate
     if (this.link.role === 'host') {
       this.link.send({ t: 'tick', g: guardRows(r.ai.enemies), m: mirrorMission(r.state), d: doorBits(r.player.actions.doors),
-        players: [this.myState(), ...this.matesHere().map(mate => mate.state)], h: r.escort.motion })
+        players: [this.myState(), ...this.matesHere().map(mate => mate.state)], h: r.escort.motion, k: r.dogs?.dogs.length ? r.dogs.rows() : undefined })
     } else this.link.send({ t: 'me', me: this.myState() })
   }
 
@@ -726,8 +727,11 @@ export class RescueCoop {
     r.ai.nearMiss(shot, distance)
     this.shooter = from
     this.reaction = null
-    const camera = r.visuals?.cameraHit(origin, direction, distance, r.ai.aimDistance(origin, direction, distance))
+    const body = r.ai.aimDistance(origin, direction, distance)
+    const camera = r.visuals?.cameraHit(origin, direction, distance, body)
     if (camera) r.campaign?.hostAction(`camera:${camera}`, from)
+    const dog = r.dogs?.hit(shot, Math.min(distance, body))
+    if (dog) { this.link.send({ t: 'hit', p: vec(dog.point), z: 'torso', l: dog.dead ? 1 : 0 }, { to: from }); return }
     const hit = r.ai.hit(shot, distance, mate.sense)
     this.shooter = 0
     const reaction = this.reaction as HitReaction | null

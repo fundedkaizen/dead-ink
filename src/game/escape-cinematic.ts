@@ -22,6 +22,7 @@ export class EscapeCinematic {
   timing: { departure: number; drive: number; fade: number; black: number; menu: number; end: number } = { ...ESCAPE_TIMING }
   /** A helicopter or boat: travel follows the route itself, heading along it, with no road curve. */
   private flying = false
+  private look = new THREE.Vector3()
   private heading = 0
 
   /**
@@ -111,7 +112,9 @@ export class EscapeCinematic {
     // Fit the exit in portrait too. The stationary camera also avoids extra
     // motion for reduced-motion players: only the jeep moves, then a plain fade.
     camera.position.copy(this.cameraTarget).addScaledVector(this.cameraOffset, Math.max(1, 1.5 / camera.aspect))
-    camera.lookAt(this.cameraTarget)
+    // A helicopter climbs out of a fixed frame: the camera turns to follow it up and away.
+    if (this.flying) camera.lookAt(this.look.copy(this.cameraTarget).lerp(this.position, 0.85))
+    else camera.lookAt(this.cameraTarget)
     if (camera.fov !== 60) { camera.fov = 60; camera.updateProjectionMatrix() }
   }
 

@@ -26,6 +26,7 @@ import { CampaignVisuals } from './campaign/visuals'
 import { CampaignHud } from './campaign/hud'
 import { campaignMenuCopy } from './campaign/menu'
 import { createRescuePings } from './campaign/pings'
+import { DogPack, type DogSnapshot } from './campaign/dogs'
 import type { Pings } from './shared/pings'
 import { footstepRadius } from './campaign/stealth'
 import type { Difficulty } from './campaign/types'
@@ -35,7 +36,7 @@ import { updateRescueJeepDoor } from './rescue-jeep'
 import { RescueCoop } from './rescue-coop'
 import type { EnemySnapshot, MissionWorld, Shot, SoundEvent, Station, Vec3, WeaponSnapshot } from './types'
 
-type Checkpoint = { mission: MissionState; weapons: WeaponSnapshot; enemies: EnemySnapshot[]; doors: boolean[]; position: Vec3; quaternion: [number,number,number,number]; blood?: BloodSnapshot }
+type Checkpoint = { mission: MissionState; weapons: WeaponSnapshot; enemies: EnemySnapshot[]; doors: boolean[]; position: Vec3; quaternion: [number,number,number,number]; blood?: BloodSnapshot; dogs?: DogSnapshot }
 
 export class MissionRuntime {
   state = initialMission()
@@ -58,6 +59,8 @@ export class MissionRuntime {
   tools?: CampaignTools
   visuals?: CampaignVisuals
   campaignHud?: CampaignHud
+  /** The campaign's guard dogs. */
+  dogs?: DogPack
   /** Pings (shared/pings.ts): mark a guard, a camera, a door or the hostage for the team. */
   pings?: Pings
   private stopPings: () => void = () => {}
@@ -135,6 +138,13 @@ export class MissionRuntime {
     this.escort = new FollowEscort(scene, player.world, player.actions.doors)
     this.security = new SecuritySystem(player.world, world, this.ai, event => this.emit(event, false))
     this.security.onAlarm = () => { if (this.state.run) this.state.run.alarms++ }
+    this.dogs = new DogPack(scene, player.world, player.actions.doors)
+    this.dogs.onBark = position => this.ai.hear({ kind: 'dog-bark', position, radius: 32 })
+    this.dogs.onBite = (id, amount, from) => {
+      if (id >= HOSTAGE_SENSE_ID) this.campaign?.hurtHostage(id - HOSTAGE_SENSE_ID, amount)
+      else if (id) this.coop?.hurt(id, amount, from)
+      else this.damage(amount, from)
+    }
     this.tools = new CampaignTools(this, scene)
     this.visuals = new CampaignVisuals(this, scene)
     this.campaignHud = new CampaignHud(this, document.querySelector<HTMLElement>('#mission-hud')!)
@@ -412,8 +422,17 @@ export class MissionRuntime {
     if (this.coop?.isGuest) { this.coop.guestShot(shot, surface, distance); return }
     this.ai.nearMiss(shot,distance)
     this.impactPoint = null
-    const camera = this.visuals?.cameraHit(shot.origin, shot.direction, distance, this.ai.aimDistance(shot.origin, shot.direction, distance))
+    const body = this.ai.aimDistance(shot.origin, shot.direction, distance)
+    const camera = this.visuals?.cameraHit(shot.origin, shot.direction, distance, body)
     if (camera) this.campaign?.hostAction(`camera:${camera}`, 0)
+    const dog = this.dogs?.hit(shot, Math.min(distance, body))
+    if (dog) {
+      this.hitFlash = 0.15
+      this.audio.play({ kind: 'enemy-hit', position: dog.point, radius: 14, zone: 'torso' })
+      this.bulletTrails.emit(shot.origin, dog.point, shot.weapon)
+      if (!shot.pelletIndex) this.coop?.fired(shot.origin, dog.point, shot.weapon)
+      return
+    }
     if (this.state.run && !shot.pelletIndex && !this.weapons.current?.suppressed) this.state.run.loudShots++
     const hit=this.ai.hit(shot,distance)
     if (hit) this.hitFlash = 0.15
@@ -470,7 +489,7 @@ export class MissionRuntime {
   private snapshot(): Checkpoint {
     return { mission:structuredClone(this.state),weapons:this.weapons.snapshot(),enemies:this.ai.snapshot(),
       doors:this.player.actions.doors.map(door=>Boolean(door.userData.open)),position:this.player.body.position.toArray() as Vec3,
-      quaternion:this.camera.perspective.quaternion.toArray() as [number,number,number,number], blood:this.blood.snapshot() }
+      quaternion:this.camera.perspective.quaternion.toArray() as [number,number,number,number], blood:this.blood.snapshot(), dogs: this.dogs?.snapshot() }
   }
 
   private restore(saved: Checkpoint) {
@@ -488,7 +507,7 @@ export class MissionRuntime {
     this.safePosition.copy(this.player.body.position); this.safeQuaternion.copy(this.camera.perspective.quaternion)
     this.stepTime=0; this.interactionTime=0; this.hitFlash=0; this.lastCaptionAt=-100
     this.coop?.clear()
-    this.tools?.reset(); this.visuals?.reset(); this.pings?.clear()
+    this.tools?.reset(); this.visuals?.reset(); this.pings?.clear(); this.dogs?.restore(saved.dogs)
     this.bulletTrails.clear(); this.impacts.clear(); this.hud.reset(); this.security.reset(); this.syncWorld(true); this.invalidate()
   }
 
@@ -598,6 +617,7 @@ export class MissionRuntime {
     this.hud.update(step, this.state, { playing: false, enabled: true, weapon: this.weapons.current, reloading: false,
       position: this.player.body.position, yaw: 0, deaths: this.deaths, ready: this.ready })
     this.hud.setEscape(this.escape)
+    if (this.escape.menuVisible) this.menuRefresh?.()
     this.coop?.idle(dt)
     return playing && this.escape.running || !!this.coop?.paired
   }
@@ -764,10 +784,15 @@ export class MissionRuntime {
       this.escort.threat = this.lastThreat
     }
     this.escort.update(dt, this.state, coop?.leaders(body.position) ?? body.position, danger)
+    if (this.dogs) {
+      this.dogs.listener.copy(eye)
+      this.dogs.update(dt, [{ feet: body.position, eye, velocity: body.velocity, alive: this.state.phase === 'active' && seen, radioEnabled: true, id: 0, exposure: this.tools?.exposure },
+        ...(coop?.senses() ?? []), ...hostages])
+    }
     this.campaign?.frame(dt, players)
   }
   /** Where the last shot near the hostages came from (he hides from it). */
   private lastThreat: THREE.Vector3 | null = null
   private stopBlood: () => void = () => {}
-  dispose() { this.stopPings(); this.pings?.dispose(); this.campaign?.dispose(); this.tools?.dispose(); this.visuals?.dispose(); this.campaignHud?.dispose(); this.coop?.dispose(); this.stopBlood(); this.escape.reset(this.camera.perspective);this.escapeDust.dispose();this.playerHits.clear();this.disposed=true;this.abort.abort();this.bulletTrails.dispose();this.escort.dispose();this.weapons.dispose();this.ai.dispose();this.blood.dispose();this.impacts.dispose();this.audio.dispose();this.hud.dispose();this.player.movementLocked=false;this.player.onPlayingChange=()=>{};this.player.lookSensitivity=()=>1;this.player.actions.extraTargets=()=>[];this.player.actions.onAction=()=>{} }
+  dispose() { this.dogs?.dispose(); this.stopPings(); this.pings?.dispose(); this.campaign?.dispose(); this.tools?.dispose(); this.visuals?.dispose(); this.campaignHud?.dispose(); this.coop?.dispose(); this.stopBlood(); this.escape.reset(this.camera.perspective);this.escapeDust.dispose();this.playerHits.clear();this.disposed=true;this.abort.abort();this.bulletTrails.dispose();this.escort.dispose();this.weapons.dispose();this.ai.dispose();this.blood.dispose();this.impacts.dispose();this.audio.dispose();this.hud.dispose();this.player.movementLocked=false;this.player.onPlayingChange=()=>{};this.player.lookSensitivity=()=>1;this.player.actions.extraTargets=()=>[];this.player.actions.onAction=()=>{} }
 }
