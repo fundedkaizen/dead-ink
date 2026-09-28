@@ -421,6 +421,12 @@ export class MissionMenu {
     if (!this.pause.hidden && !this.pause.inert && !primary.hidden && !primary.disabled) primary.focus({ preventScroll: true })
   }
   ready() { this.loaded = true; this.start.disabled = false; this.start.textContent = this.copy.begin; if (this.page === 'home') this.focusPrimary() }
+  /** A new mission loading (the rescue campaign): Begin waits, and the game starts fresh from its title. */
+  loading(on: boolean) {
+    if (!on) return
+    this.loaded = false; this.hasPlayed = false; this.phase = 'active'; this.mainMenu = false
+    this.start.disabled = true; this.start.textContent = 'Loading the mission…'
+  }
   error(message: string) { this.loadError = message; this.start.textContent = 'Unable to load'; this.start.disabled = true; this.show('home'); this.showError() }
   private showError() { const debrief = this.element('#mission-debrief'); debrief.hidden = false; delete debrief.dataset.summary; debrief.textContent = this.loadError }
   reset() { this.phase = 'active'; this.loadError = ''; this.mainMenu = false; this.show('home', undefined, false) }

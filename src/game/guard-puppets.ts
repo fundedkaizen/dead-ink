@@ -61,6 +61,7 @@ export class GuardPuppets {
       actor.root.userData.alertScan = scan >= 0 ? scan : undefined
       enemy.moveSpeed = speed
       enemy.canSee = row[8] === 1
+      enemy.awareness = row[13] ?? 0
       // Footsteps where he walks, as the host's guard makes them.
       if (moving) {
         enemy.footstepDistance += this.before.distanceTo(enemy.position)

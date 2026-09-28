@@ -7,6 +7,7 @@ import type { HostageMotion } from './hostages'
 import type { HitZone } from './hit-reactions'
 import type { PlayerBulletHit, PlayerHitRegion } from './player-hit-reactions'
 import type { EnemyState, Vec3, WeaponItem, WeaponName } from './types'
+import type { Difficulty } from './campaign/types'
 
 /**
  * The hostage rescue in co-op (rescue-coop.ts): the rules and the messages, kept apart from the game so they
@@ -33,7 +34,9 @@ export type HurtHit = { r: PlayerHitRegion; sd: -1 | 0 | 1; p: V; d: V; w?: Weap
 
 export type RescueMessage =
   // host -> guests
-  | { t: 'sync'; m: MissionMirror; d: string; pickups: WeaponItem[]; begun: 0 | 1 }
+  | { t: 'sync'; m: MissionMirror; d: string; pickups: WeaponItem[]; begun: 0 | 1; mn?: { id: string; d: Difficulty; s: number } }
+  /** The host loaded a campaign mission: load the same one, from the same seed. */
+  | { t: 'mission'; id: string; d: Difficulty; s: number }
   | { t: 'tick'; g: GuardRow[]; m: MissionMirror; d: string; players: PlayerState[]; h: HostageMotion[] }
   /** A guard struck: the reaction it played (`c`), lethal, the round's direction, its shotgun travel, zone, point, weapon, bone. */
   | { t: 'react'; g: number; c: string; l: 0 | 1; d: V; tr: number; z: HitZone; p: V; w?: WeaponName; b?: string }
@@ -112,7 +115,7 @@ export const POSTURES: readonly Posture[] = ['stand', 'crouch', 'kneel', 'prone'
 
 /**
  * One guard, as a guest's puppet needs it: [number, state, x, y, z, heading, speed, posture, aiming (0 or 1),
- * aim x, y, z, scan (the look round after a near miss, 0 to 1, or -1)]. A reserve still in the barracks is only
+ * aim x, y, z, scan (the look round after a near miss, 0 to 1, or -1), awareness (the campaign's, 0 to 1)]. A reserve still in the barracks is only
  * [number, state]; a body [number, state, x, y, z, heading].
  */
 export type GuardRow = number[]
@@ -126,7 +129,7 @@ export function guardRows(enemies: readonly Enemy[]): GuardRow[] {
     const scan = enemy.actor.root.userData.alertScan
     return [index, state, round(p.x), round(p.y), round(p.z), round(enemy.yaw), round(enemy.moveSpeed), Math.max(0, POSTURES.indexOf(enemy.actor.posture ?? 'stand')),
       aim ? 1 : 0, aim ? round(aim.x) : 0, aim ? round(aim.y + 1.65) : 0, aim ? round(aim.z) : 0,
-      typeof scan === 'number' && Number.isFinite(scan) ? round(scan) : -1]
+      typeof scan === 'number' && Number.isFinite(scan) ? round(scan) : -1, round(enemy.awareness ?? 0)]
   })
 }
 

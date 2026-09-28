@@ -147,6 +147,8 @@ export class MissionHUD {
   }
 
   ready() { this.menu.ready() }
+  /** A campaign mission is loading: Begin waits for it. */
+  loading(on: boolean) { this.menu.loading(on) }
   showMap() { this.menu.showMap() }
   setPlaying(playing: boolean) { this.menu.setPlaying(playing) }
   /** Co-op: a teammate's pause is holding the game (null when nobody's is). */

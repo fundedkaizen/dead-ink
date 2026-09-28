@@ -139,6 +139,7 @@ export class RescueCoop {
     // The guards leave alone a player who is down, or has the menu open.
     sense.alive = state.dn === 0 && !state.ps
     sense.yaw = state.yaw
+    sense.exposure = { crouched: !!state.cr, moving: state.mv === 1, running: sense.velocity.lengthSq() > 25 }
     mate.heardAt = this.clock
     mate.state = { ...state, id: from }
   }
@@ -147,7 +148,8 @@ export class RescueCoop {
     const r = this.r, body = r.player.body, e = this.euler.setFromQuaternion(this.camera.quaternion, 'YXZ')
     return { id: this.link.id, p: vec(body.position), yaw: Math.round(e.y * 100) / 100, pitch: Math.round(e.x * 100) / 100, w: r.weapons.current?.name ?? null,
       mv: Math.hypot(body.velocity.x, body.velocity.z) > 0.6 ? 1 : 0, dn: this.stand.down, pts: 0, kills: r.state.kills, name: this.name,
-      rv: this.hold.active ? Math.round(this.hold.fraction * 100) / 100 : 0, rt: this.hold.active ? this.hold.target : undefined, ps: r.player.playing ? 0 : 1 }
+      rv: this.hold.active ? Math.round(this.hold.fraction * 100) / 100 : 0, rt: this.hold.active ? this.hold.target : undefined, ps: r.player.playing ? 0 : 1,
+      cr: r.tools?.crouched ? 1 : undefined }
   }
 
   // ---------------------------------------------------------------- the host's world
@@ -172,6 +174,19 @@ export class RescueCoop {
     if (!this.hosting || !hostage) return own
     return escortLeaders(hostage.position, hostage.by, [{ id: 0, feet: own, up: this.stand.down === 0 },
       ...this.matesHere().map(mate => ({ id: mate.id, feet: mate.sense.feet, up: mate.state.dn === 0 }))])
+  }
+
+  /** Host: every guest, where they stand and whether they are up (the campaign's objectives and escort). */
+  playerFeet() {
+    return this.hosting ? this.matesHere().map(mate => ({ id: mate.id, feet: mate.sense.feet, up: mate.state.dn === 0 })) : []
+  }
+
+  /** A campaign mission finished loading: the host brings every guest onto it (same mission, same seed). */
+  missionLoaded() {
+    const run = this.r.state.run
+    if (!this.hosting || !run) return
+    this.link.send({ t: 'mission', id: run.mission, d: run.difficulty, s: run.seed })
+    this.sendSync()
   }
 
   /** Host: guests reaching the detention block count for the objective too. */
@@ -440,6 +455,8 @@ export class RescueCoop {
   /** Host: a guest used a station. Same checks and effects as the host's own use; the guest hears how it went. */
   private guestUse(id: string, from: number) {
     const r = this.r, mate = this.mates.get(from), station = r.world.stations.find(candidate => candidate.id === id)
+    // The campaign's actions (doors, takedowns, the hostage, boosts, marks) are not stations.
+    if (!station && mate?.state && r.state.phase === 'active' && !r.escape.active) { r.campaign?.hostAction(id, from); return }
     if (!station || !mate?.state || mate.state.dn || r.state.phase !== 'active' || r.escape.active) return
     if (mate.sense.feet.clone().setY(mate.sense.feet.y + EYE_HEIGHT).distanceTo(station.point) > RESCUE_COOP.useReach) return
     const note = (text: string, seconds = 7) => this.link.send({ t: 'note', x: text, s: seconds }, { to: from })
@@ -453,7 +470,8 @@ export class RescueCoop {
       if (r.gateOpening()) { note('Wait for the exit gate to finish opening.', 3); return }
       if (!this.jeepReady()) { note('The jeep leaves when everyone is here, or when the host says go.', 4); return }
     }
-    const result = useStation(r.state, station.kind, id)
+    // The runtime's rules (the campaign's first); a bare stage without them uses the classic rules.
+    const result = r.applyStation?.(station, from) ?? useStation(r.state, station.kind, id)
     if (result.message) note(result.message)
     if (!result.changed) return
     r.stationEffects(station, from, result.message)
@@ -470,7 +488,7 @@ export class RescueCoop {
 
   /** The jeep can leave: everyone still up is at it. */
   jeepReady() {
-    const r = this.r, jeep = r.world.stations.find(station => station.kind === 'jeep')
+    const r = this.r, jeep = r.world.stations.find(station => station.kind === 'jeep' && (r.campaign?.active(station) ?? true))
     if (!this.paired || !jeep) return true
     return escapeReady([{ feet: r.player.body.position, up: this.stand.down === 0 },
       ...this.matesHere().map(mate => ({ feet: mate.avatar.feet, up: mate.state.dn === 0 }))], jeep.point)
@@ -533,8 +551,9 @@ export class RescueCoop {
   private sendSync(to?: number) {
     const r = this.r
     if (this.link.role !== 'host' || !this.paired) return
-    this.link.send({ t: 'sync', m: mirrorMission(r.state), d: doorBits(r.player.actions.doors), pickups: r.weapons.snapshot().pickups, begun: this.begun ? 1 : 0 },
-      to === undefined ? undefined : { to })
+    const run = r.state.run
+    this.link.send({ t: 'sync', m: mirrorMission(r.state), d: doorBits(r.player.actions.doors), pickups: r.weapons.snapshot().pickups, begun: this.begun ? 1 : 0,
+      mn: run ? { id: run.mission, d: run.difficulty, s: run.seed } : undefined }, to === undefined ? undefined : { to })
   }
 
   /** Guest: start beside the host at the insertion point, not inside them. */
@@ -558,6 +577,11 @@ export class RescueCoop {
     switch (m.t) {
       // ---- on a guest
       case 'sync':
+        // The host is on another campaign mission (or seed): load it first, then take its world.
+        if (m.mn && (r.state.run?.mission !== m.mn.id || r.state.run?.difficulty !== m.mn.d || r.state.run?.seed !== m.mn.s)) {
+          void r.loadMission(m.mn.id, m.mn.d, m.mn.s).then(() => { this.mirror(m.m); this.applyDoors(m.d, true); this.applyPickups(m.pickups); this.placeGuest(true) })
+          break
+        }
         this.mirror(m.m)
         this.applyDoors(m.d, true)
         this.applyPickups(m.pickups)
@@ -597,6 +621,9 @@ export class RescueCoop {
       case 'heal':
         r.state.health = 100
         r.hud.notify('Field dressing used. Health restored.', 7)
+        break
+      case 'mission':
+        if (r.state.run?.mission !== m.id || r.state.run?.difficulty !== m.d || r.state.run?.seed !== m.s) void r.loadMission(m.id, m.d, m.s).then(() => this.placeGuest(true))
         break
       case 'start':
         this.lobby?.started()
@@ -695,6 +722,8 @@ export class RescueCoop {
     r.ai.nearMiss(shot, distance)
     this.shooter = from
     this.reaction = null
+    const camera = r.visuals?.cameraHit(origin, direction, distance, r.ai.aimDistance(origin, direction, distance))
+    if (camera) r.campaign?.hostAction(`camera:${camera}`, from)
     const hit = r.ai.hit(shot, distance, mate.sense)
     this.shooter = 0
     const reaction = this.reaction as HitReaction | null

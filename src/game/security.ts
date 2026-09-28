@@ -20,12 +20,52 @@ export function cameraPatrolYaw(elapsed: number, index: number, yaw: number, arc
   const smooth = progress * progress * (3 - 2 * progress)
   return yaw + THREE.MathUtils.lerp(stops[step], stops[(step + 1) % stops.length], smooth) * arc
 }
+export type CameraSpec = { id: string; position: [number, number, number]; yaw: number; arc: number; range: number }
+export type CameraRig = { id: string; pivot: THREE.Group; lamp: THREE.Mesh; root?: THREE.Object3D }
+/** The rescue campaign's cameras and alarm rules (its difficulty); absent, the classic mission's. */
+export type SecurityRules = { detectionDwell: number; secondWaveDelay: number; reserveLimit: number }
+
 /** Security keeps only a confirmed sighting; guard perception remains authoritative afterward. */
 export class SecuritySystem {
   private dwell = new Map<string, number>()
   private lastAlarm: MissionState['alarm'] = 'inactive'
   private lastLampColor: number | null = null
   private hornElapsed = 0
+  private rigs: { spec: CameraSpec; rig: CameraRig }[] | null = null
+  private rules: SecurityRules = SECURITY_RULES
+  /** Cameras shot out: dark, drooping, blind for good (the campaign's; a restart brings them back). */
+  destroyed = new Set<string>()
+  /** Called when a camera raises the alarm (the campaign counts alarms). */
+  onAlarm: (position: THREE.Vector3) => void = () => {}
+
+  /** Watch through these cameras, with these rules (the campaign's mission). */
+  configure(rigs: { spec: CameraSpec; rig: CameraRig }[], rules: SecurityRules) {
+    this.rigs = rigs; this.rules = rules; this.lastLampColor = null
+  }
+
+  /** The cameras in use: the configured ones, or the classic four. */
+  list(): { spec: CameraSpec; rig: CameraRig }[] {
+    if (this.rigs) return this.rigs
+    const out: { spec: CameraSpec; rig: CameraRig }[] = []
+    for (const rig of this.missionWorld.rescue?.cameras ?? []) {
+      const spec = RESCUE_LAYOUT.cameras.find(candidate => candidate.id === rig.id)
+      if (spec) out.push({ spec, rig })
+    }
+    return out
+  }
+
+  /** A camera shot out: false if it was already gone or is not in use. */
+  destroy(id: string) {
+    const entry = this.list().find(item => item.spec.id === id)
+    if (!entry || this.destroyed.has(id)) return false
+    this.destroyed.add(id)
+    this.dwell.delete(id)
+    entry.rig.pivot.rotation.x = 0.55
+    for (const material of Array.isArray(entry.rig.lamp.material) ? entry.rig.lamp.material : [entry.rig.lamp.material]) {
+      if ('color' in material) (material as THREE.MeshBasicMaterial).color.setHex(CAMERA_LIGHTS.offline)
+    }
+    return true
+  }
 
   constructor(private world: CollisionWorld, private missionWorld: MissionWorld, private ai: EnemyDirector, private emit: EmitSound) {}
 
@@ -34,6 +74,8 @@ export class SecuritySystem {
     this.lastAlarm = 'inactive'
     this.lastLampColor = null
     this.hornElapsed = 0
+    for (const { rig } of this.rigs ?? []) rig.pivot.rotation.x = 0
+    this.destroyed.clear()
   }
 
   sync(state: MissionState, visualElapsed = state.elapsed) {
@@ -45,33 +87,33 @@ export class SecuritySystem {
     this.lastAlarm = state.alarm
     const color = !state.camerasActive ? CAMERA_LIGHTS.offline : state.alarm === 'active' ? CAMERA_LIGHTS.alarm : CAMERA_LIGHTS.watching
     const changed = this.lastLampColor !== color
-    for (const camera of this.missionWorld.rescue?.cameras ?? []) {
-      const spec = RESCUE_LAYOUT.cameras.find(candidate => candidate.id === camera.id)
-      if (!spec) continue
-      if (state.camerasActive) camera.pivot.rotation.y = cameraPatrolYaw(visualElapsed, RESCUE_LAYOUT.cameras.indexOf(spec), spec.yaw, spec.arc)
+    this.list().forEach(({ spec, rig: camera }, index) => {
+      if (this.destroyed.has(spec.id)) return
+      if (state.camerasActive) camera.pivot.rotation.y = cameraPatrolYaw(visualElapsed, index, spec.yaw, spec.arc)
       if (changed) {
         for (const material of Array.isArray(camera.lamp.material) ? camera.lamp.material : [camera.lamp.material]) {
           if ('color' in material) (material as THREE.MeshBasicMaterial).color.setHex(color)
           if ('emissive' in material) (material as THREE.MeshStandardMaterial).emissiveIntensity = 0
         }
       }
-    }
+    })
     if (!state.camerasActive) this.dwell.clear()
     this.lastLampColor = color
   }
 
-  trigger(state: MissionState, position: THREE.Vector3) {
+  trigger(state: MissionState, position: THREE.Vector3, text?: string) {
     if (state.phase !== 'active' || state.alarm === 'active') return false
     state.alarm = 'active'
     state.alarmElapsed = 0
     state.silencedElapsed = 0
     state.alarmPosition = position.toArray() as [number, number, number]
     state.detections++
-    const count = Math.min(2, SECURITY_RULES.reserveLimit - state.reservesDispatched)
+    const count = Math.min(2, this.rules.reserveLimit - state.reservesDispatched)
     state.reservesDispatched += this.ai.respondToAlarm(position, Math.max(0, count))
     this.hornElapsed = 0
-    this.emit({ kind: 'horn', position: position.clone(), radius: 100, text: 'ALARM - barracks responding to the camera sighting.' })
+    this.emit({ kind: 'horn', position: position.clone(), radius: 100, text: text ?? 'ALARM - barracks responding to the camera sighting.' })
     this.sync(state)
+    this.onAlarm(position)
     return true
   }
 
@@ -83,8 +125,8 @@ export class SecuritySystem {
     if (state.alarm === 'active') {
       state.alarmElapsed += dt
       this.hornElapsed += dt
-      if (state.alarmPosition && state.alarmElapsed >= SECURITY_RULES.secondWaveDelay && state.reservesDispatched < SECURITY_RULES.reserveLimit) {
-        state.reservesDispatched += this.ai.respondToAlarm(new THREE.Vector3(...state.alarmPosition), SECURITY_RULES.reserveLimit - state.reservesDispatched, false)
+      if (state.alarmPosition && state.alarmElapsed >= this.rules.secondWaveDelay && state.reservesDispatched < this.rules.reserveLimit) {
+        state.reservesDispatched += this.ai.respondToAlarm(new THREE.Vector3(...state.alarmPosition), this.rules.reserveLimit - state.reservesDispatched, false)
       }
       if (this.hornElapsed >= SECURITY_RULES.hornInterval) {
         this.hornElapsed %= SECURITY_RULES.hornInterval
@@ -96,9 +138,8 @@ export class SecuritySystem {
     }
     if (!state.camerasActive) return
     const watched: readonly THREE.Vector3[] = Array.isArray(eyes) ? eyes : [eyes as THREE.Vector3]
-    for (const camera of this.missionWorld.rescue?.cameras ?? []) {
-      const spec = RESCUE_LAYOUT.cameras.find(candidate => candidate.id === camera.id)
-      if (!spec) continue
+    for (const { spec, rig: camera } of this.list()) {
+      if (this.destroyed.has(spec.id)) continue
       const origin = new THREE.Vector3(...spec.position)
       const yaw = camera.pivot.rotation.y
       const eye = watched.find(eye => {
@@ -110,7 +151,7 @@ export class SecuritySystem {
       })
       const elapsed = eye ? (this.dwell.get(camera.id) ?? 0) + dt : 0
       this.dwell.set(camera.id, elapsed)
-      if (eye && elapsed >= SECURITY_RULES.detectionDwell) this.trigger(state, eye.clone().add(new THREE.Vector3(0, -1.65, 0)))
+      if (eye && elapsed >= this.rules.detectionDwell) this.trigger(state, eye.clone().add(new THREE.Vector3(0, -1.65, 0)))
     }
   }
 }

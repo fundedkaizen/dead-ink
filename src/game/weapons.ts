@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { shotRadius } from './campaign/stealth'
 import { applyPenMaterial, createPenSilhouette, penPalette } from '../render/ballpoint'
 import { disposeGun, type Gun } from '../lab/weapons/models'
 import type { WeaponContext, WeaponFrame, WeaponItem, WeaponName, WeaponSnapshot } from './types'
@@ -1298,8 +1299,9 @@ export class FirstPersonWeapons {
     const yaw = (Math.random() - 0.5) * rules.kick * (item.name === 'shotgun' ? 0.55 : 1)
     this.nudge(pitch, yaw)
     this.settle.pitch += pitch * rules.settle; this.settle.yaw += yaw * 0.35
-    this.context.emit({ kind: item.special === 'rayGun' ? 'shot-raygun' : `shot-${item.name}`, position: origin.clone(), radius: item.name === 'pistol' ? 38 : 55,
-      text: `${rules.label} fired`, packed: item.packed ? item.packLevel ?? 1 : 0 })
+    this.context.emit({ kind: item.special === 'rayGun' ? 'shot-raygun' : `shot-${item.name}`, position: origin.clone(), radius: shotRadius(item.name, item.suppressed),
+      // A suppressed pistol (the rescue campaign's) is a muffled cough: a short reach and a quiet report.
+      volume: item.suppressed ? 0.3 : undefined, text: `${item.suppressed ? 'Suppressed pistol' : rules.label} fired`, packed: item.packed ? item.packLevel ?? 1 : 0 })
     this.pose(0)
   }
 
