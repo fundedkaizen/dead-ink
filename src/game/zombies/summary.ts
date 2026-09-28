@@ -2,7 +2,9 @@ import './summary.css'
 import type { MenuCopy, MenuState } from '../menu'
 import { WEAPON_LABELS } from './cosmetics/challenges'
 import { camoSwatch } from './cosmetics/icons'
-import { lastReport, type GameReport } from './cosmetics/progression'
+import { lastReport, onReport, type GameReport } from './cosmetics/progression'
+import { rankBadge, rankName, prestigeBadge } from './cosmetics/career'
+import { RECORD_CATEGORIES, formatRecord } from './cosmetics/records'
 
 /**
  * Dead Ink's game-over page: the round reached (and a New record stamp when it beats the best), the game's
@@ -35,6 +37,46 @@ export function reportFromState(state: MenuState): GameReport {
   }
 }
 
+/** "New best!" stamps: every high score this game set (first place), and any other top-ten places. */
+function recordsHtml(report: GameReport) {
+  const placed = report.records ?? []
+  if (!placed.length) return ''
+  const label = (id: string) => RECORD_CATEGORIES.find(c => c.id === id)?.label ?? id
+  const firsts = placed.filter(p => p.rank === 1), others = placed.filter(p => p.rank > 1)
+  return `<section class="summary-records" aria-label="High scores">
+    ${firsts.map(p => `<div class="summary-best-stamp"><em>New best!</em><span>${escape(label(p.category))}</span><b>${escape(formatRecord(p.category, p.value))}</b></div>`).join('')}
+    ${others.map(p => `<div class="summary-place"><span class="summary-place-rank">#${p.rank}</span><span>${escape(label(p.category))}</span><b>${escape(formatRecord(p.category, p.value))}</b></div>`).join('')}
+  </section>`
+}
+
+/** Every player's awards, each card in the player's colour. */
+function awardsHtml(report: GameReport) {
+  const awards = report.awards ?? []
+  if (!awards.length) return ''
+  const color = (value?: string) => value && /^#[0-9a-f]{6}$/i.test(value) ? value : '#111111'
+  return `<section class="summary-awards" aria-labelledby="summary-awards-title">
+    <h3 id="summary-awards-title">Awards</h3>
+    <div class="summary-award-players">${awards.map(player => `<div class="summary-award-player" style="--player:${color(player.color)}">
+      <span class="summary-award-name">${escape(player.name)}</span>
+      ${player.awards.map(award => `<div class="summary-award"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 3l3.6 7.4 8.1 1.2-5.9 5.7 1.4 8.1L16 21.6l-7.2 3.8 1.4-8.1-5.9-5.7 8.1-1.2z" fill="var(--player)" stroke="#111" stroke-width="1.8" stroke-linejoin="round"/></svg>
+        <span><b>${escape(award.title)}</b><small>${escape(award.detail)}</small></span></div>`).join('')}
+    </div>`).join('')}</div>
+  </section>`
+}
+
+/** The XP this game earned, and the level bar before and after. */
+function xpHtml(report: GameReport) {
+  const xp = report.xp
+  if (!xp) return ''
+  const after = xp.after, levels = after.level - xp.before.level
+  return `<section class="summary-xp" aria-label="Career">
+    <div class="summary-xp-badge">${rankBadge(after.level, 54)}${prestigeBadge(xp.prestige, 24)}</div>
+    <div class="summary-xp-text"><b>Level ${after.level}</b> <span>${escape(rankName(after.level))}</span>${levels > 0 ? `<em>+${levels} level${levels === 1 ? '' : 's'}</em>` : ''}
+      <div class="summary-xp-bar"><i style="width:${(after.fraction * 100).toFixed(1)}%"></i></div>
+      <small>+${number(xp.earned)} XP this game${after.max ? ' · level 55: prestige from the Career page' : ` · ${number(after.needed - after.into)} XP to level ${after.level + 1}`}</small></div>
+  </section>`
+}
+
 export function summaryHtml(report: GameReport) {
   const accuracy = report.accuracy === null ? '–' : `${Math.round(report.accuracy * 100)}%`
   const stats: [string, string, string?][] = [
@@ -63,6 +105,9 @@ export function summaryHtml(report: GameReport) {
         <small>${report.newRecord ? (report.previousBest ? `was ${number(report.previousBest)}` : 'your first') : `${number(best - report.round)} to beat it`}</small>
       </div>
     </div>
+    ${recordsHtml(report)}
+    ${awardsHtml(report)}
+    ${xpHtml(report)}
     <dl class="summary-stats">${stats.map(([label, value, note]) => `<div><dt>${label}</dt><dd>${value}</dd>${note ? `<dd class="summary-note">${note}</dd>` : ''}</div>`).join('')}</dl>
     <div class="summary-columns">
       <section class="summary-ink" aria-labelledby="summary-ink-title">
@@ -88,6 +133,10 @@ export function showSummary(report: GameReport) {
 }
 
 export const DEAD_INK_GAME_OVER: NonNullable<MenuCopy['gameOver']> = {
-  build: slot => { body = slot; slot.classList.add('summary') },
+  build: slot => {
+    body = slot; slot.classList.add('summary')
+    // The host's awards arrive a moment after the game ends: show them as they come.
+    onReport(report => { if (!slot.closest('[hidden]')) showSummary(report) })
+  },
   show: state => showSummary(lastReport() ?? reportFromState(state)),
 }

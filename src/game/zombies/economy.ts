@@ -42,8 +42,14 @@ export const freshWeapon = (id: string, name: WeaponName, rarity?: Rarity): Weap
   return { id, name, magazine: capacity, reserve: spareAmmo({ name }), ...(rarity ? { rarity } : {}) }
 }
 
-/** The starting pistol: Call of Duty starts you with one pistol and two spare magazines' worth more. */
-export const startingPistol = (): WeaponItem => ({ id: 'start-pistol', name: 'pistol', magazine: WEAPON_RULES.pistol.capacity, reserve: WEAPON_RULES.pistol.capacity * 4 })
+/**
+ * The starting pistol: Call of Duty starts you with one pistol and four magazines' worth more. The Career
+ * unlocks two others to start with: the burst pistol (two magazines spare) and the Magnum (two cylinders).
+ */
+export const startingPistol = (kind: 'pistol' | 'burst' | 'magnum' = 'pistol'): WeaponItem => {
+  const capacity = WEAPON_RULES[kind].capacity
+  return { id: 'start-pistol', name: kind, magazine: capacity, reserve: capacity * (kind === 'pistol' ? 4 : 2) }
+}
 
 /** Guns on the walls, in the order they are placed outward from the spawn: cheap and close first. */
 export const WALL_WEAPONS: { name: WeaponName; price: number }[] = [

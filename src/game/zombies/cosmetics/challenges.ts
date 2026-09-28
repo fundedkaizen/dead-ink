@@ -37,12 +37,14 @@ export const WEAPON_TIERS: readonly WeaponTier[] = [
 ]
 
 export type AccountMetric = 'bestRound' | 'bruteKills' | 'storms' | 'kills' | 'headshots' | 'editions'
-export type AccountChallenge = { id: string; metric: AccountMetric; goal: number; ink: number; title: string; label: string }
+/** `reward`: a cosmetic the challenge unlocks as well as its Ink (gloves:brute). */
+export type AccountChallenge = { id: string; metric: AccountMetric; goal: number; ink: number; title: string; label: string; reward?: string }
 export const ACCOUNT_CHALLENGES: readonly AccountChallenge[] = [
   { id: 'round-10', metric: 'bestRound', goal: 10, ink: 250, title: 'Double Digits', label: 'Reach round 10' },
   { id: 'round-20', metric: 'bestRound', goal: 20, ink: 750, title: 'Deep Water', label: 'Reach round 20' },
   { id: 'round-30', metric: 'bestRound', goal: 30, ink: 2000, title: 'The Long Night', label: 'Reach round 30' },
   { id: 'brute-10', metric: 'bruteKills', goal: 10, ink: 500, title: 'Brute Force', label: 'Kill the Brute 10 times' },
+  { id: 'brute-25', metric: 'bruteKills', goal: 25, ink: 750, title: 'Brute Knuckles', label: 'Kill the Brute 25 times', reward: 'gloves:brute' },
   { id: 'storm-5', metric: 'storms', goal: 5, ink: 500, title: 'Storm Chaser', label: 'Survive 5 Ink Storms' },
   { id: 'headshots-1000', metric: 'headshots', goal: 1000, ink: 1000, title: 'Headhunter', label: '1,000 headshot kills' },
   { id: 'kills-5000', metric: 'kills', goal: 5000, ink: 1500, title: 'Marathon', label: '5,000 kills' },
@@ -67,6 +69,8 @@ export type ChallengeUnlock = {
   tier?: number
   camo?: ChallengeCamoId
   ink?: number
+  /** A cosmetic it unlocks (an account challenge's reward). */
+  reward?: string
 }
 
 const zeroStats = (): WeaponStats => ({ kills: 0, headshots: 0, packedKills: 0, deepKills: 0 })
@@ -149,7 +153,8 @@ export function settle(state: ChallengeState): ChallengeUnlock[] {
     const id = `account:${challenge.id}`
     if (state.done.includes(id) || state.account[challenge.metric] < challenge.goal) continue
     state.done.push(id)
-    unlocked.push({ id, kind: 'account', ink: challenge.ink, title: `${challenge.title} · +${challenge.ink.toLocaleString('en-GB')} Ink`, detail: challenge.label })
+    unlocked.push({ id, kind: 'account', ink: challenge.ink, title: `${challenge.title} · +${challenge.ink.toLocaleString('en-GB')} Ink`, detail: challenge.label,
+      ...(challenge.reward ? { reward: challenge.reward } : {}) })
   }
   return unlocked
 }
@@ -168,6 +173,8 @@ export type KillRecord = {
   round: number
   /** Wonder weapons and the Death Machine count toward account totals only. */
   special?: boolean
+  /** A knife kill (it pays extra XP). */
+  knife?: boolean
 }
 
 /** Count one kill into the state. Returns nothing; call settle() for unlocks. */

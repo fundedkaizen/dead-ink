@@ -1,0 +1,79 @@
+/* Dead Ink's Shop, Career and Records pages (pages.ts). Ink on paper; colour for rarity, ranks and records. */
+body[data-mission="true"] .walk-card[data-page="shop"], body[data-mission="true"] .walk-card[data-page="career"], body[data-mission="true"] .walk-card[data-page="records"] { width: min(860px, 100%); }
+.shop, .career, .records { display: grid; gap: 18px; color: var(--ink); }
+body[data-mission="true"] .walk-card .shop h3, body[data-mission="true"] .walk-card .career h3, body[data-mission="true"] .walk-card .records h3 { margin: 0 0 8px; font: 700 22px/1.1 var(--hand); color: var(--ink); }
+
+/* Shop */
+.shop-section header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
+.shop-clock { font: 12px/1.3 var(--notes); color: var(--ink-muted); }
+.shop-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px 12px; padding-top: 8px; }
+.shop-offer { position: relative; display: grid; grid-template-rows: auto auto auto 1fr auto; justify-items: center; gap: 3px; padding: 22px 10px 10px; text-align: center;
+  border: 2px solid var(--ink); border-bottom: 7px solid var(--rarity); border-radius: 5px 3px 6px 4px; background: var(--paper); box-shadow: 3px 4px 0 var(--ink); }
+.shop-offer.featured { grid-column: span 2; box-shadow: 3px 4px 0 var(--ink), inset 0 0 0 3px var(--rarity); }
+.shop-offer.featured .shop-art svg { width: 96px; height: 96px; }
+.shop-art svg { width: 70px; height: 70px; color: var(--ink); }
+.shop-offer b { font: 700 16px/1.15 var(--notes); }
+body[data-mission="true"] .walk-card .shop-offer small { margin: 0; font: 12px/1.3 var(--notes); color: var(--ink-muted); text-transform: capitalize; }
+body[data-mission="true"] .walk-card .shop-offer p { margin: 2px 0 6px; font: 12px/1.35 var(--notes); color: var(--ink-muted); }
+.shop-flag { position: absolute; top: -11px; left: 50%; transform: translateX(-50%) rotate(-3deg); white-space: nowrap; padding: 2px 10px; background: var(--rarity); color: #fff;
+  border: 2px solid var(--ink); border-radius: 3px; font: 700 12px/1.3 var(--notes); font-style: normal; }
+.shop-flag.shelf { background: var(--ink); }
+body[data-mission="true"] .walk-card .shop-offer button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 38px; width: 100%; padding: 6px 12px;
+  font: 700 15px/1 var(--notes); color: var(--paper); background: var(--ink); border: 2px solid var(--ink); border-radius: 4px 3px 5px 3px; cursor: pointer; }
+body[data-mission="true"] .walk-card .shop-offer button svg { width: 15px; height: 15px; }
+body[data-mission="true"] .walk-card .shop-offer button:disabled { background: var(--paper-shade); color: var(--ink-muted); border-color: var(--ink-rule); cursor: not-allowed; }
+body[data-mission="true"] .walk-card p.shop-status { margin: 0; min-height: 1.4em; font: 700 14px/1.4 var(--notes); }
+
+/* Career */
+.career-hero { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 20px; align-items: center; padding: 16px; border: 2px solid var(--ink); border-radius: 5px 3px 6px 4px; box-shadow: 4px 5px 0 var(--ink); }
+.career-badges { position: relative; display: grid; place-items: center; }
+.career-badges .prestige-badge { position: absolute; right: -10px; bottom: -8px; }
+.career-rank { display: grid; gap: 3px; min-width: 0; }
+.career-rank > b { font: 700 40px/1 var(--hand); }
+.career-rank > span { font: 700 18px/1.2 var(--notes); }
+body[data-mission="true"] .walk-card .career-rank small { margin: 0; font: 13px/1.35 var(--notes); color: var(--ink-muted); }
+.career-bar { height: 14px; margin: 6px 0 2px; border: 2px solid var(--ink); border-radius: 8px 6px 9px 7px; overflow: hidden; background: repeating-linear-gradient(135deg, #fff 0 6px, #eee 6px 8px); }
+.career-bar i { display: block; height: 100%; background: var(--ink); border-radius: 0 6px 6px 0; }
+.career-next b { color: var(--ink); font-weight: 700; }
+.career-prestige-box { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; border: 2px dashed var(--ink); border-radius: 5px; }
+.career-prestige-box > div:first-child { flex: 1 1 320px; }
+body[data-mission="true"] .walk-card .career-prestige-box p { margin: 0; font: 13px/1.45 var(--notes); color: var(--ink-muted); }
+.career-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+body[data-mission="true"] .walk-card .career-prestige, body[data-mission="true"] .walk-card .career-prestige-yes, body[data-mission="true"] .walk-card .career-prestige-no {
+  min-height: 42px; padding: 8px 18px; font: 700 15px/1 var(--notes); color: var(--paper); background: var(--ink); border: 2px solid var(--ink); border-radius: 4px 3px 5px 3px; cursor: pointer; }
+body[data-mission="true"] .walk-card .career-prestige:disabled { background: var(--paper-shade); color: var(--ink-muted); border-color: var(--ink-rule); cursor: not-allowed; }
+body[data-mission="true"] .walk-card .career-prestige-no { background: var(--paper); color: var(--ink); }
+.career-choices { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+body[data-mission="true"] .walk-card .career-choices button { min-height: 36px; padding: 6px 12px; font: 600 13px/1.1 var(--notes); color: var(--ink); background: var(--paper); border: 1.5px solid var(--ink); border-radius: 4px 3px 5px 3px; cursor: pointer; }
+body[data-mission="true"] .walk-card .career-choices button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+body[data-mission="true"] .walk-card .career-choices button:disabled { opacity: 0.45; cursor: not-allowed; }
+.career-unlocks ol { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px; margin: 0; padding: 0; list-style: none; }
+.career-unlocks li { display: grid; grid-template-columns: 30px 36px minmax(0, 1fr); align-items: center; gap: 6px; padding: 4px 8px 4px 4px; border: 1.5px solid var(--ink-rule); border-radius: 4px; font: 12px/1.25 var(--notes); color: var(--ink-muted); }
+.career-unlocks li.got { border-color: var(--ink); color: var(--ink); }
+.career-unlock-level { display: grid; place-items: center; width: 26px; height: 26px; border: 1.5px solid currentColor; border-radius: 50%; font: 700 12px/1 var(--notes); }
+.career-unlocks li.got .career-unlock-level { background: var(--ink); color: var(--paper); }
+.career-unlock-art svg { width: 34px; height: 34px; color: var(--ink); }
+.career-unlocks li:not(.got) .career-unlock-art { opacity: 0.35; filter: grayscale(1); }
+body[data-mission="true"] .walk-card p.career-foot { margin: 0; font: 12px/1.4 var(--notes); color: var(--ink-muted); }
+
+/* Records */
+body[data-mission="true"] .walk-card p.records-map { margin: 0; font: 700 16px/1.2 var(--notes); }
+.records-filters { display: flex; flex-wrap: wrap; gap: 4px 18px; }
+.records-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.records-table { padding: 12px; border: 2px solid var(--ink); border-radius: 5px 3px 6px 4px; }
+.records-table ol { display: grid; gap: 3px; margin: 0; padding: 0; list-style: none; }
+.records-table li { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: baseline; gap: 8px; padding: 3px 0; border-bottom: 1px solid var(--ink-rule); font: 13px/1.3 var(--notes); }
+.records-table li b { font-variant-numeric: tabular-nums; }
+body[data-mission="true"] .walk-card .records-table li small { margin: 0; font: 11px/1.3 var(--notes); color: var(--ink-muted); }
+.records-rank { font: 700 13px/1 var(--notes); color: var(--ink-muted); }
+.records-table li.top .records-rank { color: #e8a317; }
+.records-table li.top b { font: 700 18px/1 var(--hand); }
+body[data-mission="true"] .walk-card p.records-empty { margin: 0; font: 13px/1.4 var(--notes); color: var(--ink-muted); }
+
+@media (max-width: 640px) {
+  .shop-offer.featured { grid-column: 1 / -1; }
+  .shop-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 10px; }
+  .career-hero { grid-template-columns: minmax(0, 1fr); justify-items: center; text-align: center; }
+  .career-rank > b { font-size: 34px; }
+  .records-grid { grid-template-columns: minmax(0, 1fr); }
+}

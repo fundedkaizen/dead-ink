@@ -8,6 +8,7 @@ import { tallySvg } from '../hud'
 import { CATALOGUE, cosmeticKey, type CamoId, type ChallengeCamoId, type CosmeticItem, type CosmeticKind, type EquippedCosmetics } from './catalogue'
 import { ACCOUNT_CHALLENGES, CHALLENGE_WEAPONS, WEAPON_LABELS, WEAPON_TIERS, accountProgress, masteredCount, tierProgress, weaponMastered, type ChallengeState } from './challenges'
 import { camoSwatch, cosmeticIcon } from './icons'
+import { LEVEL_UNLOCKS, levelOf, rankBadge, rankName } from './career'
 import { CASE, caseOdds, equippedCosmetics, loadProfile, onProfileChange, openCases, ownsCamo, toggleEquip, type CaseOpening, type Profile } from './profile'
 
 /**
@@ -17,12 +18,12 @@ import { CASE, caseOdds, equippedCosmetics, loadProfile, onProfileChange, openCa
 
 type Tab = CosmeticKind | 'challenges'
 const KINDS: { kind: Tab; label: string }[] = [
-  { kind: 'watch', label: 'Watches' }, { kind: 'charm', label: 'Charms' }, { kind: 'camo', label: 'Camos' }, { kind: 'knife', label: 'Knives' },
+  { kind: 'watch', label: 'Watches' }, { kind: 'charm', label: 'Charms' }, { kind: 'camo', label: 'Camos' }, { kind: 'knife', label: 'Knives' }, { kind: 'gloves', label: 'Gloves' },
   { kind: 'challenges', label: 'Challenges' },
 ]
 const GUNS: { name: WeaponName; label: string }[] = [
   { name: 'pistol', label: 'Pistol' }, { name: 'smg', label: 'SMG' }, { name: 'ak', label: 'AK' }, { name: 'shotgun', label: 'Shotgun' }, { name: 'sniper', label: 'Sniper' },
-  { name: 'magnum', label: 'Magnum' }, { name: 'lmg', label: 'LMG' },
+  { name: 'magnum', label: 'Magnum' }, { name: 'lmg', label: 'LMG' }, { name: 'burst', label: 'Burst' }, { name: 'pdw', label: 'PDW' }, { name: 'lever', label: 'Lever' },
 ]
 const TILE = 120
 /** The x5 reels are stacked, so their tiles are smaller (64 px wide plus a 6 px gap). */
@@ -41,6 +42,15 @@ function unlockHint(camo: ChallengeCamoId) {
   if (camo === 'diamond') return 'Tier 4 on every gun'
   const tier = WEAPON_TIERS.find(t => t.camo === camo)!
   return `Tier ${tier.tier}: ${tier.label(tier.goal)}`
+}
+
+/** Where a locked item that is not in a case comes from. */
+function sourceHint(item: CosmeticItem) {
+  if (item.source === 'shop') return 'In the Shop'
+  const level = LEVEL_UNLOCKS.find(unlock => unlock.kind === 'item' && unlock.item === item.id)
+  if (item.source === 'level' && level) return `Career level ${level.level}`
+  const challenge = ACCOUNT_CHALLENGES.find(c => c.reward === item.id)
+  return challenge ? `Challenge: ${challenge.label}` : 'Earned, not found in cases'
 }
 
 /** A progress bar: ink fill on paper, the count beside it. `aria` names what it measures. */
@@ -88,6 +98,7 @@ function isEquipped(item: CosmeticItem, equipped: EquippedCosmetics, gun: Weapon
   if (item.kind === 'watch') return equipped.watch === key
   if (item.kind === 'charm') return equipped.charm === key
   if (item.kind === 'knife') return equipped.knife === key
+  if (item.kind === 'gloves') return equipped.gloves === key
   return equipped.camos[gun] === key
 }
 
@@ -189,7 +200,9 @@ class Armory {
     this.body.querySelector('.armory-hint')!.textContent = this.kind === 'camo'
       ? 'A camo covers one gun type. Challenge camos are earned per gun. Pack-a-Punched guns wear the Pack-a-Punch camo.'
       : this.kind === 'challenges' ? `Each gun's tiers unlock a camo for that gun, in order. Tier 4 on all ${CHALLENGE_WEAPONS.length} guns unlocks Diamond.`
-      : this.kind === 'knife' ? 'Your knife slashes with V and shows off when you stand still.' : 'Click something you own to wear it; click again to take it off.'
+      : this.kind === 'knife' ? 'Your knife slashes with V and shows off when you stand still.'
+      : this.kind === 'gloves' ? 'Gloves go on both hands. Some come from cases, some from the Shop, Career levels and challenges.'
+      : 'Click something you own to wear it; click again to take it off.'
     const grid = this.body.querySelector<HTMLElement>('.armory-grid')!, challenges = this.body.querySelector<HTMLElement>('.armory-challenges')!
     grid.hidden = this.kind === 'challenges'
     challenges.hidden = this.kind !== 'challenges'
@@ -199,9 +212,10 @@ class Armory {
       const key = cosmeticKey(item.id)
       const owned = item.kind === 'camo' ? ownsCamo(profile, key as CamoId, this.gun) : profile.owned.includes(item.id)
       const worn = owned && isEquipped(item, profile.equipped, this.gun)
-      // A locked challenge camo says what earns it; a locked case item stays a mystery.
-      const name = owned || item.challenge ? escape(item.name) : 'Locked'
-      const line = !owned && item.challenge ? escape(unlockHint(key as ChallengeCamoId)) : `${RARITY_INFO[item.rarity].label}${worn ? ' · worn' : ''}`
+      // A locked challenge camo says what earns it, as does anything from the Shop, a level or a challenge; a locked case item stays a mystery.
+      const name = owned || item.challenge || item.source ? escape(item.name) : 'Locked'
+      const line = !owned && item.challenge ? escape(unlockHint(key as ChallengeCamoId)) : !owned && item.source ? escape(sourceHint(item))
+        : `${RARITY_INFO[item.rarity].label}${worn ? ' · worn' : ''}`
       return `<button type="button" class="armory-item${worn ? ' worn' : ''}${item.challenge ? ' challenge' : ''}${key === 'diamond' ? ' diamond' : ''}" data-item="${item.id}" style="--rarity:${RARITY_INFO[item.rarity].css}"
         ${owned ? '' : 'aria-disabled="true"'} aria-pressed="${worn}" title="${escape(item.blurb)}">
         ${cosmeticIcon(item)}
@@ -331,7 +345,9 @@ export function deadInkHome(slot: HTMLElement) {
   slot.classList.add('dead-ink-record')
   const render = (profile: Profile) => {
     const last = profile.last
+    const level = levelOf(profile.xp).level
     slot.innerHTML = `
+      <div class="dead-ink-level" title="${rankName(level)}">${rankBadge(level, 40)}<span>Level ${level}${profile.prestige ? ` · P${profile.prestige}` : ''}</span></div>
       <div class="dead-ink-best"><span>Best round</span><b>${profile.bestRound ? (profile.bestRound <= 5 ? tallySvg(profile.bestRound) : `<em>${profile.bestRound}</em>`) : '<em>–</em>'}</b></div>
       <div><span>Last game</span><strong>${last ? `Round ${last.round} · ${last.kills} kills` : 'None yet'}</strong>${last ? `<small>+${ink(last.ink)} Ink</small>` : ''}</div>
       <div><span>Ink</span><strong>${ink(profile.ink)}</strong></div>`

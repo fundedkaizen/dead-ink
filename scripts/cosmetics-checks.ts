@@ -358,7 +358,7 @@ test('A version 1 profile keeps its Ink, items and equipment, gains challenges a
     equipped: { watch: 'diver', charm: null, knife: 'combat', camos: { lmg: 'gold', magnum: 'gold' } }, last: { round: 22, kills: 500, headshots: 90, ink: 790 } }))
   resetProfileCache()
   const profile = loadProfile()
-  assert.equal(profile.version, 2)
+  assert.equal(profile.version, 3, 'saved in the current format (3: the Career, records, the Shop and gloves)')
   assert.equal(profile.ink, 1234 + 250 + 750, 'the round 10 and round 20 challenges pay out on migration')
   assert.deepEqual(profile.owned, ['knife:combat', 'watch:diver', 'camo:gold'])
   assert.deepEqual([profile.games, profile.bestRound, profile.opened], [9, 22, 4])
@@ -366,10 +366,10 @@ test('A version 1 profile keeps its Ink, items and equipment, gains challenges a
   assert.equal(profile.equipped.camos.lmg, 'gold', 'LMG and Magnum camos survive a reload')
   assert.equal(profile.equipped.camos.magnum, 'gold')
   assert(profile.challenges.done.includes('account:round-20') && !profile.challenges.done.includes('account:round-30'))
-  // Saved as version 2; loading it again does not pay twice.
+  // Saved in the current format; loading it again does not pay twice.
   toggleEquip('watch:diver'); resetProfileCache()
   assert.equal(loadProfile().ink, 1234 + 1000)
-  assert.equal(JSON.parse(store.get('dead-ink-profile')!).version, 2)
+  assert.equal(JSON.parse(store.get('dead-ink-profile')!).version, 3)
 })
 
 test('A game reports rounds, kills, accuracy, best weapon, Ink line by line and new records', () => {
@@ -452,8 +452,8 @@ test('The case reel ticks and wins in sound, at the saved effects volume, silent
 
 test('Every kind has one Mythic in the case, at about one case in 250, and the odds line shows it', () => {
   const mythics = casePool().filter(item => item.rarity === 'mythic')
-  assert.deepEqual(mythics.map(item => item.kind).sort(), ['camo', 'charm', 'knife', 'watch'])
-  assert.equal(CATALOGUE.filter(item => item.rarity === 'mythic').length, 4)
+  assert.deepEqual(mythics.map(item => item.kind).sort(), ['camo', 'charm', 'gloves', 'knife', 'watch'])
+  assert.equal(CATALOGUE.filter(item => item.rarity === 'mythic').length, 5)
   assert.equal(CASE_WEIGHTS.mythic, 0.4)
   const odds = caseOdds()
   assert.deepEqual(odds.map(o => o.rarity), [...RARITIES], 'every rarity, Mythic last')

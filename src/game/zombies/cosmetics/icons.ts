@@ -121,6 +121,54 @@ const CAMOS: Record<string, string> = {
     <rect x="4" y="8" width="40" height="32" rx="3" fill="none" stroke="#56688a" stroke-width="1"/>`,
 }
 
+// The second set of case camos.
+Object.assign(CAMOS, {
+  'ink-wash': `<rect x="4" y="8" width="40" height="32" rx="3" fill="#f7f7f7"/>
+    <path d="M8 18c4-6 12-6 14 0s-4 10-10 8-6-4-4-8z" fill="#9c9c9c" stroke="#2a2a2a" stroke-width="1.4"/>
+    <path d="M26 26c5-4 13-2 14 3s-6 8-11 6-6-6-3-9z" fill="#b8b8b8" stroke="#2a2a2a" stroke-width="1.2"/><circle cx="34" cy="14" r="2" fill="#222"/>`,
+  newsprint: `<rect x="4" y="8" width="40" height="32" rx="3" fill="#ebe8df"/>
+    <path d="M8 13h14M8 16h12M8 19h14M8 22h10M26 29h14M26 32h12M26 35h14" stroke="#222" stroke-width="1.3"/>
+    ${[0, 1, 2, 3].flatMap(r => [0, 1, 2, 3].map(c => `<circle cx="${28 + c * 4}" cy="${13 + r * 3.4}" r="${0.6 + (r + c) * 0.25}" fill="#222"/>`)).join('')}
+    ${[0, 1, 2].flatMap(r => [0, 1, 2].map(c => `<circle cx="${10 + c * 4.5}" cy="${28 + r * 4}" r="${1.4 - r * 0.3}" fill="#222"/>`)).join('')}`,
+  topo: `<rect x="4" y="8" width="40" height="32" rx="3" fill="#eef0dc"/>
+    <path d="M10 30c0-8 8-14 16-12s10 10 4 14-18 6-20-2z" fill="none" stroke="#6b4521" stroke-width="1.6"/>
+    <path d="M15 29c1-5 6-8 11-7s6 6 2 8-12 4-13-1z" fill="none" stroke="#6b4521" stroke-width="1.1"/>
+    <path d="M21 27c1-2 3-3 5-2s2 3 0 3-5 1-5-1z" fill="none" stroke="#6b4521" stroke-width="1"/><path d="M4 16c10 2 20-6 40 0" fill="none" stroke="#6b4521" stroke-width="1"/>`,
+  'love-letter': `<rect x="4" y="8" width="40" height="32" rx="3" fill="#ffdbe5"/>
+    <path d="M4 15h40M4 21h40M4 27h40M4 33h40" stroke="#9fb4ee" stroke-width="0.8"/>
+    <path d="${HEART}" fill="#db1a52" stroke="#1a0208" stroke-width="2" transform="translate(16 20) scale(0.36) translate(-24 -27)"/>
+    <path d="${HEART}" fill="#ff7299" stroke="#1a0208" stroke-width="2.4" transform="translate(33 30) scale(0.28) translate(-24 -27)"/>
+    <path d="${HEART}" fill="#db1a52" stroke="#1a0208" stroke-width="3" transform="translate(36 15) scale(0.2) translate(-24 -27)"/>`,
+  circuit: `<rect x="4" y="8" width="40" height="32" rx="3" fill="#07130d"/>
+    <path d="M8 14h12v8h10M8 30h8l6-6h14M28 36v-6M34 12v10h6" fill="none" stroke="#178a5b" stroke-width="1.8"/>
+    <g fill="#178a5b"><circle cx="8" cy="14" r="2"/><circle cx="30" cy="22" r="2"/><circle cx="36" cy="24" r="2"/><circle cx="28" cy="36" r="2"/><circle cx="40" cy="22" r="2"/></g>
+    <g class="camo-glint" fill="#b6ffe0"><circle cx="18" cy="14" r="1.6"/><circle cx="12" cy="30" r="1.6"/><circle cx="34" cy="17" r="1.6"/></g>`,
+  molten: `<defs><clipPath id="camo-m"><rect x="4" y="8" width="40" height="32" rx="3"/></clipPath></defs><g clip-path="url(#camo-m)"><rect x="4" y="8" width="40" height="32" fill="#0b0807"/>
+    <path d="M4 20c6 2 8-4 14-2s6 8 12 6 8-8 14-6M12 40c2-6 8-6 10-12M30 8c-2 6 2 10 0 16" fill="none" stroke="#e8761b" stroke-width="3" stroke-linecap="round"/>
+    <path d="M4 20c6 2 8-4 14-2s6 8 12 6 8-8 14-6M12 40c2-6 8-6 10-12M30 8c-2 6 2 10 0 16" fill="none" stroke="${GOLD}" stroke-width="1.2" stroke-linecap="round" class="camo-glint"/></g>`,
+})
+
+/** Glove icons: a mitten and cuff in the glove's colours, 48 x 48. */
+const GLOVE_LOOK: Record<string, { fill: string; cuff: string; detail?: string }> = {
+  work: { fill: '#e2dccd', cuff: '#bdb29a', detail: '<path d="M16 20l14 14M20 16l14 14M14 26l10 10" stroke="#8b8270" stroke-width="1"/>' },
+  tactical: { fill: '#1d1d1d', cuff: '#444', detail: '<path d="M15 16h18" stroke="#777" stroke-width="3" stroke-linecap="round"/>' },
+  rubber: { fill: '#3fae49', cuff: '#2e8636', detail: '<path d="M18 12c4-2 10-2 14 1" stroke="#c9f5cc" stroke-width="2" fill="none" stroke-linecap="round"/>' },
+  wraps: { fill: '#fafaf5', cuff: '#fafaf5', detail: '<path d="M12 18l24 6M12 25l24 6M12 32l24 6" stroke="#222" stroke-width="1.2"/>' },
+  origami: { fill: '#6f9fe8', cuff: '#4b7cc9', detail: '<path d="M12 22l12-12 12 12M12 22l12 8 12-8M24 10v20" stroke="#10223f" stroke-width="1.1" fill="none"/>' },
+  boxing: { fill: '#2f7fe0', cuff: '#fff', detail: '<path d="M20 36l8 4M28 36l-8 4" stroke="#fff" stroke-width="1.6"/>' },
+  bones: { fill: '#111', cuff: '#111', detail: '<path d="M16 14v10M22 12v12M28 12v12M34 14v10M17 28h16" stroke="#f2f2f2" stroke-width="2" stroke-linecap="round"/>' },
+  brute: { fill: '#5b2a86', cuff: '#3a1a58', detail: '<g fill="#050505"><circle cx="17" cy="16" r="2"/><circle cx="23" cy="14" r="2"/><circle cx="29" cy="14" r="2"/><circle cx="35" cy="16" r="2"/></g>' },
+  midas: { fill: GOLD, cuff: '#c78d2a', detail: '<path d="M14 26l18-14" stroke="#fff3c9" stroke-width="2" stroke-linecap="round"/>' },
+  heartstring: { fill: ROSE, cuff: '#c67f7b', detail: `<path d="${HEART}" fill="${PINK}" class="mythic-pulse" transform="translate(24 21) scale(0.34) translate(-24 -27)"/><path d="${HEART}" fill="${PINK}" class="mythic-halo" transform="translate(24 21) scale(0.5) translate(-24 -27)" opacity="0.4"/>` },
+}
+function glove(id: string) {
+  const look = GLOVE_LOOK[id] ?? GLOVE_LOOK.work
+  return `<path d="M12 30V16c0-5 4-8 12-8s12 3 12 8v14c0 4-5 6-12 6s-12-2-12-6z" fill="${look.fill}" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/>
+    <path d="M36 20c4 0 6 3 5 6l-5 3" fill="${look.fill}" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/>
+    ${look.detail ?? ''}
+    <rect x="13" y="35" width="22" height="9" rx="2" fill="${look.cuff}" stroke="currentColor" stroke-width="2.2"/>`
+}
+
 /** A camo swatch by id, for the Challenges tab and the game-over summary. */
 export const camoSwatch = (camo: string) => `<svg viewBox="0 4 48 40" aria-hidden="true">${CAMOS[camo] ?? ''}</svg>`
 
@@ -139,6 +187,6 @@ const KNIVES: Record<string, string> = {
 
 export function cosmeticIcon(item: CosmeticItem) {
   const id = cosmeticKey(item.id)
-  const body = item.kind === 'watch' ? watch(id) : item.kind === 'charm' ? CHARMS[id] : item.kind === 'camo' ? CAMOS[id] : KNIVES[id]
+  const body = item.kind === 'watch' ? watch(id) : item.kind === 'charm' ? CHARMS[id] : item.kind === 'camo' ? CAMOS[id] : item.kind === 'gloves' ? glove(id) : KNIVES[id]
   return `<svg viewBox="0 0 48 48" aria-hidden="true">${body ?? ''}</svg>`
 }

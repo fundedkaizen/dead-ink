@@ -45,7 +45,9 @@ import { REVIVE, SecondDraftRevive } from './revive'
 import { DECOY, DollBuy, animateDoll, inkDoll } from './decoy'
 import { THROW_RELEASE } from '../weapons'
 import { BENCH_PLACE, BUILDS, BuildSite, PARTS, POWER_PLACE, PartPickup, PowerSwitch, SHIELD, fromBehind, type BuildId, type PartId } from './buildables'
-import { ARMORY_PAGE, beginGame, deadInkHome, installCosmetics, recordBruteKill, recordGameEnd, recordKill, recordQuestComplete, recordRound, recordStormSurvived, type ChallengeUnlock } from './cosmetics'
+import { ARMORY_PAGE, CAREER_PAGE, RECORDS_PAGE, SHOP_PAGE, beginGame, deadInkHome, grantXp, installCosmetics, recordBruteKill, recordGameEnd, recordKill, recordQuestComplete, recordRound, recordStormSurvived, setAwards, startingPistolOf, type ChallengeUnlock } from './cosmetics'
+import { XP } from './cosmetics/career'
+import { awardsFor, sanitizeAwards, type AwardStats } from '../shared/awards'
 import { DEAD_INK_GAME_OVER } from './summary'
 import { LowHealthWarning } from './lowhealth'
 import { getSettings, lookScale, subscribeSettings, volumeFor } from '../settings'
@@ -69,6 +71,9 @@ import { Barriers, WINDOW, type Barrier } from './windows'
 // The Ink Storm's flyers (flyers.ts) and what a storm brings (rules.ts).
 import { StormPack } from './flyers'
 import { inkwingHealth, stormNumber } from './rules'
+
+/** A fresh game's numbers for the end-of-game awards. */
+const freshStats = () => ({ revives: 0, spent: 0, clutch: 0, dollKills: 0, explosiveKills: 0, wonderKills: 0, planks: 0, boxSpins: 0, damageTaken: 0, downs: 0 })
 
 export type ZombieState = {
   phase: 'active' | 'dead' | 'complete'
@@ -180,8 +185,8 @@ export const DEAD_INK_COPY: MenuCopy = {
   restartWarning: 'This game ends and a new one starts at round 1.',
   missionPage: false,
   modeLink: { label: 'Hostage mission', href: './' },
-  controls: [['Knife', 'V'], ['Grenade', 'Q or G'], ['Ink Doll', 'E'], ['Switch weapon', 'Wheel']],
-  pages: [ARMORY_PAGE], home: deadInkHome, mode: 'zombies', gameOver: DEAD_INK_GAME_OVER,
+  controls: [['Knife', 'V'], ['Grenade', 'Q or G'], ['Ink Doll', 'E'], ['Switch weapon', 'Wheel'], ['Ping (twice: danger)', 'Middle click or Z']],
+  pages: [ARMORY_PAGE, SHOP_PAGE, CAREER_PAGE, RECORDS_PAGE], home: deadInkHome, mode: 'zombies', gameOver: DEAD_INK_GAME_OVER,
 }
 
 /**
@@ -330,6 +335,16 @@ export class ZombiesRuntime {
   /** Accuracy for the game-over page: trigger pulls, and pulls that hit a zombie (a shotgun blast counts once). */
   private shotsFired = 0
   private shotsHit = 0
+  /**
+   * This game's numbers for the end-of-game awards (../shared/awards.ts): revives, points spent, kills with the
+   * back to the wall, by Ink Doll, by explosive, by wonder weapon, planks nailed back, box spins, damage taken.
+   */
+  private stats = freshStats()
+  /** Co-op, on the host: each guest's numbers, as they last sent them. */
+  private mateStats = new Map<number, Record<string, number>>()
+  private statsTimer = 0
+  /** A knife kill is being counted (it pays extra XP). */
+  private knifeKill = false
   private pullHit = false
   /** Ink creeping in from the edges as your health runs low, with a heartbeat. */
   readonly lowHealth = new LowHealthWarning({ onBeat: strength => this.audio.play({ kind: 'heartbeat', intensity: strength }) })
@@ -654,7 +669,7 @@ export class ZombiesRuntime {
     this.perks.clear(); this.pendingPerk = null; this.reviveGrace = 0; this.applyPerks(); this.zombieHud.perks([])
     this.resetBuildables()
     this.revive.reset(); this.player.movementLocked = false
-    beginGame(); this.shotsFired = 0; this.shotsHit = 0; this.lowHealth.clear()
+    beginGame(); this.shotsFired = 0; this.shotsHit = 0; this.lowHealth.clear(); this.stats = freshStats(); this.mateStats.clear()
     this.setStorm(false)
     this.brute = null; this.bruteTimer = -1
     for (const skull of this.skulls) { skull.found = false; skull.object.userData.found = false }
@@ -663,7 +678,7 @@ export class ZombiesRuntime {
     this.dolls.clear(); this.dollCount = 0; this.dollCooldown = 0; this.pendingThrows = []
     if (this.pack && this.pack.state !== 'idle') this.pack.take()
     this.dropper = new PowerupDropper(this.random)
-    this.weapons.restore({ slots: [startingPistol(), null], selected: 0, pickups: [], nextId: 1 })
+    this.weapons.restore({ slots: [startingPistol(startingPistolOf()), null], selected: 0, pickups: [], nextId: 1 })
     this.player.actions.reset()
     // In co-op the guest starts a couple of metres beside the host, not inside them.
     const node = this.isGuest && this.graph ? this.graph.nearest(this.spawn.clone().add(new THREE.Vector3(2, 0, 0)), 2) : -1
@@ -904,6 +919,7 @@ export class ZombiesRuntime {
   private spend(cost: number) {
     if (this.state.points < cost) { this.hud.notify('Not enough points.', 1.6, true); return false }
     this.state.points -= cost
+    this.stats.spent += cost
     this.zombieHud.spend(cost)
     return true
   }
@@ -1304,6 +1320,7 @@ export class ZombiesRuntime {
         if (this.coop.role === 'host') this.coop.send({ t: 'revive', by: this.playerName }, { to: mate.id })
         else this.coop.send({ t: 'revive', target: mate.id, by: this.playerName })
         if (mate.state) mate.state.dn = 0
+        this.stats.revives++
         this.award(COOP.revivePoints)
         this.hud.notify(`You got ${this.mateName(mate.id)} back up.`, 2.5)
       } else this.interactionTime = Math.max(this.interactionTime, 0.2)
@@ -1344,7 +1361,10 @@ export class ZombiesRuntime {
       const debris = this.director?.brutes.debris.rows() ?? []
       this.coop.send({ t: 'tick', fz: getSettings().coopPause ? 1 : 0, dr: this.doors.map(door => door.userData.open ? 1 : 0).join(''), z: this.director?.snapshot() ?? [], r: this.rounds.round, ph: this.rounds.phase, players: [this.myState(), ...this.matesHere().map(mate => mate.state)],
         storm: this.storm, pw: this.power ? 1 : 0, pk: this.packBuilt ? 1 : 0, w: this.worldState(), ...(debris.length ? { bd: debris } : {}) })
-    } else this.coop.send({ t: 'me', me: this.myState() })
+    } else {
+      this.coop.send({ t: 'me', me: this.myState() })
+      if ((this.statsTimer -= 1 / COOP.sendRate) <= 0) { this.statsTimer = 1; this.coop.send({ t: 'stats', v: this.awardValues() }) }
+    }
   }
 
   /** A shared announcement: shown here, and on the guest's screen when we are the host. */
@@ -1361,6 +1381,7 @@ export class ZombiesRuntime {
   /** Down in co-op: on the floor until the partner gets you up, or you bleed out. */
   private goDown() {
     this.down = 1
+    this.stats.downs++
     this.bleed = COOP.bleedSeconds
     this.state.health = 0
     this.losePerks()
@@ -1408,7 +1429,7 @@ export class ZombiesRuntime {
     this.player.actions.disabled = false
     if (respawn) {
       this.downWeapons = null
-      this.weapons.restore({ slots: [startingPistol(), null], selected: 0, pickups: [], nextId: 1 })
+      this.weapons.restore({ slots: [startingPistol(startingPistolOf()), null], selected: 0, pickups: [], nextId: 1 })
       this.revive.reset()
     } else if (this.downWeapons) {
       // Back up with every gun you went down with; the pistol keeps what it has left.
@@ -1490,6 +1511,8 @@ export class ZombiesRuntime {
         if (m.w) this.applyWorld(m.w)
         if (m.bd) this.director?.brutes.debris.sync(m.bd)
         if (newRound) {
+          // The guest reaches the round too: its challenges, XP and record times.
+          this.toastUnlocks(recordRound(m.r, this.state.elapsed))
           if (this.down === 2) this.getUp(true)
           this.grenadeCount = Math.min(GRENADE.max, this.grenadeCount + GRENADE.perRound)
           if (this.liveBoss(false)) this.bruteCarriesOver()
@@ -1499,6 +1522,8 @@ export class ZombiesRuntime {
       case 'award':
         this.state.points += m.n
         this.zombieHud.gain(m.n)
+        if (m.k) this.countKills(m.k, m.c)
+        if (m.c === 'plank') this.stats.planks++
         if (m.k) { this.state.kills += m.k; this.state.headshots += m.h ?? 0; for (let i = 0; i < m.k; i++) this.toastUnlocks(recordKill({ weapon: this.weapons.current?.special ? null : this.weapons.current?.name ?? null, headshot: i < (m.h ?? 0), packed: !!this.weapons.current?.packed, packLevel: this.weapons.current?.packLevel, round: this.rounds.round, special: !!this.weapons.current?.special })) }
         break
       case 'hit':
@@ -1535,6 +1560,8 @@ export class ZombiesRuntime {
         break
       // ---- on the host
       case 'me': this.mate(from).state = { ...m.me, id: from }; break
+      case 'stats': this.mateStats.set(from, Object.fromEntries(Object.entries(m.v ?? {}).filter(([, v]) => typeof v === 'number' && Number.isFinite(v)).slice(0, 20))); break
+      case 'awards': this.receiveAwards(sanitizeAwards(m.a)); break
       case 'shot': this.partnerShot(m, from); break
       case 'knife': this.partnerKnife(m, from); break
       case 'door': { const door = this.doors[m.i]; if (door && !door.userData.missionLocked) setDoorOpen(door, m.o === 1); break }
@@ -1660,7 +1687,8 @@ export class ZombiesRuntime {
     this.blastLook(at, radius, kind)
     // The other guests see it go off too.
     this.coop.send({ t: 'boom', p: vec(at), r: radius, k: kind }, { skip: from })
-    if (points) this.coop.send({ t: 'award', n: this.timers.doublePoints ? points * 2 : points, k: kills }, { to: from })
+    const c = kind === 'doll' ? 'doll' : kind === 'bolt' || cannon ? 'wonder' : 'boom'
+    if (points) this.coop.send({ t: 'award', n: this.timers.doublePoints ? points * 2 : points, k: kills, c }, { to: from })
   }
 
   /** The box spins for a player (the host 0, or a guest); its gun is for whoever paid. */
@@ -1854,13 +1882,13 @@ export class ZombiesRuntime {
   private dollBlast(at: THREE.Vector3) {
     const director = this.director
     if (!director) return
-    this.coopBlast(at, DECOY.radius, this.blastDamage('dollBlast'))
+    this.coopBlast(at, DECOY.radius, this.blastDamage('dollBlast'), 'doll')
     if (this.isGuest) return
     const damage = zombieHealth(this.rounds.round) * DIFFICULTY[this.difficulty].health * 3
     for (const hit of director.blast(at, DECOY.radius, damage)) {
       this.award(pointsForHit({ lethal: hit.lethal, explosive: true }))
       this.hits.hit(hit.reaction.point, hit.dealt, hit.zombie.id, false, hit.lethal)
-      if (hit.lethal) { this.state.kills++; this.killed(hit.zombie.position, hit.zombie) }
+      if (hit.lethal) { this.state.kills++; this.stats.dollKills++; this.killed(hit.zombie.position, hit.zombie) }
     }
     this.explosions.emit(at, DECOY.radius)
     this.emit({ kind: 'grenade-blast', position: at.clone(), radius: 120 })
@@ -2176,6 +2204,7 @@ export class ZombiesRuntime {
       return true
     }
     if (box.state !== 'idle' || !this.spend(PRICES.box)) return false
+    this.stats.boxSpins++
     if (this.isGuest) { this.coop.send({ t: 'use', what: 'box', guns: this.weapons.slots.filter(Boolean).map(s => s!.name) }); return true }
     this.spinBox(0)
     this.invalidate()
@@ -2213,7 +2242,7 @@ export class ZombiesRuntime {
     this.repairWait = WINDOW.repairSeconds
     if (this.isGuest) { this.coop.send({ t: 'use', what: 'window', index: barrier.index }); return }
     const paid = this.barriers!.rebuild(barrier, 'p1', this.rounds.round, this.timers.doublePoints ? 2 : 1)
-    if (paid > 0) { this.state.points += paid; this.earned += paid; this.zombieHud.gain(paid) }
+    if (paid > 0) { this.state.points += paid; this.earned += paid; this.zombieHud.gain(paid); this.stats.planks++ }
   }
 
   /** On the host: the guest nailed a plank back; the points go to the guest. */
@@ -2221,7 +2250,7 @@ export class ZombiesRuntime {
     const barrier = this.barriers?.list[index]
     if (!barrier || !this.mates.get(from) || this.mates.get(from)!.avatar.feet.distanceTo(barrier.point) > 3.5) return
     const paid = this.barriers!.rebuild(barrier, `p${from + 1}`, this.rounds.round, this.timers.doublePoints ? 2 : 1)
-    if (paid > 0) this.coop.send({ t: 'award', n: paid }, { to: from })
+    if (paid > 0) this.coop.send({ t: 'award', n: paid, c: 'plank' }, { to: from })
   }
 
   // ---------------------------------------------------------------- combat
@@ -2259,8 +2288,11 @@ export class ZombiesRuntime {
   private killed(position: THREE.Vector3, zombie?: Zombie, weapon?: WeaponItem | null, headshot = false, byGuest?: number) {
     const byPartner = byGuest !== undefined
     const credit = (points: number) => byPartner ? this.coop.send({ t: 'award', n: this.timers.doublePoints ? points * 2 : points }, { to: byGuest }) : this.award(points)
-    if (!byPartner) this.toastUnlocks(recordKill({ weapon: weapon && !weapon.special ? weapon.name : null, headshot, packed: !!weapon?.packed,
-      packLevel: weapon?.packLevel, round: this.rounds.round, special: !!weapon?.special }))
+    if (!byPartner) {
+      if (this.clutchNow()) this.stats.clutch++
+      this.toastUnlocks(recordKill({ weapon: weapon && !weapon.special ? weapon.name : null, headshot, packed: !!weapon?.packed,
+        packLevel: weapon?.packLevel, round: this.rounds.round, special: !!weapon?.special, knife: this.knifeKill }))
+    }
     this.lastKillAt = position.clone()
     if (this.questStep === 'wells' && zombie && !zombie.boss) {
       // The nearest thirsty inkwell in reach takes this one's ink.
@@ -2453,7 +2485,7 @@ export class ZombiesRuntime {
       this.hitFlash = 0.15
       this.award(pointsForHit({ lethal: hit.lethal, explosive: true }))
       this.hits.hit(hit.reaction.point, hit.dealt, hit.zombie.id, false, hit.lethal)
-      if (hit.lethal) { this.state.kills++; this.killed(hit.zombie.position, hit.zombie) }
+      if (hit.lethal) { this.state.kills++; this.stats.explosiveKills++; this.killed(hit.zombie.position, hit.zombie) }
     }
     this.blastLook(at, radius, kind)
   }
@@ -2480,7 +2512,7 @@ export class ZombiesRuntime {
       this.hitFlash = 0.15
       this.award(pointsForHit({ lethal: hit.lethal, explosive: true }))
       this.hits.hit(hit.reaction.point, hit.dealt, hit.zombie.id, false, hit.lethal)
-      if (hit.lethal) { this.meltBody(hit.zombie); this.state.kills++; this.killed(hit.zombie.position, hit.zombie, cannon) }
+      if (hit.lethal) { this.meltBody(hit.zombie); this.state.kills++; this.stats.wonderKills++; this.killed(hit.zombie.position, hit.zombie, cannon) }
     }
   }
 
@@ -2522,14 +2554,14 @@ export class ZombiesRuntime {
     const director = this.director
     if (!director) return
     const radius = packed ? INK_RAY.packedRadius : INK_RAY.radius, scale = packed ? INK_RAY.packedDamage : 1
-    this.coopBlast(at, radius, this.blastDamage('boltBurst') * scale)
+    this.coopBlast(at, radius, this.blastDamage('boltBurst') * scale, 'bolt')
     if (this.isGuest) return
     const damage = Math.max(1500, zombieHealth(this.rounds.round) * DIFFICULTY[this.difficulty].health * 1.6) * scale
     for (const hit of director.blast(at, radius, damage)) {
       this.hitFlash = 0.15
       this.award(pointsForHit({ lethal: hit.lethal, explosive: true }))
       this.hits.hit(hit.reaction.point, hit.dealt, hit.zombie.id, false, hit.lethal)
-      if (hit.lethal) { this.state.kills++; this.killed(hit.zombie.position, hit.zombie) }
+      if (hit.lethal) { this.state.kills++; this.stats.wonderKills++; this.killed(hit.zombie.position, hit.zombie) }
     }
     const eye = this.camera.perspective.getWorldPosition(new THREE.Vector3())
     const distance = eye.distanceTo(at)
@@ -2550,7 +2582,7 @@ export class ZombiesRuntime {
     for (const hit of director.blast(at, GRENADE.radius, GRENADE.damage)) {
       this.award(pointsForHit({ lethal: hit.lethal, explosive: true }))
       this.hits.hit(hit.reaction.point, hit.dealt, hit.zombie.id, false, hit.lethal)
-      if (hit.lethal) { this.state.kills++; this.killed(hit.zombie.position, hit.zombie) }
+      if (hit.lethal) { this.state.kills++; this.stats.explosiveKills++; this.killed(hit.zombie.position, hit.zombie) }
     }
     const eye = this.camera.perspective.getWorldPosition(new THREE.Vector3())
     const distance = eye.distanceTo(at)
@@ -2573,7 +2605,7 @@ export class ZombiesRuntime {
     this.hitFlash = 0.15
     this.award(pointsForHit({ lethal: hit.lethal, zone: hit.reaction.zone, knife: true }))
     this.hits.hit(hit.reaction.point, hit.dealt, hit.zombie.id, false, hit.lethal)
-    if (hit.lethal) { this.state.kills++; this.state.knifeKills++; this.killed(hit.zombie.position, hit.zombie) }
+    if (hit.lethal) { this.state.kills++; this.state.knifeKills++; this.knifeKill = true; this.killed(hit.zombie.position, hit.zombie); this.knifeKill = false }
     return true
   }
 
@@ -2598,6 +2630,7 @@ export class ZombiesRuntime {
         return
       }
     }
+    this.stats.damageTaken += Math.min(amount, this.state.health)
     this.state.health = Math.max(0, this.state.health - amount)
     this.lastHurt = this.state.elapsed
     const dead = this.state.health === 0
@@ -2635,12 +2668,49 @@ export class ZombiesRuntime {
     this.hud.setScoped(false); this.hud.clearThreat(); this.hud.setDeath(this.death)
     // Ink for the Armory (round x 10 + kills + headshots x 2 + challenge rewards), and the game-over page's report.
     const report = recordGameEnd({ round: this.state.round, kills: this.state.kills, headshots: this.state.headshots,
-      shotsFired: this.shotsFired, shotsHit: this.shotsHit, elapsed: this.state.elapsed })
+      shotsFired: this.shotsFired, shotsHit: this.shotsHit, elapsed: this.state.elapsed,
+      difficulty: this.difficulty, mode: this.paired ? 'coop' : 'solo', map: 'compound',
+      stats: this.awardValues(), name: this.playerName, color: PLAYER_CSS[this.coop.id], player: this.coop.id })
+    // Awards: alone they are this player's own (in the report); in co-op the host works out everyone's and sends them.
+    if (this.coop.role === 'host' && this.paired) {
+      const everyone: AwardStats[] = [{ player: 0, name: this.playerName, color: PLAYER_CSS[0], values: this.awardValues() },
+        ...this.matesHere().map(mate => ({ player: mate.id, name: mate.state.name, color: mate.css, values: { kills: mate.state.kills, ...(this.mateStats.get(mate.id) ?? {}) } }))]
+      const awards = awardsFor(everyone)
+      this.coop.send({ t: 'awards', a: awards })
+      this.receiveAwards(awards)
+    } else if (!this.paired) grantXp(XP.award * (report.awards?.find(a => a.player === this.coop.id)?.awards.filter(a => a.id !== 'standing').length ?? 0), 'Awards')
     this.hud.notify(`+${report.inkTotal} Ink`, 3)
     this.lowHealth.clear()
     delete document.body.dataset.deadInkOneHit
     // As in Call of Duty: the fall, then ink, then the map from above under GAME OVER while the requiem plays.
     this.gameOverFlight.begin(this.player.body.position.clone(), this.flightStops(), Math.max(1, this.state.round), this.player.world)
+  }
+
+  /** This player's numbers for the awards (see `stats`), with the kills, headshots and accuracy. */
+  private awardValues(): Record<string, number> {
+    return { ...this.stats, kills: this.state.kills, headshots: this.state.headshots, knifeKills: this.state.knifeKills,
+      ...(this.shotsFired >= 50 ? { accuracy: Math.round(this.shotsHit / this.shotsFired * 100) } : {}) }
+  }
+
+  /** Every player's awards (co-op: from the host): into the summary, and XP for each this player won. */
+  private receiveAwards(awards: ReturnType<typeof awardsFor>) {
+    setAwards(awards)
+    const mine = awards.find(entry => entry.player === this.coop.id)?.awards.filter(award => award.id !== 'standing').length ?? 0
+    if (mine) grantXp(XP.award * mine, 'Awards')
+  }
+
+  /** A kill with the back to the wall: every teammate down, or this player one or two hits from going down. */
+  private clutchNow() {
+    const low = this.state.health <= this.maxHealth() * 0.3
+    return low || (this.paired && this.matesHere().length > 0 && this.matesHere().every(mate => mate.state.dn !== 0))
+  }
+
+  /** Kills the host credited to this guest: counted for the awards by what made them. */
+  private countKills(count: number, kind?: 'boom' | 'wonder' | 'doll' | 'plank') {
+    if (this.clutchNow()) this.stats.clutch += count
+    if (kind === 'boom') this.stats.explosiveKills += count
+    else if (kind === 'wonder') this.stats.wonderKills += count
+    else if (kind === 'doll') this.stats.dollKills += count
   }
 
   /** Where the game-over flight passes: the start, the box, the Pack-a-Punch and every perk machine. */
@@ -2854,7 +2924,7 @@ export class ZombiesRuntime {
       if (events.roundStarted) {
         this.dropper.newRound(); this.sting('roundStart')
         if (this.down === 2) this.getUp(true)
-        this.toastUnlocks(recordRound(events.roundStarted))
+        this.toastUnlocks(recordRound(events.roundStarted, this.state.elapsed))
         this.setStorm(isStormRound(events.roundStarted))
         if (this.storm) {
           // The storm's own pack, Inkwings and a few sprinters (flyers.ts): this step may already have fed some in.

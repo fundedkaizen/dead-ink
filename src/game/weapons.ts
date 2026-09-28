@@ -7,8 +7,8 @@ import { setCannonCharge } from '../lab/weapons/models/cannon'
 import { createMissionGun } from './weapon-models'
 import { RARITY_INFO, weaponRules } from './loot'
 import { createRarityBeam } from '../render/ink'
-import type { EquippedCosmetics, KnifeId } from './zombies/cosmetics/catalogue'
-import { CHARM_ANCHORS, CHARM_LENGTH, KNIFE_BUILDERS, animateCosmetics, applyCamo, buildCharm, buildWatch, removeCamo } from './zombies/cosmetics/models'
+import type { EquippedCosmetics, GloveId, KnifeId } from './zombies/cosmetics/catalogue'
+import { CHARM_ANCHORS, CHARM_LENGTH, KNIFE_BUILDERS, animateCosmetics, applyCamo, buildCharm, buildWatch, gloveMaterial, removeCamo } from './zombies/cosmetics/models'
 import { applyDragonSkin, removeDragonSkin } from './zombies/mythic'
 import { Offhand, firingHand, isAkimbo, type Kick } from './akimbo'
 export { WEAPON_RULES } from './balance'
@@ -199,6 +199,10 @@ export class FirstPersonWeapons {
   private charm: { pivot: THREE.Group; model: Gun; bob: THREE.Vector3; previous: THREE.Vector3; anchor: THREE.Vector3; ready: boolean } | null = null
   /** The Deadline's second Magnum, in the left hand (akimbo.ts); null for every other gun. */
   private offhand: Offhand | null = null
+  /** Every mitten shape of both hands (their material is the gloves'), and the two cuffs round the wrists. */
+  private handShapes: THREE.Mesh[] = []
+  private cuffs: THREE.Mesh[] = []
+  private gloves: GloveId | null = null
 
   constructor(private context: WeaponContext) {
     this.root.name = 'First-person stickman arms'
@@ -268,6 +272,7 @@ export class FirstPersonWeapons {
 
   private mitten(parent: THREE.Group, position: [number, number, number], scale: [number, number, number]) {
     const shape = this.armShape(this.palmGeometry)
+    this.handShapes.push(shape)
     shape.position.set(...position)
     shape.scale.set(scale[0] * 1.12, scale[1] * 1.06, scale[2] * 1.08)
     parent.add(shape)
@@ -394,6 +399,7 @@ export class FirstPersonWeapons {
       this.watch.name = `Watch: ${cosmetics.watch}`
       this.root.add(this.watch)
     }
+    this.wearGloves(cosmetics?.gloves ?? null)
     this.endFlourish()
     this.idleTime = 0
     if (this.knifeModel && this.knifeTime === null) this.hideKnife()
@@ -401,6 +407,43 @@ export class FirstPersonWeapons {
     if (cosmetics) this.knifeFor(cosmetics.knife)
     this.dress()
     this.pose(0)
+  }
+
+  /**
+   * Gloves on both hands: every mitten shape takes the glove's material and a cuff closes round each wrist.
+   * Null goes back to bare paper hands.
+   */
+  private wearGloves(id: GloveId | null) {
+    if (id === this.gloves) return
+    this.gloves = id
+    const material = id ? gloveMaterial(id) : this.armMaterial
+    for (const shape of this.handShapes) shape.material = material
+    if (id && !this.cuffs.length) {
+      const geometry = new THREE.CylinderGeometry(0.047, 0.05, 0.075, 20, 1, true)
+      for (let i = 0; i < 2; i++) {
+        const cuff = new THREE.Mesh(geometry, material)
+        const contour = createPenSilhouette(geometry, 2.4)
+        contour.name = 'Glove cuff contour'
+        cuff.add(contour)
+        cuff.name = i ? 'Left glove cuff' : 'Right glove cuff'
+        this.root.add(cuff)
+        this.cuffs.push(cuff)
+      }
+    }
+    for (const cuff of this.cuffs) { cuff.material = material; cuff.visible = !!id }
+  }
+
+  /** Each cuff sits just behind its hand, along the forearm. */
+  private placeCuffs(wrists: [THREE.Vector3, THREE.Vector3]) {
+    if (!this.gloves) return
+    this.cuffs.forEach((cuff, i) => {
+      const arm = this.arms[i]
+      cuff.visible = arm.fore.visible
+      if (!cuff.visible) return
+      const elbow = arm.elbow.position, axis = wrists[i].clone().sub(elbow).normalize()
+      cuff.position.copy(elbow).lerp(wrists[i], 0.93)
+      cuff.quaternion.setFromUnitVectors(up, axis)
+    })
   }
 
   trigger(pressed: boolean) {
@@ -1074,6 +1117,7 @@ export class FirstPersonWeapons {
     this.placeArm(this.arms[0], reachableWrist, shoulders[0])
     this.placeArm(this.arms[1], left, shoulders[1])
     this.placeWatch(left)
+    this.placeCuffs([reachableWrist, left])
     this.swingCharm(dt)
     if (this.cosmetics) animateCosmetics(this.frame.reducedMotion ? 1 : performance.now() / 1000 % 1000, [this.watch, this.charm?.model, this.knifeModel])
   }
