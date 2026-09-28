@@ -541,7 +541,7 @@ export class EnemyDirector {
     const player = enemy.spotting >= 0 ? this.players.find(candidate => (candidate.id ?? 0) === enemy.spotting && candidate.alive) : undefined
     if (!player) { enemy.awareness = Math.max(0, enemy.awareness - dt * 0.2); return }
     const eye = this.eye(enemy), distance = eye.distanceTo(player.eye)
-    const alert = enemy.state === 'patrol' || enemy.state === 'guard' ? 1 : 1.8
+    const alert = enemy.state === 'patrol' || enemy.state === 'guard' ? 1 : 1.4
     const rate = detectionRate(distance, player.exposure ?? { moving: player.velocity.lengthSq() > 0.25, running: player.velocity.lengthSq() > 25 }, this.options.alertness * alert)
     enemy.awareness = Math.min(1, enemy.awareness + (distance <= POINT_BLANK ? 1 : rate * dt))
     enemy.lastKnown = player.feet.clone()

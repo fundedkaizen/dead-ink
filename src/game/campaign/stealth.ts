@@ -33,12 +33,13 @@ export const POINT_BLANK = 2.5
 export const SUSPECT_AT = 0.3
 
 /**
- * Awareness a guard gains per second while he sees you. Close is fast (a second at ten metres standing), far
- * is slow, crouched and still is slowest; `alertness` is the difficulty's (and an alerted guard's) factor.
+ * Awareness a guard gains per second while he sees you. Close is fast (a second at five metres, walking), far
+ * is slow (two and a half at twenty), crouched and still is slowest; `alertness` is the difficulty's (and an
+ * alerted guard's) factor.
  */
 export function detectionRate(distance: number, exposure: Exposure, alertness = 1) {
   if (distance <= POINT_BLANK) return Infinity
-  let rate = 1 / (0.3 + distance * 0.06)
+  let rate = 1 / (0.5 + distance * 0.1)
   if (exposure.crouched) rate *= 0.5
   if (exposure.running) rate *= 1.5
   else if (!exposure.moving) rate *= 0.7

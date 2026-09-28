@@ -11,30 +11,40 @@ import { ENEMY_COMBAT } from '../balance'
 const GUARD_HALF_ANGLE = 55 * Math.PI / 180, CAMERA_HALF_ANGLE = 28 * Math.PI / 180
 const INK = 0x000000, DANGER = 0xc8322b
 
+/** A fan on the ground, darkest at the guard and fading out toward its reach (vertex alpha). */
 function fanGeometry(halfAngle: number, segments = 18) {
-  const positions = [0, 0, 0]
-  for (let i = 0; i <= segments; i++) {
+  const positions: number[] = [], colors: number[] = [], index: number[] = []
+  const rings = [0, 0.35, 1], alpha = [1, 0.55, 0]
+  for (const [r, radius] of rings.entries()) for (let i = 0; i <= segments; i++) {
     const a = -halfAngle + i / segments * halfAngle * 2
-    positions.push(Math.sin(a), 0, Math.cos(a))
+    positions.push(Math.sin(a) * radius, 0, Math.cos(a) * radius)
+    colors.push(1, 1, 1, alpha[r])
   }
-  const index: number[] = []
-  for (let i = 1; i <= segments; i++) index.push(0, i, i + 1)
+  const row = segments + 1
+  for (let r = 0; r < rings.length - 1; r++) for (let i = 0; i < segments; i++) {
+    const a = r * row + i, b = a + row
+    index.push(a, b, a + 1, a + 1, b, b + 1)
+  }
   const geometry = new THREE.BufferGeometry()
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 4))
   geometry.setIndex(index)
   return geometry
 }
-function fanOutline(halfAngle: number, segments = 18) {
-  const points = [new THREE.Vector3()]
-  for (let i = 0; i <= segments; i++) {
-    const a = -halfAngle + i / segments * halfAngle * 2
-    points.push(new THREE.Vector3(Math.sin(a), 0, Math.cos(a)))
+/** The fan's two edges, fading out along their length. */
+function fanOutline(halfAngle: number) {
+  const positions: number[] = [], colors: number[] = []
+  for (const side of [-1, 1]) {
+    positions.push(0, 0, 0, Math.sin(side * halfAngle) * 0.8, 0, Math.cos(side * halfAngle) * 0.8)
+    colors.push(1, 1, 1, 1, 1, 1, 1, 0)
   }
-  points.push(new THREE.Vector3())
-  return new THREE.BufferGeometry().setFromPoints(points)
+  const geometry = new THREE.BufferGeometry()
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 4))
+  return geometry
 }
 
-type Cone = { group: THREE.Group; fill: THREE.Mesh; edge: THREE.Line; fillMaterial: THREE.MeshBasicMaterial; edgeMaterial: THREE.LineBasicMaterial }
+type Cone = { group: THREE.Group; fill: THREE.Mesh; edge: THREE.LineSegments; fillMaterial: THREE.MeshBasicMaterial; edgeMaterial: THREE.LineBasicMaterial }
 
 export class CampaignVisuals {
   private root = new THREE.Group()
@@ -58,10 +68,10 @@ export class CampaignVisuals {
   }
 
   private cone(fan: THREE.BufferGeometry, edge: THREE.BufferGeometry): Cone {
-    const fillMaterial = new THREE.MeshBasicMaterial({ color: INK, transparent: true, opacity: 0.08, depthWrite: false, side: THREE.DoubleSide, toneMapped: false })
-    const edgeMaterial = new THREE.LineBasicMaterial({ color: INK, transparent: true, opacity: 0.35, toneMapped: false })
+    const fillMaterial = new THREE.MeshBasicMaterial({ color: INK, vertexColors: true, transparent: true, opacity: 0.08, depthWrite: false, side: THREE.DoubleSide, toneMapped: false })
+    const edgeMaterial = new THREE.LineBasicMaterial({ color: INK, vertexColors: true, transparent: true, opacity: 0.35, toneMapped: false })
     const group = new THREE.Group()
-    const fill = new THREE.Mesh(fan, fillMaterial), line = new THREE.Line(edge, edgeMaterial)
+    const fill = new THREE.Mesh(fan, fillMaterial), line = new THREE.LineSegments(edge, edgeMaterial)
     fill.renderOrder = 3; line.renderOrder = 3
     group.add(fill, line)
     group.userData.noCollision = true
@@ -105,8 +115,8 @@ export class CampaignVisuals {
       const strength = combat ? 1 : Math.max(0.35, enemy.awareness)
       cone.fillMaterial.color.setHex(combat || enemy.awareness > 0.7 ? DANGER : INK)
       cone.edgeMaterial.color.copy(cone.fillMaterial.color)
-      cone.fillMaterial.opacity = 0.05 + 0.07 * strength
-      cone.edgeMaterial.opacity = 0.2 + 0.3 * strength
+      cone.fillMaterial.opacity = 0.06 + 0.1 * strength
+      cone.edgeMaterial.opacity = 0.15 + 0.3 * strength
     })
     // Cameras' sweeps on the ground.
     const live = new Set<string>()
@@ -122,7 +132,7 @@ export class CampaignVisuals {
       cone.group.scale.set(reach, 1, reach)
       const alarm = r.state.alarm === 'active'
       cone.fillMaterial.color.setHex(alarm ? DANGER : INK); cone.edgeMaterial.color.setHex(alarm ? DANGER : INK)
-      cone.fillMaterial.opacity = 0.05; cone.edgeMaterial.opacity = 0.28
+      cone.fillMaterial.opacity = 0.07; cone.edgeMaterial.opacity = 0.22
     }
     for (const [id, cone] of this.cameraCones) cone.group.visible = live.has(id)
     this.updateGlints()

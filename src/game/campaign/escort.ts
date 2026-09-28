@@ -35,7 +35,7 @@ export const FOLLOW = {
 
 export type EscortPlayer = { id: number; feet: THREE.Vector3; up: boolean }
 
-type Travel = { crumb: number; trail: number; detour: THREE.Vector3[]; replanAfter: number; stalled: number; cover: THREE.Vector3 | null; coverFrom: THREE.Vector3 | null
+type Travel = { strict: number; crumb: number; trail: number; detour: THREE.Vector3[]; replanAfter: number; stalled: number; cover: THREE.Vector3 | null; coverFrom: THREE.Vector3 | null
   boardingFrom: THREE.Vector3 | null; boardingTime: number; seated: boolean }
 
 const ignore = new THREE.Object3D()
@@ -84,7 +84,7 @@ export class FollowEscort {
   }
 
   private fresh(): Travel {
-    return { crumb: -1, trail: -1, detour: [], replanAfter: 0, stalled: 0, cover: null, coverFrom: null, boardingFrom: null, boardingTime: 0, seated: false }
+    return { strict: 0, crumb: -1, trail: -1, detour: [], replanAfter: 0, stalled: 0, cover: null, coverFrom: null, boardingFrom: null, boardingTime: 0, seated: false }
   }
 
   sync(state: Pick<MissionState, 'hostages'>) {
@@ -145,7 +145,9 @@ export class FollowEscort {
 
   /** The next point toward `leader`: straight at him if the way is clear, otherwise along his footprints. */
   private nextPoint(position: THREE.Vector3, leader: EscortPlayer, travel: Travel, dt: number) {
-    if (Math.abs(leader.feet.y - position.y) < 0.4 && leader.feet.distanceTo(position) < 14 && this.navigation.segment(position, leader.feet, false)) {
+    // Shortcuts are tested with the planning clearance (a little wider than he is), so they never graze a corner.
+    travel.strict = Math.max(0, travel.strict - dt)
+    if (!travel.strict && Math.abs(leader.feet.y - position.y) < 0.4 && leader.feet.distanceTo(position) < 14 && this.navigation.segment(position, leader.feet)) {
       travel.crumb = -1; travel.detour = []
       return leader.feet
     }
@@ -163,8 +165,9 @@ export class FollowEscort {
       if (travel.crumb >= 0) {
         // Skip ahead along footprints he can reach directly.
         while (travel.crumb + 1 < trail.points.length && trail.points[travel.crumb].distanceTo(position) < 0.45) travel.crumb++
-        let look = Math.min(trail.points.length - 1, travel.crumb + 6)
-        while (look > travel.crumb && !(Math.abs(trail.points[look].y - position.y) < 0.35 && this.navigation.segment(position, trail.points[look], false))) look--
+        // Skip ahead along footprints in plain reach, unless he just got stuck (then one at a time, as walked).
+        let look = travel.strict ? travel.crumb : Math.min(trail.points.length - 1, travel.crumb + 6)
+        while (look > travel.crumb && !(Math.abs(trail.points[look].y - position.y) < 0.35 && this.navigation.segment(position, trail.points[look]))) look--
         travel.crumb = look
         return trail.points[travel.crumb]
       }
@@ -227,7 +230,11 @@ export class FollowEscort {
         } else if (!vitals?.waiting) {
           travel.cover = null
           const leader = this.leaderFor(position, vitals?.leader ?? 0)
-          if (leader && leader.feet.distanceTo(position) > FOLLOW.near) goal = this.nextPoint(position, leader, travel, elapsed)
+          if (leader && leader.feet.distanceTo(position) > FOLLOW.near) {
+            goal = this.nextPoint(position, leader, travel, elapsed)
+            // A footprint or a planned corner is walked right up to; only the player himself is kept at a step.
+            if (goal && goal !== leader.feet) near = 0.2
+          }
           if (leader && leader.feet.distanceTo(position) > FOLLOW.far) speed = FOLLOW.farSpeed
         }
         if (goal && goal.distanceTo(position) > near) {
@@ -238,8 +245,8 @@ export class FollowEscort {
             position.copy(stepped)
             moving = true; travel.stalled = 0
             cowering = false
-          } else if ((travel.stalled += elapsed) > 1.5) {
-            travel.stalled = 0; travel.crumb = -1; travel.detour = []; travel.cover = null
+          } else if ((travel.stalled += elapsed) > 0.6) {
+            travel.stalled = 0; travel.crumb = -1; travel.detour = []; travel.cover = null; travel.strict = 2.5
           }
         }
       }
