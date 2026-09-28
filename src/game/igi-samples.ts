@@ -25,6 +25,11 @@ export const IGI_SAMPLES: Record<string, { files: string[]; gain: number; pitch?
   // under automatic fire). The LMG is a deeper AK; the Magnum a short, hard crack.
   'shot-lmg': { files: files('ak47_single'), gain: 0.9, pitch: 0.84 },
   'shot-magnum': { files: files('svddrag_shot_1'), gain: 0.85, pitch: 1.18 },
+  // Dead Ink's newer guns: the burst pistol a quicker Glock, the PDW a thinner, faster MP5, the lever rifle a
+  // deeper, rounder crack than the sniper.
+  'shot-burst': { files: files('glock_shot_1', 'glock_shot_2'), gain: 0.68, pitch: 1.12 },
+  'shot-pdw': { files: files('mp5sd_single'), gain: 0.6, pitch: 1.22 },
+  'shot-lever': { files: files('svddrag_shot_1'), gain: 0.92, pitch: 0.9 },
   'enemy-shot-sniper': { files: files('svddrag_shot_1'), gain: 0.82 },
   impact: { files: series('bul_concrete_', 2), gain: 0.35 },
   'enemy-hit': { files: series('bul_flesh_', 5), gain: 0.75 },

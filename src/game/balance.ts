@@ -33,10 +33,10 @@ export const WEAPON_RULES = {
   // The PDW: a compact, fast SMG with a long magazine and a lighter round.
   pdw: { label: 'PDW', capacity: 40, reload: 2.3, interval: 0.07, range: 90, damage: 22, automatic: true, kick: 0.01, settle: 0.62 },
   // The lever-action rifle: eight heavy rounds through a tube, each one worked by the lever, and they go through two bodies.
-  lever: { label: 'Lever rifle', capacity: 8, reload: 2.8, interval: 0.62, range: 190, damage: 120, automatic: false, kick: 0.06, settle: 0.8 },
+  lever: { label: 'Lever rifle', capacity: 8, reload: 2.8, interval: 0.62, range: 190, damage: 98, automatic: false, kick: 0.06, settle: 0.8 },
   // The Ink Cannon, the Mystery Box's second wonder weapon: hold to charge, let go to lob a blob of ink
   // (zombies/ink-cannon.ts does the damage by bursting; `damage` is unused).
-  cannon: { label: 'Ink Cannon', capacity: 3, reload: 2.8, interval: 0.7, range: 90, damage: 60, automatic: false, kick: 0.1, settle: 0.85 },
+  cannon: { label: 'Ink Cannon', capacity: 3, reload: 2.8, interval: 0.7, range: 90, damage: 40, automatic: false, kick: 0.1, settle: 0.85 },
 } as const
 
 /** Guns that fire a burst per trigger pull: how many rounds, and the gap between them (seconds). */
