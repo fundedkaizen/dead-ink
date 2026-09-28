@@ -8,6 +8,7 @@ import type { HitZone } from './hit-reactions'
 import type { PlayerBulletHit, PlayerHitRegion } from './player-hit-reactions'
 import type { EnemyState, Vec3, WeaponItem, WeaponName } from './types'
 import type { Difficulty } from './campaign/types'
+import type { PingMessage } from './shared/pings'
 
 /**
  * The hostage rescue in co-op (rescue-coop.ts): the rules and the messages, kept apart from the game so they
@@ -37,6 +38,8 @@ export type RescueMessage =
   | { t: 'sync'; m: MissionMirror; d: string; pickups: WeaponItem[]; begun: 0 | 1; mn?: { id: string; d: Difficulty; s: number } }
   /** The host loaded a campaign mission: load the same one, from the same seed. */
   | { t: 'mission'; id: string; d: Difficulty; s: number }
+  /** A ping (either way; the host passes a guest's on to the others). */
+  | PingMessage
   | { t: 'tick'; g: GuardRow[]; m: MissionMirror; d: string; players: PlayerState[]; h: HostageMotion[] }
   /** A guard struck: the reaction it played (`c`), lethal, the round's direction, its shotgun travel, zone, point, weapon, bone. */
   | { t: 'react'; g: number; c: string; l: 0 | 1; d: V; tr: number; z: HitZone; p: V; w?: WeaponName; b?: string }

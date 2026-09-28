@@ -25,6 +25,8 @@ import { CampaignTools } from './campaign/tools'
 import { CampaignVisuals } from './campaign/visuals'
 import { CampaignHud } from './campaign/hud'
 import { campaignMenuCopy } from './campaign/menu'
+import { createRescuePings } from './campaign/pings'
+import type { Pings } from './shared/pings'
 import { footstepRadius } from './campaign/stealth'
 import type { Difficulty } from './campaign/types'
 import { SecuritySystem } from './security'
@@ -56,6 +58,9 @@ export class MissionRuntime {
   tools?: CampaignTools
   visuals?: CampaignVisuals
   campaignHud?: CampaignHud
+  /** Pings (shared/pings.ts): mark a guard, a camera, a door or the hostage for the team. */
+  pings?: Pings
+  private stopPings: () => void = () => {}
   ready = false
   readonly initialized: Promise<void>
   deaths = 0
@@ -172,6 +177,8 @@ export class MissionRuntime {
     this.initialized = this.initialize()
     this.coop = new RescueCoop(this, scene, camera.perspective, document.querySelector<HTMLElement>('#mission-hud')!)
     if (lobby) this.coop.buildLobby(lobby)
+    this.pings = createRescuePings(this, document.querySelector<HTMLElement>('#mission-hud')!)
+    this.stopPings = this.pings.bind(document.querySelector<HTMLElement>('#world')!, () => this.isActive() && !this.tools?.flying)
   }
 
   private async initialize() {
@@ -227,7 +234,7 @@ export class MissionRuntime {
     await this.campaign.load(id, difficulty, seed)
     this.deaths = 0; this.gunfireUntil = 0
     this.settleMission()
-    this.tools?.reset(); this.visuals?.reset()
+    this.tools?.reset(); this.visuals?.reset(); this.pings?.clear()
     this.ready = true
     this.hud.loading(false); this.hud.ready()
     this.coop?.missionLoaded()
@@ -481,7 +488,7 @@ export class MissionRuntime {
     this.safePosition.copy(this.player.body.position); this.safeQuaternion.copy(this.camera.perspective.quaternion)
     this.stepTime=0; this.interactionTime=0; this.hitFlash=0; this.lastCaptionAt=-100
     this.coop?.clear()
-    this.tools?.reset(); this.visuals?.reset()
+    this.tools?.reset(); this.visuals?.reset(); this.pings?.clear()
     this.bulletTrails.clear(); this.impacts.clear(); this.hud.reset(); this.security.reset(); this.syncWorld(true); this.invalidate()
   }
 
@@ -721,6 +728,7 @@ export class MissionRuntime {
     this.hud.setScoped(this.weapons.scoped, this.weapons.scopeMagnification)
     this.visuals?.update(dt)
     this.campaignHud?.update(dt)
+    this.pings?.update(dt)
     if(active || deathPlaying) {
       this.bulletTrails.update(dt)
       this.hitFlash-=dt
@@ -761,5 +769,5 @@ export class MissionRuntime {
   /** Where the last shot near the hostages came from (he hides from it). */
   private lastThreat: THREE.Vector3 | null = null
   private stopBlood: () => void = () => {}
-  dispose() { this.campaign?.dispose(); this.tools?.dispose(); this.visuals?.dispose(); this.campaignHud?.dispose(); this.coop?.dispose(); this.stopBlood(); this.escape.reset(this.camera.perspective);this.escapeDust.dispose();this.playerHits.clear();this.disposed=true;this.abort.abort();this.bulletTrails.dispose();this.escort.dispose();this.weapons.dispose();this.ai.dispose();this.blood.dispose();this.impacts.dispose();this.audio.dispose();this.hud.dispose();this.player.movementLocked=false;this.player.onPlayingChange=()=>{};this.player.lookSensitivity=()=>1;this.player.actions.extraTargets=()=>[];this.player.actions.onAction=()=>{} }
+  dispose() { this.stopPings(); this.pings?.dispose(); this.campaign?.dispose(); this.tools?.dispose(); this.visuals?.dispose(); this.campaignHud?.dispose(); this.coop?.dispose(); this.stopBlood(); this.escape.reset(this.camera.perspective);this.escapeDust.dispose();this.playerHits.clear();this.disposed=true;this.abort.abort();this.bulletTrails.dispose();this.escort.dispose();this.weapons.dispose();this.ai.dispose();this.blood.dispose();this.impacts.dispose();this.audio.dispose();this.hud.dispose();this.player.movementLocked=false;this.player.onPlayingChange=()=>{};this.player.lookSensitivity=()=>1;this.player.actions.extraTargets=()=>[];this.player.actions.onAction=()=>{} }
 }

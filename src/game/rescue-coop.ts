@@ -622,6 +622,10 @@ export class RescueCoop {
         r.state.health = 100
         r.hud.notify('Field dressing used. Health restored.', 7)
         break
+      case 'ping':
+        r.pings?.receive(m)
+        if (this.link.role === 'host') this.link.send(m, { skip: from })
+        break
       case 'mission':
         if (r.state.run?.mission !== m.id || r.state.run?.difficulty !== m.d || r.state.run?.seed !== m.s) void r.loadMission(m.id, m.d, m.s).then(() => this.placeGuest(true))
         break
