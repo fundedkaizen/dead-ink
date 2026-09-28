@@ -182,6 +182,8 @@ export type Zombie = {
   /** Parts lost to gore (the legs are `crawler`), and whether a blast blew it apart. */
   lost: { head: boolean; L: boolean; R: boolean }
   gibbed: boolean
+  /** Walking in something that holds it back (the Ink Deluge's sticky pool): its speed is multiplied by this. Unset is 1. */
+  slow?: number
   /** Coming in through a boarded window (windows.ts), until it is inside. */
   window: WindowJob | null
 }
@@ -418,6 +420,7 @@ export class ZombieDirector {
   private wake(zombie: Zombie, at: THREE.Vector3, health: number, gait: ZombieGait, facing: number, rise: boolean, boss: boolean, blot: boolean) {
     zombie.position.copy(at)
     zombie.yaw = facing
+    zombie.slow = 1
     zombie.moving = false
     zombie.health = zombie.maxHealth = health
     zombie.gait = gait
@@ -643,7 +646,7 @@ export class ZombieDirector {
         if (flags & 1 && !zombie.crawler) this.makeCrawler(zombie, away)
         if (flags & 16) this.loseArm(zombie, 'L', away)
         if (flags & 32) this.loseArm(zombie, 'R', away)
-        if (flags & 64 && !zombie.gibbed) this.gib(zombie, away)
+        if (flags & 64 && !zombie.gibbed) { if (this.melting(zombie)) this.melt(zombie); else this.gib(zombie, away) }
         else if (flags & 8 && !zombie.lost.head) this.popHead(zombie, away)
         if (state === 2) { zombie.position.copy(goal); this.kill(zombie) }
       }
@@ -1773,6 +1776,34 @@ export class ZombieDirector {
     this.context.emit({ kind: 'gib', position: centre, radius: 50 })
   }
 
+  /**
+   * The Ink Cannon's kill: the body does not fall, it melts into a splashing puddle of ink where it stood.
+   * Marks it gibbed (a co-op guest sees the same through the snapshot) and hides it.
+   */
+  melt(zombie: Zombie) {
+    const { actor } = zombie, floor = this.groundUnder(zombie)
+    actor.root.updateMatrixWorld(true)
+    const centre = actor.rig.bones.chest.getWorldPosition(new THREE.Vector3())
+    this.gore.pop(centre, 1.5, 0.45)
+    this.gore.spray(centre, UP, 26, floor, 3.6)
+    this.gore.fling(centre, UP, 6, floor, 1.3, 2.4, 1.4)
+    this.gore.splat(zombie.position.clone().setY(floor), 2.1)
+    zombie.gibbed = true
+    zombie.lost.head = zombie.lost.L = zombie.lost.R = true
+    actor.root.visible = false
+    this.context.emit({ kind: 'ink-melt', position: centre, radius: 40 })
+  }
+
+  /** Where Ink Cannon blobs just burst (co-op guest): a body gibbed there melts instead, as it did on the host. */
+  private melts: { at: THREE.Vector3; radius: number; until: number }[] = []
+  markMelt(at: THREE.Vector3, radius: number) {
+    this.melts = this.melts.filter(m => m.until > this.time)
+    this.melts.push({ at: at.clone(), radius: radius + 0.6, until: this.time + 1.2 })
+  }
+  private melting(zombie: Zombie) {
+    return this.melts.some(m => m.until > this.time && m.at.distanceTo(zombie.position) <= m.radius + 1.1)
+  }
+
   /** Zombies near `centre` stagger and stop swiping for a moment (Second Draft getting you back up). */
   shove(centre: THREE.Vector3, radius: number, seconds: number) {
     for (const zombie of this.zombies) {
@@ -2191,7 +2222,7 @@ function attackOf(zombie: Zombie) {
 }
 
 function speedOf(zombie: Zombie) {
-  return zombie.boss ? bruteSpeed(zombie) : zombie.crawler ? CRAWL.speed : zombie.blot ? BLOT.speed : ZOMBIE_SPEED[zombie.gait]
+  return (zombie.boss ? bruteSpeed(zombie) : zombie.crawler ? CRAWL.speed : zombie.blot ? BLOT.speed : ZOMBIE_SPEED[zombie.gait]) * (zombie.slow ?? 1)
 }
 
 /**

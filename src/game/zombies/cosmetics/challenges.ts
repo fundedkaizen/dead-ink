@@ -11,11 +11,12 @@ import type { ChallengeCamoId } from './catalogue'
  * The goals are meant to take many games. A solo game to round 15 is about 430 kills across two or three
  * guns, to round 20 about 690; headshots are roughly a quarter of kills for a careful player.
  */
-export const CHALLENGE_WEAPONS: readonly WeaponName[] = ['pistol', 'smg', 'ak', 'shotgun', 'sniper', 'magnum', 'lmg']
+export const CHALLENGE_WEAPONS: readonly WeaponName[] = ['pistol', 'smg', 'ak', 'shotgun', 'sniper', 'magnum', 'lmg', 'burst', 'pdw', 'lever']
 export const WEAPON_LABELS: Record<WeaponName, string> = {
   pistol: 'Pistol', smg: 'SMG', ak: 'AK', shotgun: 'Shotgun', sniper: 'Sniper', magnum: 'Magnum', lmg: 'LMG',
-  // The box's launcher has no camo challenges (its kills are its blast's, like a grenade's).
-  rocket: 'Ink Rocket',
+  burst: 'Burst pistol', pdw: 'PDW', lever: 'Lever rifle',
+  // The box's launcher and the Ink Cannon have no camo challenges (their kills are their blast's, like a grenade's).
+  rocket: 'Ink Rocket', cannon: 'Ink Cannon',
 }
 
 /** What a gun's tier counts. */

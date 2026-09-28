@@ -18,6 +18,7 @@ import { PlayerDeathSequence } from '../player-death'
 import type { MenuCopy } from '../menu'
 import type { MissionWorld, Shot, SoundEvent, WeaponItem, WeaponName, WeaponSnapshot } from '../types'
 import { HitMarkers } from '../shared/hitmarkers'
+import { createPings, type PingTarget, type Pings } from '../shared/pings'
 import { DamageIndicator } from '../shared/damage-indicator'
 import { Hotbar } from '../shared/hotbar'
 import { seeded, weighted, type Random } from '../shared/random'
@@ -34,6 +35,8 @@ import { ZombieHud } from './hud'
 import { MuzzleSparks, RiseMarks, Shockwaves } from './effects'
 import { GRENADE, Grenades } from './grenades'
 import { INK_RAY, InkRayBolts } from './wonder'
+// The Ink Cannon, the second wonder weapon (ink-cannon.ts).
+import { ChargeMeter, INK_CANNON, InkBlobs, InkPools, cannonDamage, type CannonBurst } from './ink-cannon'
 // Dead Ink weapons: the Ink Rocket and the Deadline's explosive rounds.
 import { InkRockets, ROCKET, rocketLoad, type RocketBurst } from './rockets'
 import { DEADLINE_ROUND, roundDamage, selfBlast, type BlastKind } from './blasts'
@@ -91,7 +94,7 @@ type Teammate = { id: number; state: PlayerState | null; avatar: PartnerAvatar; 
 function packCost(item: WeaponItem) {
   const level = item.packed ? item.packLevel ?? 1 : 0
   // The Ink Ray upgrades once, to the X2, as the Ray Gun does in Call of Duty.
-  if (item.special === 'rayGun') return level ? null : PACK.costs[0]
+  if (item.special === 'rayGun' || item.special === 'inkCannon') return level ? null : PACK.costs[0]
   return level >= PACK.costs.length ? null : PACK.costs[level]
 }
 const BOX_PLACES: readonly [number, number, number][] = [[-60, 0, 45], [0, 0, 40], [145, 0, 5]]
@@ -109,6 +112,15 @@ const INK_BURST = [{ chance: 0.15, radius: 3 }, { chance: 0.3, radius: 3.8 }, { 
 const LATE_WALL_WEAPONS: { name: 'magnum' | 'lmg'; near: [number, number, number] }[] = [
   { name: 'magnum', near: [-57, 0.7, 64] },
   { name: 'lmg', near: [120, 0, 0] },
+]
+/**
+ * The newer wall guns, placed last so every older station keeps its spot: the burst pistol near the start,
+ * the PDW in the Warehouse Yard and the lever rifle out in the Rail Yard.
+ */
+const NEW_WALL_WEAPONS: { name: 'burst' | 'pdw' | 'lever'; near: [number, number, number] }[] = [
+  { name: 'burst', near: [-38, 0, -30] },
+  { name: 'pdw', near: [10, 0, 5] },
+  { name: 'lever', near: [57, 0, -10] },
 ]
 
 /** The Ink Doll wall is in the warehouse, the first zone past the start worth fighting for. */
@@ -191,6 +203,9 @@ export class ZombiesRuntime {
   readonly hits: HitMarkers
   readonly indicator: DamageIndicator
   readonly hotbar: Hotbar
+  /** Pings (../shared/pings.ts): middle mouse, Z, the pad's D-pad right, or the phone's ping button. */
+  readonly pings: Pings
+  private unbindPings: () => void
   readonly zombieHud: ZombieHud
   readonly riseMarks: RiseMarks
   readonly sparks: MuzzleSparks
@@ -199,6 +214,10 @@ export class ZombiesRuntime {
   readonly bolts: InkRayBolts
   /** The Ink Rocket's rockets in flight (rockets.ts). */
   readonly rockets: InkRockets
+  /** The Ink Cannon's blobs in flight, the Ink Deluge's sticky pools, and the charge meter under the crosshair. */
+  readonly blobs: InkBlobs
+  readonly inkPools: InkPools
+  private chargeMeter: ChargeMeter
   /** Frags carried, and seconds before another can be thrown. */
   grenadeCount: number = GRENADE.start
   private grenadeCooldown = 0
@@ -390,6 +409,8 @@ export class ZombiesRuntime {
     this.dolls = new Grenades(scene, player.world, inkDoll, { fuse: DECOY.lure + 1, upright: true })
     this.bolts = new InkRayBolts(scene, player.world, (origin, direction, max) => this.director?.aimDistance(origin, direction, max) ?? Infinity)
     this.rockets = new InkRockets(scene, player.world, (origin, direction, max) => this.director?.aimDistance(origin, direction, max) ?? max)
+    this.blobs = new InkBlobs(scene, player.world, (origin, direction, max) => this.director?.aimDistance(origin, direction, max) ?? max)
+    this.inkPools = new InkPools(scene)
     this.powerups = new PowerupDrops(scene)
     this.bottle = new PerkBottle(camera.perspective)
     this.syringe = new ReviveSyringe(camera.perspective)
@@ -411,6 +432,13 @@ export class ZombiesRuntime {
     this.hits = new HitMarkers(hudRoot)
     this.powerMarker = new WorldMarker(hudRoot, POWER_ICON, 'The power switch')
     this.indicator = new DamageIndicator(hudRoot)
+    this.chargeMeter = new ChargeMeter(hudRoot)
+    this.pings = createPings({ camera: camera.perspective, parent: hudRoot, me: () => this.coop.id,
+      colorOf: id => PLAYER_CSS[id] ?? PLAYER_CSS[0], nameOf: id => this.mateName(id),
+      pick: (origin, direction) => this.pingTarget(origin, direction),
+      resolve: id => { const z = this.director?.zombies.find(zombie => zombie.id === id && zombie.state === 'chase'); return z ? z.position.clone().setY(z.position.y + (z.boss ? BOSS.scale * 1.95 : 1.95)) : null },
+      send: message => this.coop.send(message) })
+    this.unbindPings = this.pings.bind(document.querySelector<HTMLElement>('#world')!, () => this.isActive())
     // One more cell than you start with, for Spare Nib's third gun; the hotbar hides cells you do not have.
     this.hotbar = new Hotbar(hudRoot, ZOMBIE_SLOTS + 1)
     this.addDifficultySetting()
@@ -602,6 +630,15 @@ export class ZombiesRuntime {
       taken.push(spot.stand)
       this.boxSpots.push(spot)
     }
+    for (const { name, near } of NEW_WALL_WEAPONS) {
+      graph.flow([new THREE.Vector3(...near)])
+      const [spot] = [30, 60].map(far => findWallSpots(graph, this.player.world, this.random, { count: 1, near: 0, far, spacing: 7, avoid: taken })[0]).filter(Boolean)
+      if (!spot) { console.warn(`Dead Ink: no wall for the ${name} near ${near[0]}, ${near[2]}`); continue }
+      taken.push(spot.stand)
+      const buy = new WallBuy(spot, name, PRICES.wall[name])
+      this.wallBuys.push(buy)
+      this.scene.add(buy.root)
+    }
   }
 
   private startGame() {
@@ -622,7 +659,7 @@ export class ZombiesRuntime {
     this.brute = null; this.bruteTimer = -1
     for (const skull of this.skulls) { skull.found = false; skull.object.userData.found = false }
     this.music.stopStings()
-    this.grenades.clear(); this.bolts.clear(); this.rockets.clear(); this.grenadeCount = GRENADE.start; this.grenadeCooldown = 0
+    this.grenades.clear(); this.bolts.clear(); this.rockets.clear(); this.blobs.clear(); this.inkPools.clear(); this.grenadeCount = GRENADE.start; this.grenadeCooldown = 0
     this.dolls.clear(); this.dollCount = 0; this.dollCooldown = 0; this.pendingThrows = []
     if (this.pack && this.pack.state !== 'idle') this.pack.take()
     this.dropper = new PowerupDropper(this.random)
@@ -642,6 +679,7 @@ export class ZombiesRuntime {
     this.downWeapons = null; this.player.crawling = false; this.player.actions.disabled = false; this.syringe.stop(); this.zombieHud.lastStand(null)
     this.lastTick = null
     this.partnerLures = []
+    this.pings.clear()
     if (this.coop.role === 'host') { this.sendSync(); this.coop.send({ t: 'start' }) }
   }
 
@@ -850,7 +888,7 @@ export class ZombiesRuntime {
     }
     const box = this.box
     if (box && box.state !== 'spinning' && box.state !== 'leaving') {
-      const label = box.state === 'offering' && box.offer ? box.offer.special ? 'Take the Ink Ray' : `Take ${box.offer.rarity === 'common' ? '' : `${box.offer.rarity[0].toUpperCase()}${box.offer.rarity.slice(1)} `}${WEAPON_RULES[box.offer.name].label}`
+      const label = box.state === 'offering' && box.offer ? box.offer.special ? box.offer.special === 'inkCannon' ? 'Take the Ink Cannon' : 'Take the Ink Ray' : `Take ${box.offer.rarity === 'common' ? '' : `${box.offer.rarity[0].toUpperCase()}${box.offer.rarity.slice(1)} `}${WEAPON_RULES[box.offer.name].label}`
         : this.state.points >= PRICES.box ? `Mystery Box · ${PRICES.box}` : `Mystery Box · ${PRICES.box} · need ${PRICES.box - this.state.points} more`
       targets.push({ object: box.root, point: box.point, kind: 'mission', descending: false, label, use: () => this.useBox(box) })
     }
@@ -1540,9 +1578,11 @@ export class ZombiesRuntime {
         const o = toVector(m.o), e = toVector(m.e), ray = m.w === 'raygun'
         // Dead Ink weapons: a teammate's Ink Rocket is seen flying, not as a tracer (its burst comes as a blast).
         if (m.w === 'rocket') this.rockets.fire(o, e.clone().sub(o), rocketLoad({ name: 'rocket', packed: !!m.pk }), true)
+        // A teammate's Ink Cannon blob flies here too, for the look (its burst comes as a blast).
+        else if (m.w === 'cannon') this.blobs.fire(o, e.clone().sub(o), m.c ?? 0, !!m.pk, true)
         else this.bulletTrails.emit(o, e, ray ? 'pistol' : m.w as WeaponName, undefined, undefined, m.pk ? PACKED_TRACER : ray ? RAY_TRACER : undefined)
         this.audio.play({ kind: ray ? 'shot-raygun' : `shot-${m.w}`, position: o, radius: 55, packed: m.pk })
-        if (this.coop.role === 'host' && m.from !== undefined) this.coop.send({ t: 'fire', o: m.o, e: m.e, w: m.w, pk: m.pk }, { skip: m.from })
+        if (this.coop.role === 'host' && m.from !== undefined) this.coop.send({ t: 'fire', o: m.o, e: m.e, w: m.w, pk: m.pk, c: m.c }, { skip: m.from })
         break
       }
       case 'soul': {
@@ -1551,6 +1591,13 @@ export class ZombiesRuntime {
         break
       }
       case 'down': { const mate = this.mates.get(from); if (mate?.state) mate.state.dn = m.dn; break }
+      case 'ping': {
+        // A guest's ping reaches the host marked with who sent it; the host passes it on to the other guests.
+        const { from: sender, ...ping } = m
+        if (this.coop.role === 'host' && sender !== undefined) { ping.by = sender; this.coop.send(ping, { skip: sender }) }
+        this.pings.receive(ping)
+        break
+      }
     }
   }
 
@@ -1604,8 +1651,10 @@ export class ZombiesRuntime {
     const director = this.director
     if (!director) return
     let points = 0, kills = 0
+    const cannon = kind === 'cannon' || kind === 'deluge'
     for (const hit of director.blast(at, radius, damage)) {
       points += pointsForHit({ lethal: hit.lethal, explosive: true })
+      if (hit.lethal && cannon) this.meltBody(hit.zombie)
       if (hit.lethal) { kills++; this.partnerKills++; this.killed(hit.zombie.position, hit.zombie, null, false, from) }
     }
     this.blastLook(at, radius, kind)
@@ -1710,6 +1759,49 @@ export class ZombiesRuntime {
     if (!old) return
     this.player.world.removeObject(old)
     this.solids.delete(owner)
+  }
+
+  /**
+   * What a ping points at, along the view: a zombie under the crosshair, else the station, part or power-up
+   * the view passes closest to (within a few degrees, and not far behind the first wall), else the spot where
+   * the view meets the ground or a wall.
+   */
+  private pingTarget(origin: THREE.Vector3, direction: THREE.Vector3): PingTarget | null {
+    const dir = direction.clone().normalize()
+    const wall = this.player.world.raySurface(origin, dir, 120)?.distance ?? 120
+    // A zombie: the nearest living body close to the line of sight, in front of the wall.
+    let enemy: Zombie | null = null, enemyAlong = Infinity
+    for (const zombie of this.director?.zombies ?? []) {
+      if (zombie.state !== 'chase') continue
+      const chest = zombie.position.clone().setY(zombie.position.y + 1.1 * (zombie.boss ? BOSS.scale : 1))
+      const to = chest.clone().sub(origin), along = to.dot(dir)
+      if (along <= 0.5 || along > wall + 0.6) continue
+      const off = to.addScaledVector(dir, -along).length()
+      if (off < (zombie.boss ? 1.6 : 0.85) + along * 0.012 && along < enemyAlong) { enemy = zombie; enemyAlong = along }
+    }
+    if (enemy) return { kind: 'enemy', id: enemy.id, label: enemy.brute?.editor ? 'The Editor' : enemy.boss ? 'The Brute' : 'Zombie',
+      position: enemy.position.clone().setY(enemy.position.y + (enemy.boss ? BOSS.scale * 1.95 : 1.95)) }
+    // Things you can use or pick up.
+    const items: { point: THREE.Vector3; label: string }[] = []
+    for (const buy of this.wallBuys) items.push({ point: buy.point, label: WEAPON_RULES[buy.weapon].label })
+    if (this.box) items.push({ point: this.box.point, label: 'Mystery Box' })
+    for (const machine of this.perkMachines) items.push({ point: machine.point, label: PERKS[machine.kind].name })
+    if (this.pack && this.packBuilt) items.push({ point: this.pack.point, label: 'Pack-a-Punch' })
+    if (this.dollBuy) items.push({ point: this.dollBuy.point, label: 'Ink Dolls' })
+    if (this.powerSwitch && this.powerSwitch.state !== 'on') items.push({ point: this.powerSwitch.point, label: 'Power switch' })
+    for (const part of this.parts) if (part.root.visible) items.push({ point: part.point, label: PARTS[part.id].label })
+    for (const drop of this.powerups.active) items.push({ point: drop.position.clone().setY(drop.position.y + 0.8), label: POWERUP_INFO[drop.kind].label })
+    for (const gate of this.zones?.gates ?? []) if (gate.state === 'closed') items.push({ point: this.zones!.nearestPoint(gate, origin).setY(origin.y - 0.4), label: `Door to ${gate.spec.zone}` })
+    let item: { point: THREE.Vector3; label: string } | null = null, best = Infinity
+    for (const candidate of items) {
+      const to = candidate.point.clone().sub(origin), along = to.dot(dir)
+      if (along <= 0.3 || along > Math.min(80, wall + 2.5)) continue
+      const angle = to.angleTo(dir)
+      if (angle < THREE.MathUtils.degToRad(5) + 0.5 / along && angle < best) { best = angle; item = candidate }
+    }
+    if (item) return { kind: 'item', label: item.label, position: item.point.clone() }
+    if (wall >= 120) return null
+    return { kind: 'spot', position: origin.clone().addScaledVector(dir, wall - 0.05) }
   }
 
   /** A challenge done: a short toast with what it unlocked. */
@@ -1921,6 +2013,7 @@ export class ZombiesRuntime {
 
   /** How a blast shows: a frag's burst (the Ink Doll's and the Ink Ray's too, as before), a rocket's, a Deadline round's pop. */
   private blastLook(at: THREE.Vector3, radius: number, kind: BlastKind = 'grenade') {
+    if (kind === 'cannon' || kind === 'deluge') { this.cannonLook(at, radius, kind === 'deluge'); return }
     this.explosions.emit(at, kind === 'round' ? DEADLINE_ROUND.look : radius)
     this.emit({ kind: kind === 'rocket' ? 'rocket-boom' : kind === 'round' ? 'round-burst' : 'grenade-blast', position: at.clone(), radius: kind === 'rocket' ? 160 : 120 })
   }
@@ -2077,7 +2170,8 @@ export class ZombiesRuntime {
       if (this.paired) this.coop.send(this.isGuest ? { t: 'use', what: 'box-take' } : { t: 'box', a: 'take' })
       if (!offer) return false
       const item = freshWeapon(`box-${offer.name}-${Math.floor(this.state.elapsed * 1000)}`, offer.name, offer.rarity)
-      this.weapons.give(offer.special ? { ...item, special: offer.special, magazine: INK_RAY.magazine, reserve: INK_RAY.reserve } : item)
+      this.weapons.give(offer.special === 'rayGun' ? { ...item, special: offer.special, magazine: INK_RAY.magazine, reserve: INK_RAY.reserve }
+        : offer.special ? { ...item, special: offer.special } : item)
       this.invalidate()
       return true
     }
@@ -2183,7 +2277,7 @@ export class ZombiesRuntime {
       }
     }
     if (zombie && zombie === this.editor) { this.finishQuest(position); return }
-    if (weapon?.packed) this.inkBurst(position, weapon.packLevel ?? 1)
+    if (weapon?.packed && !weapon.special) this.inkBurst(position, weapon.packLevel ?? 1)
     if (zombie && zombie === this.brute) {
       if (!byPartner) this.toastUnlocks(recordBruteKill())
       this.brute = null
@@ -2293,8 +2387,10 @@ export class ZombiesRuntime {
     if (this.paired && !shot.pelletIndex) {
       const end = shot.origin.clone().addScaledVector(shot.direction, Math.min(distance, 60))
       this.coop.send({ t: 'fire', o: vec(shot.origin), e: vec(end), w: held?.special === 'rayGun' ? 'raygun' : shot.weapon ?? held?.name ?? 'pistol',
-        pk: held?.packed ? held.packLevel ?? 1 : 0 })
+        pk: held?.packed ? held.packLevel ?? 1 : 0, ...(held?.special === 'inkCannon' ? { c: Math.round((shot.charge ?? 0) * 100) / 100 } : {}) })
     }
+    // The Ink Cannon: a blob of ink lobbed in an arc; it bursts where it lands (ink-cannon.ts).
+    if (held?.special === 'inkCannon') { this.blobs.fire(shot.origin, shot.direction, shot.charge ?? 0, !!held.packed); return }
     if (held?.special === 'rayGun') {
       // A bolt, not a bullet: it flies, and bursts where it lands.
       this.bolts.fire(shot.origin, shot.direction, !!held.packed)
@@ -2360,6 +2456,54 @@ export class ZombiesRuntime {
       if (hit.lethal) { this.state.kills++; this.killed(hit.zombie.position, hit.zombie) }
     }
     this.blastLook(at, radius, kind)
+  }
+
+  /**
+   * An Ink Cannon blob bursts: everything ordinary in it melts into a puddle of ink, the Brute takes a heavy
+   * blow, you get splashed if you stood too close, and the Ink Deluge leaves a sticky pool. A teammate's blob
+   * (`remote`) is only looked at here: its blast reaches the host as theirs.
+   */
+  private cannonBurst(burst: CannonBurst) {
+    if (burst.remote) return
+    const director = this.director
+    const kind: BlastKind = burst.packed ? 'deluge' : 'cannon'
+    const eye = this.camera.perspective.getWorldPosition(new THREE.Vector3())
+    const distance = eye.distanceTo(burst.at)
+    if (distance < INK_CANNON.selfRadius) this.damage(Math.round(INK_CANNON.selfDamage * (1 - distance / INK_CANNON.selfRadius)), 'zombie', burst.at.clone())
+    const damage = cannonDamage(zombieHealth(this.rounds.round) * DIFFICULTY[this.difficulty].health, burst.charge, burst.packed)
+    // A guest's blast goes to the host, which does the damage; the host's is drawn on every guest's screen.
+    if (this.paired) this.coop.send(this.isGuest ? { t: 'blast', p: vec(burst.at), r: burst.radius, dmg: damage, k: kind } : { t: 'boom', p: vec(burst.at), r: burst.radius, k: kind })
+    this.cannonLook(burst.at, burst.radius, burst.packed, false)
+    if (this.isGuest || !director) return
+    const cannon = [...this.weapons.slots, ...(this.heldWeapons?.slots ?? [])].find(item => item?.special === 'inkCannon') ?? null
+    for (const hit of director.blast(burst.at, burst.radius, damage)) {
+      this.hitFlash = 0.15
+      this.award(pointsForHit({ lethal: hit.lethal, explosive: true }))
+      this.hits.hit(hit.reaction.point, hit.dealt, hit.zombie.id, false, hit.lethal)
+      if (hit.lethal) { this.meltBody(hit.zombie); this.state.kills++; this.killed(hit.zombie.position, hit.zombie, cannon) }
+    }
+  }
+
+  /** A body the Ink Cannon killed melts into ink where it stood (the bosses and the Inkwings fall as they do). */
+  private meltBody(zombie: Zombie) {
+    if (zombie.boss || this.director?.flyers.owns(zombie)) return
+    this.director?.melt(zombie)
+  }
+
+  /**
+   * How an Ink Cannon burst looks and sounds, here and on every other screen: the ink ring and drops, a
+   * shock ring, the wet splash; bodies caught in it melt (on a guest, as they come through the snapshot);
+   * the Deluge's pool on the floor. `splash`: draw the ring (a local blob already drew its own).
+   */
+  private cannonLook(at: THREE.Vector3, radius: number, packed: boolean, splash = true) {
+    if (splash) this.blobs.splashAt(at, packed, radius)
+    this.director?.markMelt(at, radius)
+    this.shockwaves.emit(at.clone().setY(at.y - 0.3), radius)
+    if (packed) {
+      const floor = this.player.world.floor(at.clone().setY(at.y + 0.6), 0.2, 3)
+      this.inkPools.add(at, radius * INK_CANNON.pool.share, INK_CANNON.pool.seconds, Number.isFinite(floor) ? floor : at.y)
+    }
+    this.emit({ kind: 'cannon-burst', position: at.clone(), radius: 90, packed: packed ? 1 : 0 })
   }
 
   /** Throw a frag the way you are looking, a little up, carrying your own speed with it. */
@@ -2625,6 +2769,8 @@ export class ZombiesRuntime {
   // ---------------------------------------------------------------- frame
 
   private emit(event: SoundEvent) {
+    // A body the Ink Cannon melted (here, or on a guest through the snapshot) leaves a puddle of its ink.
+    if (event.kind === 'ink-melt' && event.position) this.blobs.puddle(event.position.clone().setY(event.position.y - 1))
     if (this.death.active && !['player-death', 'player-fall'].includes(event.kind)) return
     const eye = this.camera.perspective.position
     const distance = event.position ? eye.distanceTo(event.position) : 0
@@ -2836,6 +2982,10 @@ export class ZombiesRuntime {
       for (const at of this.dolls.update(dt)) this.dollBlast(at)
       for (const burst of this.bolts.update(dt)) this.boltBurst(burst.at, burst.packed)
       for (const burst of this.rockets.update(dt)) this.rocketBurst(burst)
+      for (const burst of this.blobs.update(dt)) this.cannonBurst(burst)
+      this.inkPools.update(dt)
+      // The Ink Deluge's pools hold zombies to a crawl (the host moves the zombies).
+      if (!this.isGuest) for (const zombie of this.director.zombies) if (zombie.state === 'chase') zombie.slow = this.inkPools.slowAt(zombie.position)
       this.tickPowerups(dt)
       const speed = Math.hypot(body.velocity.x, body.velocity.z)
       if (speed > 0.5 && body.grounded || this.player.actions.climbing) {
@@ -2889,6 +3039,8 @@ export class ZombiesRuntime {
     this.hits.update(running, this.camera.perspective, window.innerWidth, window.innerHeight)
     this.indicator.update(running, this.camera.perspective.position, yaw)
     this.hotbar.update(this.weapons.slots, this.weapons.selectedSlot)
+    this.pings.update(dt)
+    this.chargeMeter.update(this.player.playing && held?.special === 'inkCannon' ? this.weapons.chargeLevel : null, !!held?.packed)
     this.zombieHud.update(running, this.state.round, this.state.points)
     const boss = this.liveBoss()
     this.zombieHud.boss(boss ? boss.health / boss.maxHealth : null, boss?.brute?.editor ? 'THE EDITOR' : 'THE BRUTE', !!boss?.brute?.enraged)
@@ -2926,9 +3078,9 @@ export class ZombiesRuntime {
     for (const machine of this.perkMachines) machine.dispose()
     this.pack?.dispose(); this.bottle.dispose(); this.packedLook.dispose()
     this.director?.dispose()
-    this.hits.dispose(); this.indicator.dispose(); this.hotbar.dispose(); this.zombieHud.dispose()
+    this.hits.dispose(); this.indicator.dispose(); this.hotbar.dispose(); this.unbindPings(); this.pings.dispose(); this.zombieHud.dispose()
     this.minimap?.dispose()
-    this.uninstallCosmetics(); this.lowHealth.dispose(); this.stopSettings(); this.bulletTrails.dispose(); this.weapons.dispose(); this.blood.dispose(); this.impacts.dispose(); this.riseMarks.dispose(); this.sparks.dispose(); this.shockwaves.dispose(); this.explosions.dispose(); this.nukeCloud.dispose(); this.undress?.(); this.grenades.dispose(); this.dolls.dispose(); this.dollBuy?.dispose(); this.bolts.dispose(); this.rockets.dispose(); this.powerups.dispose()
+    this.uninstallCosmetics(); this.lowHealth.dispose(); this.stopSettings(); this.bulletTrails.dispose(); this.weapons.dispose(); this.blood.dispose(); this.impacts.dispose(); this.riseMarks.dispose(); this.sparks.dispose(); this.shockwaves.dispose(); this.explosions.dispose(); this.nukeCloud.dispose(); this.undress?.(); this.grenades.dispose(); this.dolls.dispose(); this.dollBuy?.dispose(); this.bolts.dispose(); this.rockets.dispose(); this.blobs.dispose(); this.inkPools.dispose(); this.chargeMeter.dispose(); this.powerups.dispose()
     for (const skull of this.skulls) skull.object.removeFromParent()
     delete document.body.dataset.deadInkStorm
     delete document.body.dataset.deadInkOneHit

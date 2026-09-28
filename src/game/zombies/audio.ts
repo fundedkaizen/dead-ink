@@ -44,14 +44,14 @@ export class DeadInkAudio extends MissionAudio {
     const handled = ['zombie-groan', 'zombie-scream', 'zombie-snarl', 'zombie-swipe', 'zombie-rise', 'powerup-drop', 'powerup-grab', 'nuke', 'round-start', 'round-end',
       'perk-drink', 'perk-jingle', 'pack-work', 'pack-ready', 'boss-roar', 'boss-growl', 'boss-slam', 'box-leave', 'box-open', 'box-spin', 'box-offer', 'ink-burst', 'grenade-blast', 'grenade-throw',
       'headshot-pop', 'gore-rip', 'gib', 'gas-burst', 'blot-gurgle', 'storm', 'doll-clap', 'heartbeat', 'shot-raygun', 'soul', 'soul-in', 'board-tear', 'board-hammer',
-      'shot-rocket', 'rocket-boom', 'round-burst', ...INKWING_KINDS, ...BRUTE_KINDS]
+      'shot-rocket', 'rocket-boom', 'round-burst', 'shot-cannon', 'cannon-charge', 'cannon-burst', 'ink-melt', ...INKWING_KINDS, ...BRUTE_KINDS]
     if (event.kind === 'door' && this.context && this.active && !this.muted) this.slam(event)
     // The Magnum: the usual report with a chest punch, a hard crack and a rolling echo under it.
     // Only your own Magnum (fired at your position): a teammate's comes from where they stand, without the chest punch.
     const own = !event.position || event.position.distanceTo(this.listenerPosition) < 2
     if (event.kind === 'shot-magnum' && own && context && this.master && this.active && !this.muted && !this.disposed && !this.dying) this.magnum()
     // Upgraded guns, as in Call of Duty: the gun's own report with a bright electric zap on top.
-    if (event.packed && event.kind.startsWith('shot-') && event.kind !== 'shot-raygun' && context && this.master && this.active && !this.muted && !this.disposed && !this.dying) this.zap(event)
+    if (event.packed && event.kind.startsWith('shot-') && event.kind !== 'shot-raygun' && event.kind !== 'shot-cannon' && context && this.master && this.active && !this.muted && !this.disposed && !this.dying) this.zap(event)
     if (!handled.includes(event.kind)) { super.play(FOOTSTEP_VOLUME[event.kind] ? { ...event, volume: FOOTSTEP_VOLUME[event.kind] } : event); return }
     if (!context || !this.master || !this.active || this.muted || this.volume <= 0 || this.disposed || this.dying) return
     if (event.position && event.position.distanceTo(this.listenerPosition) > (event.radius ?? 60)) return
@@ -108,6 +108,12 @@ export class DeadInkAudio extends MissionAudio {
       case 'rocket-boom': this.boom(event); this.blastCrack(event, 0.9, 0.16); this.dirt(event); break
       // A Deadline round going off: a small, hard pop.
       case 'round-burst': this.blastCrack(event, 0.55, 0.1); this.thump(event, 0.5); break
+      // The Ink Cannon: the blob leaving the bell (a heavy gloop, bigger the more it was charged), the ink
+      // bubbling up the tank while it charges, the burst (a wet slap and a rain of drops), and a body melting.
+      case 'shot-cannon': this.thump(event, 0.55 + 0.45 * (event.intensity ?? 0)); this.pop(event, 0.32 + 0.12 * (1 - (event.intensity ?? 0))); this.whoosh(event); break
+      case 'cannon-charge': this.bubbleUp(event); break
+      case 'cannon-burst': this.pop(event, event.packed ? 0.3 : 0.38); this.thump(event, 0.85); this.splatter(event, 12, 0.08); this.dirt(event); break
+      case 'ink-melt': this.pop(event, 0.5); this.splatter(event, 5, 0.05); break
       // A soul tearing loose and flying off; its arrival: a gulp in the ink and a small bright note.
       case 'soul': this.whoosh(event); this.wail(event); break
       case 'soul-in': this.pop(event, 0.7); this.arpeggio(event, [784, 1174.7], 0.06, 'triangle', 0.12, 0.6); break
@@ -115,6 +121,28 @@ export class DeadInkAudio extends MissionAudio {
       case 'board-tear': this.crack(event); break
       case 'board-hammer': this.hammer(event); break
     }
+  }
+
+  /**
+   * The Ink Cannon charging: ink bubbling up the tank, a thick buzzing tone climbing over `duration` seconds
+   * while the bubbles come faster. The Deluge's climbs higher.
+   */
+  private bubbleUp(event: SoundEvent) {
+    const context = this.context!, t = context.currentTime, length = event.duration ?? 1.1, packed = !!event.packed
+    const { gain, panner } = this.output(event)
+    const tone = context.createOscillator(), bubbles = context.createOscillator(), depth = context.createGain(), chop = context.createGain(), low = context.createBiquadFilter()
+    tone.type = 'sawtooth'
+    tone.frequency.setValueAtTime(58, t); tone.frequency.exponentialRampToValueAtTime(packed ? 230 : 170, t + length)
+    bubbles.type = 'square'
+    bubbles.frequency.setValueAtTime(7, t); bubbles.frequency.linearRampToValueAtTime(22, t + length)
+    chop.gain.value = 0.5; depth.gain.value = 0.45
+    bubbles.connect(depth).connect(chop.gain)
+    low.type = 'lowpass'; low.Q.value = 7
+    low.frequency.setValueAtTime(280, t); low.frequency.exponentialRampToValueAtTime(1400, t + length)
+    gain.gain.setValueAtTime(0.0001, t); gain.gain.exponentialRampToValueAtTime(0.26, t + 0.12); gain.gain.setValueAtTime(0.26, t + length); gain.gain.exponentialRampToValueAtTime(0.0001, t + length + 0.25)
+    tone.connect(low).connect(chop).connect(gain)
+    this.track(tone, [low, chop, gain, ...(panner ? [panner] : [])]); this.track(bubbles, [depth])
+    for (const source of [tone, bubbles]) { source.start(t); source.stop(t + length + 0.3) }
   }
 
   /** A soul leaving a body: a thin ghostly tone sliding up, with a slow wobble. */

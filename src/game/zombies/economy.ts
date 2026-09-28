@@ -33,6 +33,7 @@ export const ROCKET_RESERVE = { fresh: 10, packed: 16 } as const
  */
 export function spareAmmo(item: Pick<WeaponItem, 'name' | 'packed' | 'packLevel' | 'rarity'>) {
   if (item.name === 'rocket') return item.packed ? ROCKET_RESERVE.packed : ROCKET_RESERVE.fresh
+  if (item.name === 'cannon') return item.packed ? INK_CANNON_AMMO.packedReserve : INK_CANNON_AMMO.reserve
   return weaponRules(item).capacity * RESERVE_MAGAZINES * (item.packed ? 2 : 1)
 }
 
@@ -72,9 +73,18 @@ export function wallOffer(name: WeaponName, price: number, slots: readonly (Weap
  * The Mystery Box's weapon table. Snipers and shotguns are the exciting draws; the pistol is the
  * letdown every box has; the Ink Rocket, only ever from the box, the rarest pull. Weights are relative.
  */
-export const BOX_WEIGHTS: Record<WeaponName, number> = { ak: 24, smg: 22, shotgun: 22, sniper: 18, pistol: 14, magnum: 12, lmg: 10, rocket: 5 }
+export const BOX_WEIGHTS: Record<WeaponName, number> = { ak: 24, smg: 22, shotgun: 22, sniper: 18, pistol: 14, magnum: 12, lmg: 10, rocket: 5,
+  burst: 12, pdw: 18, lever: 14,
+  // The Ink Cannon is never an ordinary roll: it comes only as a wonder weapon (INK_CANNON_CHANCE).
+  cannon: 0 }
 /** The chance a box roll is the Ink Ray, Dead Ink's wonder weapon (Call of Duty's Ray Gun is a rare draw too). */
 export const RAY_GUN_CHANCE = 0.05
+/** The chance a box roll is the Ink Cannon, the second wonder weapon: rarer than the Ink Ray. */
+export const INK_CANNON_CHANCE = 0.035
+/** The Ink Cannon's ammunition: three blobs to a canister and twelve spare; the Ink Deluge four and twenty. */
+export const INK_CANNON_AMMO = { magazine: 3, reserve: 12, packedReserve: 20 } as const
+/** A wonder weapon as the box hands it over (always gold). */
+export type BoxRoll = { name: WeaponName; rarity: Rarity; special?: 'rayGun' | 'inkCannon' }
 /**
  * The chance an ordinary box roll is Mythic, the tier above gold: about one in a thousand. Drawn on its
  * own after the Ink Ray, so the grey-to-gold odds among the other rolls are exactly the chest odds.
@@ -88,9 +98,15 @@ export const BOX_SPIN = 3.2, BOX_OFFER = 12
  * odds, so the box never gives grey; now and then Mythic, never while you already carry one. Falls back
  * to any gun if you somehow hold every one.
  */
-export function rollBox(random: Random, held: readonly (WeaponItem | null)[]): { name: WeaponName; rarity: Rarity; special?: 'rayGun' } {
-  // The wonder weapon: rare, always gold, never twice.
-  if (!held.some(item => item?.special === 'rayGun') && random() < RAY_GUN_CHANCE) return { name: 'pistol', rarity: 'legendary', special: 'rayGun' }
+export function rollBox(random: Random, held: readonly (WeaponItem | null)[]): BoxRoll {
+  // The wonder weapons: rare, always gold, never one you already carry. One roll decides both: the Ink Ray from
+  // the bottom of it, the Ink Cannon from the top.
+  const ray = held.some(item => item?.special === 'rayGun'), cannon = held.some(item => item?.special === 'inkCannon' || item?.name === 'cannon')
+  if (!ray || !cannon) {
+    const wonder = random()
+    if (!ray && wonder < RAY_GUN_CHANCE) return { name: 'pistol', rarity: 'legendary', special: 'rayGun' }
+    if (!cannon && wonder >= 1 - INK_CANNON_CHANCE) return { name: 'cannon', rarity: 'legendary', special: 'inkCannon' }
+  }
   const mythic = !held.some(item => item?.rarity === 'mythic') && random() < MYTHIC_CHANCE
   const weights = { ...BOX_WEIGHTS }
   for (const item of held) if (item) weights[item.name] = 0

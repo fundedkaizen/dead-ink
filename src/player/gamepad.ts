@@ -9,6 +9,7 @@
  *   Y / Triangle switch weapon                                 RB / R1      knife
  *   LB / L1      grenade                                       B / Circle   Ink Doll (Dead Ink) · drop weapon (hostage)
  *   D-pad up/dn  scope zoom                                    View / Share mission map (hostage)
+ *   D-pad right  ping (twice: danger)
  *   Start / Options  pause; in the menus the D-pad or left stick moves, A picks, B goes back, Start resumes.
  *
  * This file only reads the pad and decides what was asked for; `PadBindings` carries it out (main.ts sends
@@ -30,7 +31,7 @@ export const PAD = {
 /** Standard-mapping button indices. */
 export const BUTTON = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, VIEW: 8, START: 9, L3: 10, R3: 11, UP: 12, DOWN: 13, LEFT: 14, RIGHT: 15 } as const
 
-export type PadAction = 'fire' | 'aim' | 'reload' | 'use' | 'jump' | 'knife' | 'grenade' | 'special' | 'switch' | 'sprint' | 'zoomIn' | 'zoomOut' | 'map' | 'pause'
+export type PadAction = 'fire' | 'aim' | 'reload' | 'use' | 'jump' | 'knife' | 'grenade' | 'special' | 'switch' | 'sprint' | 'zoomIn' | 'zoomOut' | 'map' | 'pause' | 'ping'
 export type MenuAction = 'up' | 'down' | 'left' | 'right' | 'accept' | 'back' | 'start'
 
 /** The part of the Gamepad API this reads; checks pass plain objects. */
@@ -149,6 +150,8 @@ export class GamepadInput {
       if (down(BUTTON.UP)) act('zoomIn', true)
       if (down(BUTTON.DOWN)) act('zoomOut', true)
       if (down(BUTTON.VIEW)) act('map', true)
+      // D-pad right: ping what you are looking at (twice for danger).
+      if (down(BUTTON.RIGHT)) act('ping', true)
       // Sprint, as Call of Duty: click the stick and it stays on until you stop moving.
       if (down(BUTTON.L3)) this.sprintLatched = !this.sprintLatched
       if (Math.hypot(sticks.moveX, sticks.moveForward) < 0.3) this.sprintLatched = false

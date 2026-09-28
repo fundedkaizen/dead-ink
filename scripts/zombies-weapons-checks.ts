@@ -322,7 +322,7 @@ const crawling = () => director.zombies.filter(z => z.state === 'chase' && z.cra
   assert.equal(spareAmmo({ name: 'rocket', packed: true }), ROCKET_RESERVE.packed)
   assert(spareAmmo({ name: 'ak' }) === 120 && spareAmmo({ name: 'ak', packed: true }) === 240, 'other guns keep their four magazines')
   assert.equal(spareAmmo({ name: 'magnum', packed: true }), 96, 'the Deadline, twice its fuller load')
-  assert.equal(BOX_WEIGHTS.rocket, Math.min(...Object.values(BOX_WEIGHTS)), 'the rocket is the rarest box gun')
+  assert.equal(BOX_WEIGHTS.rocket, Math.min(...Object.values(BOX_WEIGHTS).filter(weight => weight > 0)), 'the rocket is the rarest box gun (the Ink Cannon is never an ordinary roll)')
   const random = seeded(7), held = [startingPistol(), null]
   let rockets = 0
   for (let i = 0; i < 20000; i++) if (rollBox(random, held).name === 'rocket') rockets++

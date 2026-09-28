@@ -12,8 +12,11 @@ import type { WeaponItem } from '../types'
  * own blast does to you.
  */
 
-/** How a blast looks and sounds: a frag's (the Ink Doll's and the Ink Ray's too), a rocket's, a Deadline round's. */
-export type BlastKind = 'grenade' | 'rocket' | 'round'
+/**
+ * How a blast looks and sounds: a frag's (the Ink Doll's and the Ink Ray's too), a rocket's, a Deadline round's,
+ * the Ink Cannon's splash (`cannon`), and the Ink Deluge's, which leaves a sticky pool (`deluge`).
+ */
+export type BlastKind = 'grenade' | 'rocket' | 'round' | 'cannon' | 'deluge'
 
 /**
  * The Deadline (the Pack-a-Punched Magnum, held akimbo: akimbo.ts) fires explosive rounds, as Mustang &
