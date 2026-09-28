@@ -9,7 +9,9 @@ import './pings.css'
  * whatever you are looking at gets an ink marker in your colour: a zombie or guard (the marker follows it),
  * an item or station (a perk machine, the box, a door, a wall gun, a power-up), or a spot on the ground. It
  * shows through walls with how far away it is, lasts about five seconds, and lands with a soft ink tick.
- * Ping twice quickly and it becomes a danger ping: red, with an exclamation mark.
+ * Ping twice quickly and it says it louder, in a way that fits what it is on: on an enemy it turns red and
+ * reads "Danger"; on an item or station it stays in your colour and pulses harder with what to do with it
+ * ("Hit the box", "Buy this", "Open this": the target's `urge`, else "Get this"); on the ground, "Go here".
  *
  * The module owns the markers, the timing and the messages; the mode owns what a ping can point at
  * (`pick`), how to find a moving target again (`resolve`) and the link (`send`, `receive`).
@@ -32,13 +34,26 @@ import './pings.css'
  */
 
 export type PingKind = 'enemy' | 'item' | 'spot'
-/** What a ping points at. `id` names a moving target (an enemy) that `resolve` can find again. */
-export type PingTarget = { kind: PingKind; position: THREE.Vector3; label?: string; id?: string }
+/**
+ * What a ping points at. `id` names a moving target (an enemy) that `resolve` can find again. `urge` is what a
+ * double ping on it says, short ("Hit the box", "Buy this", "Free him"); without one, DOUBLE_PING[kind].
+ */
+export type PingTarget = { kind: PingKind; position: THREE.Vector3; label?: string; id?: string; urge?: string }
 /**
  * A ping on the wire. `by`: the player's number; `n`: that player's ping count (a double ping resends the
- * same `n` with `d: 1`, turning the marker into a danger ping); `k`, `p`, `l`, `id`: the target.
+ * same `n` with `d: 1`); `k`, `p`, `l`, `id`, `u`: the target, its label and its urge.
  */
-export type PingMessage = { t: 'ping'; by: number; n: number; k: PingKind; p: [number, number, number]; l?: string; id?: string; d?: 1 }
+export type PingMessage = { t: 'ping'; by: number; n: number; k: PingKind; p: [number, number, number]; l?: string; id?: string; d?: 1; u?: string }
+
+/**
+ * What a double ping says when the target has no `urge` of its own, and how it looks: on an enemy, red danger;
+ * on an item, the player's colour with a stronger pulse; on the ground, a place to go.
+ */
+export const DOUBLE_PING: Record<PingKind, { text: string; look: 'danger' | 'use' | 'go' }> = {
+  enemy: { text: 'Danger', look: 'danger' },
+  item: { text: 'Get this', look: 'use' },
+  spot: { text: 'Go here', look: 'go' },
+}
 
 export type PingsOptions = {
   camera: THREE.Camera
@@ -65,8 +80,9 @@ export type PingsOptions = {
 }
 
 export type Ping = {
+  /** `danger`: it was double pinged (named for the enemy case; see DOUBLE_PING for how each kind shows it). */
   by: number; n: number; kind: PingKind; danger: boolean; label: string
-  position: THREE.Vector3; id?: string
+  position: THREE.Vector3; id?: string; urge?: string
   /** Seconds since it landed, and how long it lasts. */
   age: number; life: number
   element: HTMLElement | null
@@ -93,17 +109,29 @@ const ICONS: Record<PingKind | 'danger', string> = {
   danger: '<path d="M11 6.5h2l-.4 6.2h-1.2z" fill="#fff"/><circle cx="12" cy="15" r="1.1" fill="#fff"/>',
 }
 
+/** The words on a marker: the label, or once double pinged what fits the target ("Danger: Zombie", "Hit the box", "Go here"). */
+export function pingText(ping: Pick<Ping, 'kind' | 'danger' | 'label' | 'urge'>) {
+  if (!ping.danger) return ping.label
+  if (ping.kind === 'enemy') return `${DOUBLE_PING.enemy.text}: ${ping.label}`
+  if (ping.kind === 'spot') return ping.urge ?? DOUBLE_PING.spot.text
+  return ping.urge ?? `${DOUBLE_PING.item.text}: ${ping.label}`
+}
+
 const round2 = (n: number) => Math.round(n * 100) / 100
 const escapeHtml = (text: string) => text.replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' })[c]!)
 
-/** A soft ink tick: a short damped knock with a drop of noise, quieter for a teammate's ping. */
-function inkTick(danger: boolean, mine: boolean) {
+/**
+ * A soft ink tick: a short damped knock, quieter for a teammate's ping. `danger` (an enemy double pinged) knocks
+ * twice, sharper; `urge` (an item or a spot double pinged) is one brighter knock.
+ */
+function inkTick(tone: 'plain' | 'danger' | 'urge', mine: boolean) {
+  const danger = tone === 'danger', bright = tone === 'urge'
   const output = synthOutput('effects', mine ? 0.5 : 0.38)
   if (!output) return
   const { context, out } = output, t = context.currentTime
   const knock = context.createOscillator(), gain = context.createGain()
   knock.type = 'sine'
-  knock.frequency.setValueAtTime(danger ? 1250 : 880, t); knock.frequency.exponentialRampToValueAtTime(danger ? 620 : 420, t + 0.09)
+  knock.frequency.setValueAtTime(danger ? 1250 : bright ? 1100 : 880, t); knock.frequency.exponentialRampToValueAtTime(danger ? 620 : bright ? 880 : 420, t + 0.09)
   gain.gain.setValueAtTime(0.0001, t); gain.gain.exponentialRampToValueAtTime(0.5, t + 0.004); gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.16)
   knock.connect(gain).connect(out)
   knock.start(t); knock.stop(t + 0.18)
@@ -147,7 +175,7 @@ export class Pings {
     }
     const aim = target ?? this.look()
     if (!aim) return null
-    const ping = this.add({ by: me, n: ++this.serial, kind: aim.kind, label: aim.label ?? LABELS[aim.kind], position: aim.position.clone(), id: aim.id, danger: false })
+    const ping = this.add({ by: me, n: ++this.serial, kind: aim.kind, label: aim.label ?? LABELS[aim.kind], position: aim.position.clone(), id: aim.id, urge: aim.urge, danger: false })
     this.lastLocal = { ping, at: this.now() }
     const message = this.message(ping)
     this.options.send?.(message)
@@ -173,7 +201,8 @@ export class Pings {
     const existing = this.active.find(p => p.by === message.by && p.n === message.n)
     if (existing) { if (message.d && !existing.danger) this.makeDanger(existing); return }
     const ping = this.add({ by: message.by, n: message.n, kind, label: typeof message.l === 'string' ? message.l.slice(0, 32) : LABELS[kind],
-      position: new THREE.Vector3(...message.p), id: typeof message.id === 'string' ? message.id : undefined, danger: !!message.d })
+      position: new THREE.Vector3(...message.p), id: typeof message.id === 'string' ? message.id : undefined,
+      urge: typeof message.u === 'string' ? message.u.slice(0, 24) : undefined, danger: !!message.d })
     if (ping.danger) this.makeDanger(ping)
   }
 
@@ -238,7 +267,7 @@ export class Pings {
 
   private message(ping: Ping): PingMessage {
     return { t: 'ping', by: ping.by, n: ping.n, k: ping.kind, p: [round2(ping.position.x), round2(ping.position.y), round2(ping.position.z)],
-      ...(ping.label !== LABELS[ping.kind] ? { l: ping.label } : {}), ...(ping.id ? { id: ping.id } : {}), ...(ping.danger ? { d: 1 as const } : {}) }
+      ...(ping.label !== LABELS[ping.kind] ? { l: ping.label } : {}), ...(ping.id ? { id: ping.id } : {}), ...(ping.urge ? { u: ping.urge } : {}), ...(ping.danger ? { d: 1 as const } : {}) }
   }
 
   private add(fields: Omit<Ping, 'age' | 'life' | 'element'>) {
@@ -258,7 +287,7 @@ export class Pings {
       this.draw(ping)
     }
     this.active.push(ping)
-    if (this.options.sound !== false) inkTick(ping.danger, mine)
+    if (this.options.sound !== false) inkTick(ping.danger ? ping.kind === 'enemy' ? 'danger' : 'urge' : 'plain', mine)
     this.options.onPing?.(ping)
     return ping
   }
@@ -267,8 +296,8 @@ export class Pings {
     ping.danger = true
     ping.age = 0
     ping.life = PINGS.dangerLife
-    if (ping.element) { ping.element.classList.add('danger'); this.draw(ping) }
-    if (this.options.sound !== false) inkTick(true, ping.by === this.options.me())
+    if (ping.element) { ping.element.classList.add('double', DOUBLE_PING[ping.kind].look); this.draw(ping) }
+    if (this.options.sound !== false) inkTick(ping.kind === 'enemy' ? 'danger' : 'urge', ping.by === this.options.me())
   }
 
   /** The teammate's name on a marker ("Ana: "), empty for your own. */
@@ -279,8 +308,9 @@ export class Pings {
     if (!element) return
     const who = this.who(ping)
     element.dataset.who = who
-    const label = ping.danger ? `Danger${ping.kind === 'spot' ? '' : `: ${ping.label}`}` : ping.label
-    element.innerHTML = `<svg class="ping-drop" viewBox="0 0 24 30" aria-hidden="true"><path d="M12 29c-1.4-2.3-9.5-10-9.5-17A9.5 9.5 0 0 1 12 2.5 9.5 9.5 0 0 1 21.5 12c0 7-8.1 14.7-9.5 17z" fill="var(--ping-fill)" stroke="#000" stroke-width="1.6" stroke-linejoin="round"/>${ICONS[ping.danger ? 'danger' : ping.kind]}</svg>
+    const label = pingText(ping)
+    // The exclamation mark only for danger (an enemy); a double ping elsewhere keeps its own mark.
+    element.innerHTML = `<svg class="ping-drop" viewBox="0 0 24 30" aria-hidden="true"><path d="M12 29c-1.4-2.3-9.5-10-9.5-17A9.5 9.5 0 0 1 12 2.5 9.5 9.5 0 0 1 21.5 12c0 7-8.1 14.7-9.5 17z" fill="var(--ping-fill)" stroke="#000" stroke-width="1.6" stroke-linejoin="round"/>${ICONS[ping.danger && ping.kind === 'enemy' ? 'danger' : ping.kind]}</svg>
       <span class="ping-text"><b>${escapeHtml(who + label)}</b><small class="ping-distance"></small></span><i class="ping-arrow" aria-hidden="true"></i>`
   }
 

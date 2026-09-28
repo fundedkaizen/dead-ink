@@ -1,9 +1,13 @@
 /* Pings (pings.ts): an ink drop in the player's colour over what was pinged, seen through walls, with how far. */
 .ping { position: fixed; left: 0; top: 0; z-index: 6; pointer-events: none; display: flex; flex-direction: column; align-items: center;
   --ping-fill: var(--ping); margin: -32px 0 0 -40px; width: 80px; transition: opacity 0.2s; }
-.ping.danger { --ping-fill: #d4332a; }
+/* A double ping: red danger on an enemy only; on an item or a spot the player's colour, pulsing harder, the words louder. */
+.ping.double.danger { --ping-fill: #d4332a; }
 .ping-drop { width: 26px; height: 32px; filter: drop-shadow(0 1px 0 #fff) drop-shadow(0 -1px 0 #fff); animation: ping-land 0.32s cubic-bezier(0.2, 1.6, 0.4, 1) both; transform-origin: 50% 100%; }
-.ping.danger .ping-drop { animation: ping-land 0.32s cubic-bezier(0.2, 1.6, 0.4, 1) both, ping-throb 0.7s ease-in-out 0.32s infinite; }
+.ping.double .ping-drop { animation: ping-land 0.32s cubic-bezier(0.2, 1.6, 0.4, 1) both, ping-throb 0.7s ease-in-out 0.32s infinite; }
+.ping.double.use .ping-drop, .ping.double.go .ping-drop { width: 32px; height: 40px; filter: drop-shadow(0 0 0 #fff) drop-shadow(0 0 6px var(--ping-fill)); animation: ping-land 0.32s cubic-bezier(0.2, 1.6, 0.4, 1) both, ping-urge 0.55s ease-in-out 0.32s infinite; }
+.ping.double .ping-text b { font-size: 14px; text-transform: uppercase; letter-spacing: 0.04em; border-bottom-width: 3px; }
+.ping.double.use .ping-text b, .ping.double.go .ping-text b { background: var(--ping-fill); color: #fff; text-shadow: none; border-radius: 3px; border-bottom-color: #000; padding: 1px 6px; }
 .ping-text { display: flex; flex-direction: column; align-items: center; margin-top: 1px; line-height: 1.05; white-space: nowrap;
   font: 700 12px/1.1 var(--font-hand, 'Segoe Print', 'Comic Sans MS', cursive); color: #000;
   text-shadow: 0 0 2px #fff, 0 0 3px #fff, 0 0 4px #fff; }
@@ -15,6 +19,7 @@
 .ping.edge .ping-drop { width: 20px; height: 25px; }
 @keyframes ping-land { from { transform: scale(0.2) translateY(-10px); opacity: 0; } to { transform: none; opacity: 1; } }
 @keyframes ping-throb { 50% { transform: scale(1.18); } }
+@keyframes ping-urge { 0%, 100% { transform: scale(1); } 40% { transform: scale(1.28) translateY(-3px); } }
 body[data-reduced-motion='true'] .ping-drop { animation: none !important; }
 
 /* The phone's ping button: a small round ink button on the right, above the points and grenades. */

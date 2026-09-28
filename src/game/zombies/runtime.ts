@@ -1818,24 +1818,26 @@ export class ZombiesRuntime {
     if (enemy) return { kind: 'enemy', id: enemy.id, label: enemy.brute?.editor ? 'The Editor' : enemy.boss ? 'The Brute' : 'Zombie',
       position: enemy.position.clone().setY(enemy.position.y + (enemy.boss ? BOSS.scale * 1.95 : 1.95)) }
     // Things you can use or pick up.
-    const items: { point: THREE.Vector3; label: string }[] = []
-    for (const buy of this.wallBuys) items.push({ point: buy.point, label: WEAPON_RULES[buy.weapon].label })
-    if (this.box) items.push({ point: this.box.point, label: 'Mystery Box' })
-    for (const machine of this.perkMachines) items.push({ point: machine.point, label: PERKS[machine.kind].name })
-    if (this.pack && this.packBuilt) items.push({ point: this.pack.point, label: 'Pack-a-Punch' })
-    if (this.dollBuy) items.push({ point: this.dollBuy.point, label: 'Ink Dolls' })
-    if (this.powerSwitch && this.powerSwitch.state !== 'on') items.push({ point: this.powerSwitch.point, label: 'Power switch' })
-    for (const part of this.parts) if (part.root.visible) items.push({ point: part.point, label: PARTS[part.id].label })
-    for (const drop of this.powerups.active) items.push({ point: drop.position.clone().setY(drop.position.y + 0.8), label: POWERUP_INFO[drop.kind].label })
-    for (const gate of this.zones?.gates ?? []) if (gate.state === 'closed') items.push({ point: this.zones!.nearestPoint(gate, origin).setY(origin.y - 0.4), label: `Door to ${gate.spec.zone}` })
-    let item: { point: THREE.Vector3; label: string } | null = null, best = Infinity
+    // Each with what a double ping on it says: never danger, only what to do with it.
+    const items: { point: THREE.Vector3; label: string; urge: string }[] = []
+    for (const buy of this.wallBuys) items.push({ point: buy.point, label: WEAPON_RULES[buy.weapon].label, urge: 'Buy this' })
+    if (this.box) items.push({ point: this.box.point, label: 'Mystery Box', urge: 'Hit the box' })
+    for (const machine of this.perkMachines) items.push({ point: machine.point, label: PERKS[machine.kind].name, urge: 'Drink this' })
+    if (this.pack && this.packBuilt) items.push({ point: this.pack.point, label: 'Pack-a-Punch', urge: 'Upgrade here' })
+    for (const site of this.sites.values()) if (!site.complete || (site.build === 'shield' && this.shieldOnBench)) items.push({ point: site.point, label: site.build === 'shield' ? 'Workbench' : 'Pack-a-Punch spot', urge: site.complete ? 'Take the shield' : 'Build here' })
+    if (this.dollBuy) items.push({ point: this.dollBuy.point, label: 'Ink Dolls', urge: 'Buy this' })
+    if (this.powerSwitch && this.powerSwitch.state !== 'on') items.push({ point: this.powerSwitch.point, label: 'Power switch', urge: 'Turn it on' })
+    for (const part of this.parts) if (part.root.visible) items.push({ point: part.point, label: PARTS[part.id].label, urge: 'Pick this up' })
+    for (const drop of this.powerups.active) items.push({ point: drop.position.clone().setY(drop.position.y + 0.8), label: POWERUP_INFO[drop.kind].label, urge: 'Grab it' })
+    for (const gate of this.zones?.gates ?? []) if (gate.state === 'closed') items.push({ point: this.zones!.nearestPoint(gate, origin).setY(origin.y - 0.4), label: `Door to ${gate.spec.zone}`, urge: 'Open this' })
+    let item: { point: THREE.Vector3; label: string; urge: string } | null = null, best = Infinity
     for (const candidate of items) {
       const to = candidate.point.clone().sub(origin), along = to.dot(dir)
       if (along <= 0.3 || along > Math.min(80, wall + 2.5)) continue
       const angle = to.angleTo(dir)
       if (angle < THREE.MathUtils.degToRad(5) + 0.5 / along && angle < best) { best = angle; item = candidate }
     }
-    if (item) return { kind: 'item', label: item.label, position: item.point.clone() }
+    if (item) return { kind: 'item', label: item.label, urge: item.urge, position: item.point.clone() }
     if (wall >= 120) return null
     return { kind: 'spot', position: origin.clone().addScaledVector(dir, wall - 0.05) }
   }

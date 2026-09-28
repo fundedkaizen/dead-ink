@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import * as THREE from 'three'
-import { PINGS, createPings, type PingMessage, type Pings, type PingTarget } from '../src/game/shared/pings'
+import { DOUBLE_PING, PINGS, createPings, pingText, type PingMessage, type Pings, type PingTarget } from '../src/game/shared/pings'
 
 /**
  * Pings (src/game/shared/pings.ts), headless: what a ping sends, a teammate receiving it, a double ping turning
@@ -63,13 +63,14 @@ test('A guest\'s ping reaches the host and, through the host, every other guest,
   assert.equal(t.players[2].pings.active.length, 1, 'the guest does not get its own ping back twice')
 })
 
-test('Ping twice quickly and it becomes a danger ping, on every screen; slower, it is a second ping', () => {
+test('Ping twice quickly and it becomes a double ping, on every screen; slower, it is a second ping', () => {
   const t = team(3)
   t.players[1].pings.ping(); t.tick(0.2); t.players[1].pings.ping()
   t.flush()
   for (const p of t.players) {
     assert.equal(p.pings.active.length, 1, 'still one ping')
-    assert.equal(p.pings.active[0].danger, true, 'now a danger ping')
+    assert.equal(p.pings.active[0].danger, true, 'now a double ping')
+    assert.equal(pingText(p.pings.active[0]), 'Go here', 'on the ground it says where to go, not danger')
     assert.equal(p.pings.active[0].life, PINGS.dangerLife)
   }
   t.tick(PINGS.doubleTap + 0.3)
@@ -77,6 +78,34 @@ test('Ping twice quickly and it becomes a danger ping, on every screen; slower, 
   t.flush()
   assert.equal(t.players[0].pings.active.length, 2, 'a slower second press is a second ping')
   assert.equal(t.players[0].pings.active[1].danger, false)
+})
+
+test('A double ping fits its target: red danger only on an enemy; on an item what to do with it; on the ground, go here', () => {
+  const at = new THREE.Vector3(0, 1, -6)
+  const cases: [PingTarget, string, 'danger' | 'use' | 'go'][] = [
+    [{ kind: 'enemy', label: 'The Brute', position: at }, 'Danger: The Brute', 'danger'],
+    [{ kind: 'item', label: 'Mystery Box', urge: 'Hit the box', position: at }, 'Hit the box', 'use'],
+    [{ kind: 'item', label: 'Quick Dip', urge: 'Drink this', position: at }, 'Drink this', 'use'],
+    [{ kind: 'item', label: 'Hostage', position: at }, 'Get this: Hostage', 'use'],
+    [{ kind: 'spot', position: at }, 'Go here', 'go'],
+  ]
+  for (const [target, text, look] of cases) {
+    let clock = 0
+    const shared: PingMessage[] = []
+    const host = createPings({ camera: new THREE.PerspectiveCamera(), parent: null, sound: false, me: () => 0, now: () => clock, pick: () => target, send: m => shared.push(m) })
+    const guest = createPings({ camera: new THREE.PerspectiveCamera(), parent: null, sound: false, me: () => 1, now: () => clock })
+    host.ping(); clock += 0.2; host.ping()
+    for (const m of shared) guest.receive(m)
+    for (const pings of [host, guest]) {
+      const ping = pings.active[0]
+      assert.equal(pingText(ping), text, `${target.label ?? target.kind} reads "${text}" on both screens`)
+      assert.equal(DOUBLE_PING[ping.kind].look, look)
+    }
+    assert.equal(pingText(guest.active[0]).includes('Danger'), target.kind === 'enemy', 'danger only for an enemy')
+    assert(pingText(guest.active[0]).length <= 24, 'short')
+  }
+  // A single ping just names it.
+  assert.equal(pingText({ kind: 'item', label: 'Mystery Box', urge: 'Hit the box', danger: false }), 'Mystery Box')
 })
 
 test('Pings last about five seconds (danger a little longer), then go', () => {
