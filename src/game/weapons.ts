@@ -419,7 +419,7 @@ export class FirstPersonWeapons {
     const material = id ? gloveMaterial(id) : this.armMaterial
     for (const shape of this.handShapes) shape.material = material
     if (id && !this.cuffs.length) {
-      const geometry = new THREE.CylinderGeometry(0.047, 0.05, 0.075, 20, 1, true)
+      const geometry = new THREE.CylinderGeometry(0.04, 0.042, 0.036, 20, 1, true)
       for (let i = 0; i < 2; i++) {
         const cuff = new THREE.Mesh(geometry, material)
         const contour = createPenSilhouette(geometry, 2.4)
@@ -441,7 +441,7 @@ export class FirstPersonWeapons {
       cuff.visible = arm.fore.visible
       if (!cuff.visible) return
       const elbow = arm.elbow.position, axis = wrists[i].clone().sub(elbow).normalize()
-      cuff.position.copy(elbow).lerp(wrists[i], 0.93)
+      cuff.position.copy(elbow).lerp(wrists[i], 0.965)
       cuff.quaternion.setFromUnitVectors(up, axis)
     })
   }

@@ -70,6 +70,8 @@ import { Minimap, type MinimapMate } from './minimap'
 import { Barriers, WINDOW, type Barrier } from './windows'
 // The Ink Storm's flyers (flyers.ts) and what a storm brings (rules.ts).
 import { StormPack } from './flyers'
+// Buildable guidance: part toasts, the hint that stays until a build is done, the glowing spots (build-guide.ts).
+import { BuildGuide, buildGuide, partToast, partsGot, siteWanted, type BuildState } from './build-guide'
 import { inkwingHealth, stormNumber } from './rules'
 
 /** A fresh game's numbers for the end-of-game awards. */
@@ -211,6 +213,7 @@ export class ZombiesRuntime {
   /** Pings (../shared/pings.ts): middle mouse, Z, the pad's D-pad right, or the phone's ping button. */
   readonly pings: Pings
   private unbindPings: () => void
+  private buildGuideView: BuildGuide
   readonly zombieHud: ZombieHud
   readonly riseMarks: RiseMarks
   readonly sparks: MuzzleSparks
@@ -448,6 +451,7 @@ export class ZombiesRuntime {
     this.powerMarker = new WorldMarker(hudRoot, POWER_ICON, 'The power switch')
     this.indicator = new DamageIndicator(hudRoot)
     this.chargeMeter = new ChargeMeter(hudRoot)
+    this.buildGuideView = new BuildGuide(hudRoot)
     this.pings = createPings({ camera: camera.perspective, parent: hudRoot, me: () => this.coop.id,
       colorOf: id => PLAYER_CSS[id] ?? PLAYER_CSS[0], nameOf: id => this.mateName(id),
       pick: (origin, direction) => this.pingTarget(origin, direction),
@@ -982,7 +986,7 @@ export class ZombiesRuntime {
     this.carried.add(part.id)
     this.parts.splice(this.parts.indexOf(part), 1)
     part.dispose()
-    this.hud.notify(by !== null ? `${this.mateName(by)} found the ${PARTS[part.id].label}.` : `You found the ${PARTS[part.id].label}.`, 2.5)
+    this.partGained(part.id, by !== null ? `${this.mateName(by)} found the ${PARTS[part.id].label}.` : `You found the ${PARTS[part.id].label}.`)
     this.emit({ kind: 'pickup', position: this.player.body.position.clone(), radius: 3 })
     this.zombieHud.parts([...this.carried].map(id => PARTS[id].label))
     this.invalidate()
@@ -1466,7 +1470,9 @@ export class ZombiesRuntime {
     }
     const carried = w.carried.join(',')
     if (carried !== [...this.carried].join(',')) {
+      const gained = (w.carried as PartId[]).filter(id => !this.carried.has(id))
       this.carried = new Set(w.carried as PartId[])
+      for (const id of gained) this.partGained(id, `The team has the ${PARTS[id].label}.`)
       this.zombieHud.parts([...this.carried].map(id => PARTS[id].label))
     }
     for (const [build, site] of this.sites) for (const id of w.placed[build] ?? []) if (!site.placed.has(id as PartId)) site.place(id as PartId)
@@ -1830,6 +1836,44 @@ export class ZombiesRuntime {
     if (item) return { kind: 'item', label: item.label, position: item.point.clone() }
     if (wall >= 120) return null
     return { kind: 'spot', position: origin.clone().addScaledVector(dir, wall - 0.05) }
+  }
+
+  /**
+   * A part found (by anyone; parts are the team's): a toast saying which part of how many and where it goes,
+   * and that spot marked in the ping style for a few seconds.
+   */
+  private partGained(id: PartId, found: string) {
+    const build = PARTS[id].build, state = this.buildState()
+    this.hud.notify(`${found} ${partToast(id, partsGot(state, build), BUILDS[build].parts.length)}`, 5, true)
+    const spot = this.buildSpot(build)
+    if (spot) this.pings.show({ kind: 'item', label: build === 'shield' ? 'Workbench' : build === 'pack' ? 'Pack-a-Punch spot' : 'Power switch', position: spot }, 6)
+  }
+
+  /** Where a build goes together. */
+  private buildSpot(build: BuildId) { return build === 'power' ? this.powerSwitch?.point ?? null : this.sites.get(build)?.point ?? null }
+
+  /** How the buildables stand, for the guidance (build-guide.ts). */
+  private buildState(): BuildState {
+    const placed: BuildState['placed'] = {}
+    for (const [build, site] of this.sites) placed[build] = [...site.placed]
+    return { carried: [...this.carried], placed, power: this.powerSwitch?.state ?? 'broken', packBuilt: this.packBuilt, shieldWaiting: this.shieldOnBench && !this.shield }
+  }
+
+  /** The mini map's build spots: the shield's workbench (unless you wear the shield and none waits), the Pack-a-Punch's outline until it stands. */
+  get buildSpots() {
+    const spots: { build: string; point: THREE.Vector3 }[] = []
+    const bench = this.sites.get('shield'), pack = this.sites.get('pack')
+    if (bench && (!this.shield || this.shieldOnBench)) spots.push({ build: 'shield', point: bench.point })
+    if (pack && !this.packBuilt) spots.push({ build: 'pack', point: pack.point })
+    return spots
+  }
+
+  /** Every frame: the spots glow while the team holds their parts, and the hint shows the way to a build that is ready. */
+  private updateBuildGuide() {
+    const state = this.buildState()
+    for (const site of this.sites.values()) site.setGlow(siteWanted(state, site.build))
+    const guide = this.player.playing && this.state.phase === 'active' && !this.down ? buildGuide(state) : null
+    this.buildGuideView.update(this.camera.perspective, guide, guide ? this.buildSpot(guide.build) : null)
   }
 
   /** A challenge done: a short toast with what it unlocked. */
@@ -3110,6 +3154,7 @@ export class ZombiesRuntime {
     this.indicator.update(running, this.camera.perspective.position, yaw)
     this.hotbar.update(this.weapons.slots, this.weapons.selectedSlot)
     this.pings.update(dt)
+    this.updateBuildGuide()
     this.chargeMeter.update(this.player.playing && held?.special === 'inkCannon' ? this.weapons.chargeLevel : null, !!held?.packed)
     this.zombieHud.update(running, this.state.round, this.state.points)
     const boss = this.liveBoss()
@@ -3148,7 +3193,7 @@ export class ZombiesRuntime {
     for (const machine of this.perkMachines) machine.dispose()
     this.pack?.dispose(); this.bottle.dispose(); this.packedLook.dispose()
     this.director?.dispose()
-    this.hits.dispose(); this.indicator.dispose(); this.hotbar.dispose(); this.unbindPings(); this.pings.dispose(); this.zombieHud.dispose()
+    this.hits.dispose(); this.indicator.dispose(); this.hotbar.dispose(); this.unbindPings(); this.pings.dispose(); this.buildGuideView.dispose(); this.zombieHud.dispose()
     this.minimap?.dispose()
     this.uninstallCosmetics(); this.lowHealth.dispose(); this.stopSettings(); this.bulletTrails.dispose(); this.weapons.dispose(); this.blood.dispose(); this.impacts.dispose(); this.riseMarks.dispose(); this.sparks.dispose(); this.shockwaves.dispose(); this.explosions.dispose(); this.nukeCloud.dispose(); this.undress?.(); this.grenades.dispose(); this.dolls.dispose(); this.dollBuy?.dispose(); this.bolts.dispose(); this.rockets.dispose(); this.blobs.dispose(); this.inkPools.dispose(); this.chargeMeter.dispose(); this.powerups.dispose()
     for (const skull of this.skulls) skull.object.removeFromParent()

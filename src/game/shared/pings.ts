@@ -154,6 +154,17 @@ export class Pings {
     return message
   }
 
+  /**
+   * Mark a spot for this player only, in the ping style (the game pointing somewhere: the workbench a part
+   * belongs to). Not sent, not a double ping; it lasts `life` seconds.
+   */
+  show(target: PingTarget, life: number = PINGS.life) {
+    for (const old of this.active.filter(p => p.n < 0 && p.label === (target.label ?? LABELS[target.kind]))) this.remove(old)
+    const ping = this.add({ by: this.options.me(), n: -1, kind: target.kind, label: target.label ?? LABELS[target.kind], position: target.position.clone(), id: target.id, danger: false })
+    ping.life = life
+    return ping
+  }
+
   /** A teammate's ping (or their double ping, which upgrades the one with the same number). */
   receive(message: PingMessage) {
     if (message?.t !== 'ping' || !Array.isArray(message.p) || message.p.length !== 3 || !message.p.every(Number.isFinite)) return

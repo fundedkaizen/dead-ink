@@ -192,6 +192,9 @@ export class BuildSite {
   /** A machine's chalk outline and its name on the wall: gone once the machine stands there. */
   private marks: THREE.Object3D[] = []
   private pop = 0
+  /** A soft column of light over the spot while the team holds one of its parts (build-guide.ts). */
+  private glow: THREE.Object3D
+  private glowTime = 0
 
   constructor(readonly build: BuildId, readonly spot: WallSpot, bench: boolean) {
     this.root.name = `Build site · ${BUILDS[build].label}`
@@ -206,6 +209,14 @@ export class BuildSite {
       table.box(1.4, 0.04, 0.5, 0, 0.3, 0, 'paper', 'detail')
       table.finish()
       this.root.add(table)
+      // Over the bench, a big shield drawn on the wall in ink, and its name: this is where the shield is built.
+      const outline = new Draft(`Workbench shield outline · ${BUILDS[build].label}`)
+      const shield: [number, number, number][] = [[-0.36, 1.9, -0.46], [0.36, 1.9, -0.46], [0.36, 1.58, -0.46], [0.26, 1.32, -0.46], [0, 1.14, -0.46], [-0.26, 1.32, -0.46], [-0.36, 1.58, -0.46]]
+      outline.line(shield, 'edge', true)
+      outline.line([[0, 1.84, -0.46], [0, 1.22, -0.46]], 'detail')
+      outline.line([[-0.3, 1.62, -0.46], [0.3, 1.62, -0.46]], 'detail')
+      outline.finish()
+      this.root.add(outline, wallText('INK SHIELD', [0, 2.08, -0.47], 0.16))
     } else {
       // A chalk square on the floor where the machine will stand.
       const chalk = new Draft(`Build outline · ${BUILDS[build].label}`)
@@ -230,7 +241,14 @@ export class BuildSite {
       this.slots.set(id, { ghost, solid })
     })
     this.point = this.root.position.clone().setY(spot.stand.y + (bench ? 1 : 0.6))
+    this.glow = createRarityBeam(0xe8b64a, bench ? 3 : 2.4)
+    this.glow.visible = false
+    this.root.add(this.glow)
   }
+
+  /** Glow while the team holds one of this build's parts, so the spot is easy to find. */
+  setGlow(on: boolean) { this.glow.visible = on && !this.complete }
+  get glowing() { return this.glow.visible }
 
   get complete() { return BUILDS[this.build].parts.every(id => this.placed.has(id)) }
   missing() { return BUILDS[this.build].parts.filter(id => !this.placed.has(id)) }
@@ -258,6 +276,10 @@ export class BuildSite {
   }
 
   update(dt: number) {
+    if (this.glow.visible) {
+      this.glowTime += dt
+      this.glow.scale.set(1, 0.9 + 0.1 * Math.sin(this.glowTime * 3), 1)
+    }
     if (this.pop <= 0) return
     this.pop = Math.max(0, this.pop - dt)
     const k = 0.8 * (1 + Math.sin((1 - this.pop / 0.35) * Math.PI) * 0.35)

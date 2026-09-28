@@ -4,7 +4,7 @@ import * as THREE from 'three'
 import { MAX_ALIVE, POWERUPS, ROUND_BREAK, isBossRound, isStormRound, zombiesInRound } from '../src/game/zombies/rules'
 import { DROPPED_KINDS, PowerupDropper } from '../src/game/zombies/powerups'
 import { FIRST_ROUND_DELAY, newGame, returnSpawns, stepRounds } from '../src/game/zombies/rounds'
-import { BOX_SPIN, BOX_WEIGHTS, MYTHIC_CHANCE, RAY_GUN_CHANCE, RESERVE_MAGAZINES, WALL_WEAPONS, ZOMBIE_SLOTS, freshWeapon, pointsForHit, rollBox, startingPistol, wallOffer } from '../src/game/zombies/economy'
+import { BOX_SPIN, BOX_WEIGHTS, INK_CANNON_CHANCE, MYTHIC_CHANCE, RAY_GUN_CHANCE, RESERVE_MAGAZINES, WALL_WEAPONS, ZOMBIE_SLOTS, freshWeapon, pointsForHit, rollBox, startingPistol, wallOffer } from '../src/game/zombies/economy'
 import { SHEET, findWallSpots } from '../src/game/zombies/placement'
 import { NavGraph, type NavData } from '../src/game/zombies/navgraph'
 import { seeded } from '../src/game/shared/random'
@@ -139,10 +139,13 @@ assert.equal(freshWeapon('z', 'smg').reserve, WEAPON_RULES.smg.capacity * RESERV
   const rays = names.rayGun ?? 0
   assert(rays > draws * 0.03 && rays < draws * 0.07, `the Ink Ray is a rare draw (${(rays / draws * 100).toFixed(1)}%)`)
   assert(!rarities.common, 'the box never gives grey')
+  // The second wonder weapon, the Ink Cannon, is rarer still.
+  const cannons = names.inkCannon ?? 0
+  assert(cannons > draws * 0.015 && cannons < draws * 0.055, `the Ink Cannon is a rare draw (${(cannons / draws * 100).toFixed(1)}%)`)
   // Ordinary guns: gold is rare among them, and each comes up in proportion to its weight.
-  const ordinary = draws - rays, gold = rarities.legendary - rays
+  const ordinary = draws - rays - cannons, gold = rarities.legendary - rays - cannons
   assert(gold > 0 && gold < ordinary * 0.12, `gold is rare (${gold} of ${ordinary})`)
-  const pool = (['smg', 'shotgun', 'sniper', 'magnum', 'lmg', 'rocket'] as WeaponName[]), total = pool.reduce((s, n) => s + BOX_WEIGHTS[n], 0)
+  const pool = (Object.keys(BOX_WEIGHTS) as WeaponName[]).filter(n => BOX_WEIGHTS[n] > 0 && n !== 'pistol' && n !== 'ak'), total = pool.reduce((s, n) => s + BOX_WEIGHTS[n], 0)
   for (const n of pool) assert(Math.abs(names[n] / ordinary - BOX_WEIGHTS[n] / total) < 0.015, `${n} share`)
   for (const r of Object.keys(rarities)) assert(RARITIES.includes(r as never))
 }
@@ -152,19 +155,19 @@ assert.equal(freshWeapon('z', 'smg').reserve, WEAPON_RULES.smg.capacity * RESERV
   const random = seeded(4242)
   const held = [startingPistol(), null]
   const draws = 400_000
-  let mythics = 0, rays = 0
+  let mythics = 0, rays = 0, cannons = 0
   const tiers: Record<string, number> = {}
   for (let i = 0; i < draws; i++) {
     const roll = rollBox(random, held)
-    if (roll.special) { rays++; assert.equal(roll.rarity, 'legendary', 'the Ink Ray is always gold, never Mythic'); continue }
+    if (roll.special) { if (roll.special === 'rayGun') rays++; else cannons++; assert.equal(roll.rarity, 'legendary', 'the wonder weapons are always gold, never Mythic'); continue }
     if (roll.rarity === 'mythic') mythics++
     else tiers[roll.rarity] = (tiers[roll.rarity] ?? 0) + 1
   }
-  const share = mythics / draws, expected = (1 - RAY_GUN_CHANCE) * MYTHIC_CHANCE
+  const share = mythics / draws, expected = (1 - RAY_GUN_CHANCE - INK_CANNON_CHANCE) * MYTHIC_CHANCE
   assert(share > expected * 0.75 && share < expected * 1.25, `Mythic is about ${(expected * 100).toFixed(3)}% of box rolls (${(share * 100).toFixed(3)}%, ${mythics} of ${draws})`)
   assert(Math.abs(rays / draws - RAY_GUN_CHANCE) < 0.003, 'the Mythic roll comes after the Ink Ray and leaves its odds alone')
   // Grey to gold among the rest are exactly the chest odds.
-  const rest = draws - rays - mythics, chest = DROP_WEIGHTS.chest, total = RARITIES.reduce((sum, r) => sum + chest[r], 0)
+  const rest = draws - rays - cannons - mythics, chest = DROP_WEIGHTS.chest, total = RARITIES.reduce((sum, r) => sum + chest[r], 0)
   for (const r of RARITIES) if (r !== 'mythic') assert(Math.abs((tiers[r] ?? 0) / rest - chest[r] / total) < 0.004, `${r} keeps its chest share`)
   assert(!tiers.common, 'still never grey')
   // Never twice: carrying a Mythic, the box never offers another.
