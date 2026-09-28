@@ -17,8 +17,8 @@
 @keyframes ping-throb { 50% { transform: scale(1.18); } }
 body[data-reduced-motion='true'] .ping-drop { animation: none !important; }
 
-/* The phone's ping button: a small round ink button above the hotbar's right end. */
-.ping-button { position: fixed; right: 16px; bottom: 132px; z-index: 7; width: 48px; height: 48px; border-radius: 50%;
+/* The phone's ping button: a small round ink button on the right, above the points and grenades. */
+.ping-button { position: fixed; right: 16px; bottom: 196px; z-index: 7; width: 48px; height: 48px; border-radius: 50%;
   border: 2px solid #000; background: #fff; color: #2878d0; display: grid; place-items: center; padding: 0; box-shadow: 2px 2px 0 #000; touch-action: manipulation; }
 .ping-button svg { width: 26px; height: 26px; }
 .ping-button:active { transform: translate(1px, 1px); box-shadow: 1px 1px 0 #000; }

@@ -210,7 +210,8 @@ export class Pings {
       this.ping()
     }, options)
     const parent = this.options.parent
-    if (parent && typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches) {
+    // A touch screen (a phone, a tablet): there is no middle button, so a small ping button in the corner.
+    if (parent && typeof window !== 'undefined' && (window.matchMedia?.('(pointer: coarse)').matches || navigator.maxTouchPoints > 0)) {
       const button = document.createElement('button')
       button.type = 'button'
       button.className = 'ping-button'
