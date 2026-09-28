@@ -59,6 +59,7 @@ export type CannonBurst = { at: THREE.Vector3; charge: number; packed: boolean; 
 type Blob = { root: THREE.Group; velocity: THREE.Vector3; age: number; charge: number; packed: boolean; remote: boolean; drip: number }
 type Drop = { mesh: THREE.Mesh; velocity: THREE.Vector3; age: number; life: number }
 type Ring = { mesh: THREE.Mesh; age: number; life: number; size: number }
+type Puddle = { mesh: THREE.Mesh; age: number; life: number; size: number }
 
 const colourOf = (packed: boolean) => packed ? CANNON_INK_PACKED : CANNON_INK
 
@@ -70,6 +71,8 @@ export class InkBlobs {
   private blobs: Blob[] = []
   private drops: Drop[] = []
   private rings: Ring[] = []
+  private puddles: Puddle[] = []
+  private puddleGeometry = new THREE.CircleGeometry(1, 20).rotateX(-Math.PI / 2)
   private ball = new THREE.SphereGeometry(0.16, 16, 12)
   private shell = new THREE.SphereGeometry(0.175, 16, 12)
   private dropGeometry = new THREE.SphereGeometry(0.045, 8, 6)
@@ -141,6 +144,13 @@ export class InkBlobs {
       drop.mesh.scale.setScalar(Math.max(0.01, 1 - drop.age / drop.life))
       if (drop.age >= drop.life) { drop.mesh.removeFromParent(); this.drops.splice(this.drops.indexOf(drop), 1) }
     }
+    for (const puddle of [...this.puddles]) {
+      puddle.age += step
+      // Spreads out fast, then dries back into the paper over its last seconds.
+      puddle.mesh.scale.setScalar(puddle.size * Math.min(1, 0.3 + puddle.age * 3))
+      ;(puddle.mesh.material as THREE.MeshBasicMaterial).opacity = 0.9 * Math.min(1, (puddle.life - puddle.age) / 2.5)
+      if (puddle.age >= puddle.life) { puddle.mesh.removeFromParent(); (puddle.mesh.material as THREE.Material).dispose(); this.puddles.splice(this.puddles.indexOf(puddle), 1) }
+    }
     for (const ring of [...this.rings]) {
       ring.age += step
       const t = ring.age / ring.life
@@ -171,6 +181,22 @@ export class InkBlobs {
     while (this.drops.length > 160) { const old = this.drops.shift()!; old.mesh.removeFromParent() }
   }
 
+  /** A melted zombie: a puddle of the cannon's ink on the floor where it stood, drying after a while. */
+  puddle(at: THREE.Vector3, packed = false) {
+    const floor = this.world.floor(at.clone().setY(at.y + 0.6), 0.2, 3)
+    const material = new THREE.MeshBasicMaterial({ color: colourOf(packed), transparent: true, opacity: 0.9, depthWrite: false, toneMapped: false,
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })
+    const mesh = new THREE.Mesh(this.puddleGeometry, material)
+    mesh.position.set(at.x + (Math.random() - 0.5) * 0.3, (Number.isFinite(floor) ? floor : at.y) + 0.025, at.z + (Math.random() - 0.5) * 0.3)
+    mesh.scale.set(0.3, 1, 0.3)
+    mesh.rotation.y = Math.random() * Math.PI
+    mesh.userData.noCollision = true
+    mesh.name = 'Ink Cannon puddle'
+    this.scene.add(mesh)
+    this.puddles.push({ mesh, age: 0, life: 10, size: 0.75 + Math.random() * 0.3 })
+    while (this.puddles.length > 30) { const old = this.puddles.shift()!; old.mesh.removeFromParent(); (old.mesh.material as THREE.Material).dispose() }
+  }
+
   private drop(at: THREE.Vector3, velocity: THREE.Vector3, packed: boolean, life: number) {
     const mesh = new THREE.Mesh(this.dropGeometry, this.inkOf(packed))
     mesh.position.copy(at)
@@ -190,12 +216,13 @@ export class InkBlobs {
     for (const blob of [...this.blobs]) this.remove(blob)
     for (const drop of this.drops) drop.mesh.removeFromParent()
     for (const ring of this.rings) { ring.mesh.removeFromParent(); (ring.mesh.material as THREE.Material).dispose() }
-    this.drops = []; this.rings = []
+    for (const puddle of this.puddles) { puddle.mesh.removeFromParent(); (puddle.mesh.material as THREE.Material).dispose() }
+    this.drops = []; this.rings = []; this.puddles = []
   }
 
   dispose() {
     this.clear()
-    for (const geometry of [this.ball, this.shell, this.dropGeometry, this.ringGeometry]) geometry.dispose()
+    for (const geometry of [this.ball, this.shell, this.dropGeometry, this.ringGeometry, this.puddleGeometry]) geometry.dispose()
     this.outline.dispose()
     for (const material of [...this.ink.values(), ...this.splash.values()]) material.dispose()
   }

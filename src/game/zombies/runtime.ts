@@ -119,7 +119,7 @@ const LATE_WALL_WEAPONS: { name: 'magnum' | 'lmg'; near: [number, number, number
 const NEW_WALL_WEAPONS: { name: 'burst' | 'pdw' | 'lever'; near: [number, number, number] }[] = [
   { name: 'burst', near: [-38, 0, -30] },
   { name: 'pdw', near: [10, 0, 5] },
-  { name: 'lever', near: [70, 0, -25] },
+  { name: 'lever', near: [57, 0, -10] },
 ]
 
 /** The Ink Doll wall is in the warehouse, the first zone past the start worth fighting for. */
@@ -2708,6 +2708,8 @@ export class ZombiesRuntime {
   // ---------------------------------------------------------------- frame
 
   private emit(event: SoundEvent) {
+    // A body the Ink Cannon melted (here, or on a guest through the snapshot) leaves a puddle of its ink.
+    if (event.kind === 'ink-melt' && event.position) this.blobs.puddle(event.position.clone().setY(event.position.y - 1))
     if (this.death.active && !['player-death', 'player-fall'].includes(event.kind)) return
     const eye = this.camera.perspective.position
     const distance = event.position ? eye.distanceTo(event.position) : 0

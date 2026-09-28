@@ -25,6 +25,8 @@ function inks() {
   return materials
 }
 
+/** The cannon is modelled large and held at this scale. */
+const CANNON_SCALE = 0.72
 const ring = (r: number, t: number, pos: V, rot: V = [90, 0, 0]) => part(new THREE.TorusGeometry(r, t, 8, 28), metal, pos, rot)
 
 /**
@@ -35,15 +37,22 @@ const ring = (r: number, t: number, pos: V, rot: V = [90, 0, 0]) => part(new THR
  */
 export function buildInkCannon(packed = false): Gun {
   const muzzleZ = 0.44
-  const result = gun('shotgun', 'shotgun', true, [0, AXIS, muzzleZ], [0.03, AXIS, 0.02], (g, parts) => {
+  const S = CANNON_SCALE
+  let inner: THREE.Group | null = null
+  const result = gun('shotgun', 'shotgun', true, [0, AXIS * S, muzzleZ * S], [0.03 * S, AXIS * S, 0.02 * S], (root, parts) => {
+    // Everything is drawn at full size inside a group held at CANNON_SCALE (baked into the batched geometry).
+    const g = new THREE.Group()
+    g.scale.setScalar(S)
+    root.add(g)
+    inner = g
     // The pistol grip and a short, thick stock shoulder.
     const grip = new THREE.Group()
     grip.rotation.x = THREE.MathUtils.degToRad(-12)
     grip.add(part(new THREE.CapsuleGeometry(0.02, 0.07, 6, 14).scale(0.95, 1, 1.15), metal, [0, -0.004, 0]))
     for (const [i, y] of [-0.026, -0.006, 0.014].entries()) grip.add(path([new THREE.Vector3(-0.014, y, 0.019), new THREE.Vector3(0, y - 0.003, 0.023), new THREE.Vector3(0.014, y, 0.019)], 1600 + i, 1.1))
     g.add(grip)
-    g.add(box(0.05, 0.05, 0.12, [0, 0.07, -0.1]))
-    g.add(box(0.056, 0.074, 0.02, [0, 0.062, -0.165]))
+    // A short knuckled cap behind the breech (no shoulder stock: it is fired from the hip).
+    g.add(part(new THREE.CylinderGeometry(0.03, 0.042, 0.05, 20), metal, [0, AXIS, -0.055], [90, 0, 0]))
     // The trigger in a round guard.
     g.add(part(new THREE.TorusGeometry(0.022, 0.0035, 8, 24, Math.PI), metal, [0, 0.03, 0.035], [0, 90, 180]))
     g.add(box(0.006, 0.024, 0.006, [0, 0.03, 0.04], metal, [-20, 0, 0]))
@@ -73,7 +82,9 @@ export function buildInkCannon(packed = false): Gun {
 
     // The ink tank on the breech: a glass drum in a frame, the ink inside (added after batching).
     const tank = new THREE.Group()
-    tank.position.set(0, AXIS + 0.08, 0.02)
+    // Riding low on the breech's left shoulder, so it never covers the sights.
+    tank.position.set(-0.045, AXIS + 0.05, 0.05)
+    tank.scale.setScalar(0.75)
     tank.add(ring(0.036, 0.005, [0, 0, 0.055], [0, 0, 0]))
     tank.add(ring(0.036, 0.005, [0, 0, -0.055], [0, 0, 0]))
     for (let i = 0; i < 4; i++) {
@@ -84,13 +95,13 @@ export function buildInkCannon(packed = false): Gun {
     parts.tank = tank
     g.add(tank)
     // A filler cap and a pressure gauge on the tank.
-    g.add(part(new THREE.CylinderGeometry(0.011, 0.013, 0.012, 14), metal, [0, AXIS + 0.124, 0.02]))
+    g.add(part(new THREE.CylinderGeometry(0.008, 0.01, 0.01, 14), metal, [-0.045, AXIS + 0.082, 0.05]))
     g.add(part(new THREE.CylinderGeometry(0.014, 0.014, 0.008, 18), metal, [0.04, AXIS + 0.055, -0.04], [0, 0, 90]))
     g.add(path([new THREE.Vector3(0.0445, AXIS + 0.055, -0.04), new THREE.Vector3(0.0445, AXIS + 0.063, -0.034)], 1630, 1.3))
 
     // The canister: a fat cartridge of ink that seats in the side of the breech, the Ink Cannon's magazine.
     const canister = new THREE.Group()
-    canister.position.set(-0.058, AXIS - 0.01, 0.0)
+    canister.position.set(0.058, AXIS - 0.01, 0.0)
     canister.add(tube(0.02, 0.07, [0, 0, 0], metal, [90, 0, 0]))
     canister.add(ring(0.02, 0.004, [0, 0, 0.03], [0, 0, 0]))
     canister.add(ring(0.02, 0.004, [0, 0, -0.03], [0, 0, 0]))
@@ -118,8 +129,8 @@ export function buildInkCannon(packed = false): Gun {
   const mouth = new THREE.Mesh(new THREE.CircleGeometry(0.032, 24), colour)
   mouth.name = 'Ink Cannon mouth ink'
   mouth.position.set(0, AXIS, 0.292)
-  result.add(mouth)
-  result.userData.support = new THREE.Vector3(0, AXIS - 0.08, 0.2)
+  ;(inner ?? result).add(mouth)
+  result.userData.support = new THREE.Vector3(0, AXIS - 0.08, 0.2).multiplyScalar(S)
   return result
 }
 
@@ -134,5 +145,5 @@ export function setCannonCharge(model: THREE.Object3D, charge: number) {
   const c = THREE.MathUtils.clamp(charge, 0, 1)
   level.scale.y = 0.55 + 0.45 * c
   level.position.y = -0.012 * (1 - c)
-  tank.scale.setScalar(1 + 0.08 * c * c)
+  tank.scale.setScalar(0.75 * (1 + 0.08 * c * c))
 }

@@ -117,8 +117,8 @@ export function buildPdw(): Gun {
     bore(upper, 0.009, 0.235, muzzleZ, 0.062, 12)
     // The ring sight: a round hood on a riser, a dot in the middle.
     upper.add(box(0.02, 0.018, 0.03, [0, 0.12, 0.03], dark))
-    upper.add(part(new THREE.TorusGeometry(0.019, 0.0045, 8, 24), metal, [0, 0.148, 0.03]))
-    upper.add(part(new THREE.SphereGeometry(0.0022, 6, 4), dark, [0, 0.148, 0.03]))
+    upper.add(part(new THREE.TorusGeometry(0.014, 0.0038, 8, 24), metal, [0, 0.142, 0.03]))
+    upper.add(part(new THREE.SphereGeometry(0.0022, 6, 4), dark, [0, 0.142, 0.03]))
     // The folded stock: two rails and a butt plate along the left side.
     upper.add(box(0.008, 0.008, 0.13, [-0.034, 0.05, -0.05], dark))
     upper.add(box(0.008, 0.008, 0.13, [-0.034, 0.085, -0.05], dark))
