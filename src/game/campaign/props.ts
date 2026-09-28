@@ -6,6 +6,7 @@ import { createMissionControl } from '../mission-controls'
 import { CAMERA_LIGHTS } from '../security'
 import type { Station, StationKind } from '../types'
 import type { CameraAnchor, ExtractionAnchor, MapModule, PanelKind } from './types'
+import { createHelicopter as createDetailedHelicopter, type HelicopterRig } from './helicopter'
 
 /**
  * What the campaign adds to a map's world so its anchors can be used: chairs and locks at the cells, the
@@ -19,6 +20,8 @@ export type MapProps = {
   stations: Station[]
   cameras: CameraObject[]
   vehicles: Map<string, THREE.Group>
+  /** The helicopters' rigs, by extraction id (their rotors, doors, rope and lights). */
+  helicopters: Map<string, HelicopterRig>
   chairs: Map<string, THREE.Object3D>
 }
 
@@ -122,42 +125,6 @@ export function poleCamera(spec: CameraAnchor): CameraObject {
   return { id: spec.id, root, pivot, lamp }
 }
 
-/**
- * A small ink helicopter: cabin, tail boom, skids, and rotors that spin (userData.rotors). Its origin is the
- * middle of the skids on the ground; it faces +Z.
- */
-export function createHelicopter() {
-  const root = new THREE.Group()
-  root.name = 'Extraction helicopter'
-  root.userData = { noCollision: true, kind: 'helicopter' }
-  const body = new Draft('Helicopter body')
-  body.box(2.1, 1.7, 3.6, 0, 1.55, 0.2, 'paper', 'edge')
-  body.box(1.9, 1.1, 1.2, 0, 1.35, 2.35, 'glass', 'edge')
-  body.beam([0, 1.9, -1.4], [0, 2.2, -7.2], 0.42, 'paper', 'edge')
-  body.box(0.12, 1.3, 1.0, 0, 2.6, -7.1, 'paper', 'edge')
-  for (const x of [-1.05, 1.05]) {
-    body.beam([x, 0.12, -1.6], [x, 0.12, 2.4], 0.1, 'roof', 'detail')
-    for (const z of [-1, 1.6]) body.beam([x, 0.12, z], [x * 0.8, 0.75, z], 0.07, 'roof', 'detail')
-  }
-  // The open side door the team climbs in by.
-  body.box(0.02, 1.2, 1.3, 1.06, 1.5, 0.4, 'roof', 'detail')
-  body.box(0.34, 0.3, 0.34, 0, 2.55, 0.2, 'roof', 'detail')
-  root.add(body.finish())
-  const rotor = new Draft('Helicopter main rotor')
-  for (const angle of [0, Math.PI / 2]) rotor.box(0.3, 0.05, 11, 0, 0, 0, 'roof', 'detail', [0, angle, 0])
-  const rotorGroup = new THREE.Group()
-  rotorGroup.position.set(0, 2.78, 0.2)
-  rotorGroup.add(rotor.finish())
-  const tail = new Draft('Helicopter tail rotor')
-  tail.box(0.04, 1.6, 0.18, 0, 0, 0, 'roof', 'detail')
-  const tailGroup = new THREE.Group()
-  tailGroup.position.set(0.12, 2.6, -7.1)
-  tailGroup.add(tail.finish())
-  root.add(rotorGroup, tailGroup)
-  root.userData.rotors = [rotorGroup, tailGroup]
-  return root
-}
-
 /** A painted landing pad: a circle and an H. */
 function helipad(extraction: ExtractionAnchor) {
   const pad = new Draft(`${extraction.label} · landing pad`, extraction.park[0], extraction.park[2], extraction.heading)
@@ -188,6 +155,7 @@ export function buildMapProps(map: MapModule, doors: readonly THREE.Group[], exi
   root.name = `Rescue campaign props · ${map.name}`
   root.userData.noCollision = true
   const stations: Station[] = [], cameras: CameraObject[] = [], vehicles = new Map<string, THREE.Group>(), chairs = new Map<string, THREE.Object3D>()
+  const helicopters = new Map<string, HelicopterRig>()
   for (const cell of Object.values(map.cells)) {
     if (cell.chair) { const seat = chair(cell.hostage, cell.facing); root.add(seat); chairs.set(cell.id, seat) }
     if (cell.station) {
@@ -214,12 +182,14 @@ export function buildMapProps(map: MapModule, doors: readonly THREE.Group[], exi
   }
   for (const extraction of Object.values(map.extractions)) {
     if (extraction.kind === 'helicopter') {
-      const helicopter = createHelicopter()
+      const rig = createDetailedHelicopter()
+      const helicopter = rig.root
       helicopter.position.set(...extraction.park)
       helicopter.rotation.y = extraction.heading
       helicopter.visible = false
       root.add(helipad(extraction), helicopter)
       vehicles.set(extraction.id, helicopter)
+      helicopters.set(extraction.id, rig)
       stations.push({ id: `board:${extraction.id}`, kind: 'jeep', object: helicopter, label: 'Board the helicopter',
         point: new THREE.Vector3(...extraction.board).setY(extraction.board[1] + 1.1) })
     }
@@ -230,5 +200,5 @@ export function buildMapProps(map: MapModule, doors: readonly THREE.Group[], exi
   }
   for (const boost of Object.values(map.boosts)) root.add(boostMark(boost.from, boost.to))
   root.updateMatrixWorld(true)
-  return { root, stations, cameras, vehicles, chairs }
+  return { root, stations, cameras, vehicles, helicopters, chairs }
 }

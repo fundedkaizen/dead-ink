@@ -44,7 +44,8 @@ const cells: CellAnchor[] = [
 const jeepRoute: Vec3[] = [[155, 0.05, 11], [161, 0.05, 11], [169, 0.05, 11], [175, 0.05, 11]]
 const helicopter = (id: string, label: string, x: number, z: number, heading: number, call: Vec3): ExtractionAnchor => ({
   id, kind: 'helicopter', label, board: [x + Math.sin(heading + Math.PI / 2) * 2.2, 0.05, z + Math.cos(heading + Math.PI / 2) * 2.2],
-  seats: [[x, 0.9, z], [x + Math.sin(heading) * 0.8, 0.9, z + Math.cos(heading) * 0.8]],
+  // In the right-hand doorway, sitting on the cabin floor, one behind the other.
+  seats: [0.3, -0.35].map((along): Vec3 => [x + Math.cos(heading) * 0.78 + Math.sin(heading) * along, 0.74, z - Math.sin(heading) * 0.78 + Math.cos(heading) * along]),
   park: [x, 0, z], heading,
   route: [[x, 0, z], [x, 6, z], [x + Math.sin(heading) * 30, 22, z + Math.cos(heading) * 30], [x + Math.sin(heading) * 90, 45, z + Math.cos(heading) * 90]],
   camera: { target: [x, 3, z], offset: [-14, 8, 18] },

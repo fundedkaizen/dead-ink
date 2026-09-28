@@ -1,6 +1,11 @@
 import * as THREE from 'three'
 import type { MissionRuntime } from '../runtime'
 import { ENEMY_COMBAT } from '../balance'
+import { PLAYER_COLORS } from '../shared/coop'
+import { RotorSound, RotorWash, poseHelicopter, seatPassengers } from './helicopter'
+
+/** Seconds of the helicopter's clock it spends flying in, and hovering down onto the pad. */
+const APPROACH = 16, HOVER = 4
 
 /**
  * What the campaign draws in the world so the angles can be read: a faint ink fan in front of any guard who is
@@ -59,11 +64,14 @@ export class CampaignVisuals {
   private clock = 0
   private landing = 0
   private arrived = false
+  private wash: RotorWash
+  private sound = new RotorSound()
 
   constructor(private r: MissionRuntime, scene: THREE.Scene) {
     this.root.name = 'Campaign sight lines'
     this.root.userData.noCollision = true
     scene.add(this.root)
+    this.wash = new RotorWash(scene)
     this.glintMaterial = new THREE.SpriteMaterial({ map: glintTexture(), transparent: true, depthWrite: false, sizeAttenuation: false, toneMapped: false })
   }
 
@@ -165,41 +173,89 @@ export class CampaignVisuals {
     })
   }
 
-  /** The helicopter comes down once it has arrived, rotors turning; its rotors race as it lifts off. */
+  /**
+   * The helicopter's flight, from the run alone (so co-op guests see the same): nothing until the last
+   * APPROACH seconds of its clock, then it flies in low over the compound with its searchlight on, flares,
+   * hovers over the pad with the rope down, settles, and idles there with the doors slid open. The lift-off
+   * is the escape (escape()).
+   */
   private updateVehicle(dt: number) {
     const r = this.r, campaign = r.campaign, run = r.state.run
-    if (!campaign || !run) return
-    const vehicle = campaign.props.vehicles.get(campaign.mission.extraction)
-    if (!vehicle) return
-    if (run.arrived && !this.arrived) { this.arrived = true; this.landing = 0 }
-    if (!run.arrived) { this.arrived = false; return }
-    if (!r.escape.active) {
-      this.landing = Math.min(1, this.landing + dt / 5)
-      const t = 1 - (1 - this.landing) ** 3
-      const park = campaign.extraction.park
-      vehicle.position.set(park[0], park[1] + (1 - t) * 34, park[2])
-      vehicle.rotation.set(0, campaign.extraction.heading + (1 - t) * 0.6, 0)
+    const rig = campaign?.props.helicopters.get(campaign.mission.extraction)
+    if (!campaign || !run || !rig) { this.sound.update(0, 999, false); this.wash.update(dt, null, 0); return }
+    if (r.escape.active) return
+    const extraction = campaign.extraction, park = new THREE.Vector3(...extraction.park)
+    const heading = extraction.heading
+    const back = new THREE.Vector3(-Math.sin(heading), 0, -Math.cos(heading))
+    let visible = false, rpm = 0, doors = 0, rope = 0, searchlight = false, pitch = 0, roll = 0
+    const position = park.clone(), yaw = { value: heading }
+    if (run.arrived) {
+      if (!this.arrived) { this.arrived = true; this.landing = 0 }
+      this.landing = Math.min(1, this.landing + dt / 1.6)
+      visible = true; rpm = 0.72; doors = THREE.MathUtils.smoothstep(this.landing, 0, 1)
+    } else {
+      this.arrived = false
+      if (run.called && run.eta <= APPROACH) {
+        visible = true; rpm = 1; searchlight = true
+        if (run.eta > HOVER) {
+          // Inbound: from far out and high, along a curve, to the hover point over the pad.
+          const s = 1 - (run.eta - HOVER) / (APPROACH - HOVER), e = 1 - (1 - s) ** 2
+          const start = park.clone().addScaledVector(back, 150).add(new THREE.Vector3(back.z * 40, 55, -back.x * 40))
+          const mid = park.clone().addScaledVector(back, 45).setY(24)
+          const hover = park.clone().setY(park.y + 9)
+          const a = start.clone().lerp(mid, e), b = mid.clone().lerp(hover, e)
+          position.copy(a.lerp(b, e))
+          const ahead = start.clone().lerp(mid, Math.min(1, e + 0.02)).lerp(mid.clone().lerp(hover, Math.min(1, e + 0.02)), Math.min(1, e + 0.02))
+          yaw.value = Math.atan2(ahead.x - position.x, ahead.z - position.z)
+          // Nose down while it travels, flaring (nose up) as it slows over the pad.
+          pitch = s < 0.8 ? 0.22 : THREE.MathUtils.lerp(0.22, -0.16, (s - 0.8) / 0.2)
+          roll = Math.sin(s * Math.PI) * 0.12
+        } else {
+          // Hover, rope down, then settle onto the skids.
+          const s = 1 - run.eta / HOVER
+          const hold = Math.min(1, s / 0.5), settle = Math.max(0, (s - 0.5) / 0.5)
+          position.y = park.y + 9 * (1 - settle * settle * (3 - 2 * settle))
+          yaw.value = heading
+          rope = 6 * Math.sin(Math.min(1, hold) * Math.PI)
+          pitch = -0.06 * (1 - settle); roll = Math.sin(this.clock * 1.3) * 0.03 * (1 - settle)
+        }
+      }
     }
-    this.spin(vehicle, dt, 1)
+    rig.root.visible = visible
+    if (!visible) { this.sound.update(0, 999, false); this.wash.update(dt, null, 0); return }
+    rig.root.position.copy(position)
+    rig.root.rotation.set(0, yaw.value, 0)
+    poseHelicopter(rig, { rpm, doors, rope, searchlight, pitch, roll, time: this.clock }, dt)
+    const altitude = position.y - park.y
+    this.wash.update(dt, park.clone().setX(position.x).setZ(position.z), rig.rpm * Math.max(0, 1 - altitude / 16))
+    this.sound.update(rig.rpm, position.distanceTo(r.view.position), true)
   }
 
-  private spin(vehicle: THREE.Object3D, dt: number, speed: number) {
-    const rotors = vehicle.userData.rotors as THREE.Object3D[] | undefined
-    if (!rotors) return
-    rotors[0].rotation.y += dt * 22 * speed
-    rotors[1].rotation.x += dt * 30 * speed
-  }
-
-  /** During the escape: a flying vehicle's rotors race. */
+  /** During the escape: the rotors race, the nose dips as it pulls away, the team sits in the doorway. */
   escape(dt: number) {
-    const campaign = this.r.campaign
-    const vehicle = campaign?.props.vehicles.get(campaign.mission.extraction)
-    if (vehicle) this.spin(vehicle, dt, 1.4)
+    const r = this.r, campaign = r.campaign
+    const rig = campaign?.props.helicopters.get(campaign.mission.extraction)
+    if (!rig || !campaign) return
+    if (!rig.passengers.visible) {
+      const ids = [r.coop?.link.id ?? 0, ...(r.coop?.paired ? [...r.coop.mates.keys()] : [])]
+      seatPassengers(rig, ids.map(id => PLAYER_COLORS[id] ?? PLAYER_COLORS[0]))
+      rig.passengers.visible = true
+    }
+    const speed = r.escape.speed
+    poseHelicopter(rig, { rpm: 1.2, doors: 1, rope: 0, searchlight: false, pitch: Math.min(0.28, speed * 0.02), roll: 0, time: this.clock }, dt)
+    const altitude = rig.root.position.y - campaign.extraction.park[1]
+    this.wash.update(dt, new THREE.Vector3(rig.root.position.x, campaign.extraction.park[1], rig.root.position.z), rig.rpm * Math.max(0, 1 - altitude / 16))
+    this.sound.update(rig.rpm, rig.root.position.distanceTo(r.view.position), true)
   }
 
-  reset() { this.arrived = false; this.landing = 0 }
+  reset() {
+    this.arrived = false; this.landing = 0
+    this.wash.clear(); this.sound.update(0, 999, false)
+    for (const rig of this.r.campaign?.props.helicopters.values() ?? []) { rig.passengers.visible = false; rig.rpm = 0 }
+  }
 
   dispose() {
+    this.wash.dispose(); this.sound.dispose()
     this.root.removeFromParent()
     for (const cone of [...this.guardCones, ...this.cameraCones.values()]) { cone.fillMaterial.dispose(); cone.edgeMaterial.dispose() }
     for (const geometry of [this.guardFan, this.guardEdge, this.cameraFan, this.cameraEdge]) geometry.dispose()

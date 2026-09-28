@@ -173,7 +173,8 @@ export class CampaignSession {
       setDoorOpen(door, released, true)
     }
     for (const station of this.props.stations) station.object.visible = this.visible(station)
-    for (const [id, vehicle] of this.props.vehicles) vehicle.visible = id === this.mission.extraction && run.arrived
+    // Helicopters: campaign/visuals.ts flies them in from the run.
+    for (const [id, vehicle] of this.props.vehicles) if (!this.props.helicopters.has(id)) vehicle.visible = id === this.mission.extraction && run.arrived
     const jeep = this.r.world.rescue?.jeep
     if (jeep) jeep.visible = this.extraction.kind === 'jeep' || this.r.escape.active
     this.r.player.world.refresh()
