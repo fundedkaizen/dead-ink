@@ -93,7 +93,7 @@ export class MysteryBox {
   timer = 0
   /** Spins at this spot: the teddy only comes after a few. */
   uses = 0
-  offer: { name: WeaponName; rarity: Rarity; special?: 'rayGun' } | null = null
+  offer: { name: WeaponName; rarity: Rarity; special?: 'rayGun' | 'inkCannon' } | null = null
   private teddyNext = false
   private lid = new THREE.Group()
   private body = new THREE.Group()
@@ -180,7 +180,7 @@ export class MysteryBox {
   }
 
   /** Start a spin with the gun it will land on, or with the teddy bear. */
-  spin(result: { name: WeaponName; rarity: Rarity; special?: 'rayGun' }, teddy = false) {
+  spin(result: { name: WeaponName; rarity: Rarity; special?: 'rayGun' | 'inkCannon' }, teddy = false) {
     this.offer = teddy ? null : result
     this.teddyNext = teddy
     this.state = 'spinning'
@@ -329,7 +329,7 @@ export class MysteryBox {
     return null
   }
 
-  private setFloating(name: WeaponName | null, rarity?: Rarity, special?: 'rayGun') {
+  private setFloating(name: WeaponName | null, rarity?: Rarity, special?: 'rayGun' | 'inkCannon') {
     if (name !== this.floatingName || rarity) {
       if (this.floating) { disposeGun(this.floating); this.floating = null }
       // The beam's material is shared across all loot of a colour; only its shapes are this box's.

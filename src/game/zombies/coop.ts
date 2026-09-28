@@ -53,14 +53,14 @@ export type CoopMessage =
   | { t: 'announce'; text: string; s: number; tone?: string }
   | { t: 'sting'; name: 'roundStart' | 'boxSpin' | 'song' }
   | { t: 'gate'; id: string }
-  | { t: 'box'; a: 'spin' | 'take' | 'close' | 'move'; r?: { name: WeaponName; rarity: string; special?: 'rayGun' }; teddy?: boolean; by?: number; spot?: number }
+  | { t: 'box'; a: 'spin' | 'take' | 'close' | 'move'; r?: { name: WeaponName; rarity: string; special?: 'rayGun' | 'inkCannon' }; teddy?: boolean; by?: number; spot?: number }
   | { t: 'drop'; k: PowerupKind; p: [number, number, number] }
   | { t: 'grab'; k: PowerupKind; p: [number, number, number]; by: number }
   // `k`: how it looks and sounds (a rocket's, a Deadline round's); a frag's when missing.
   | { t: 'boom'; p: [number, number, number]; r: number; k?: BlastKind }
   | { t: 'soul'; p: [number, number, number]; i: number }
   /** A teammate fired: the tracer from `o` to `e`, the gun (`raygun` for the Ink Ray) and its Pack-a-Punch level, to see and hear. */
-  | { t: 'fire'; o: [number, number, number]; e: [number, number, number]; w: string; pk?: number }
+  | { t: 'fire'; o: [number, number, number]; e: [number, number, number]; w: string; pk?: number; /** The Ink Cannon's charge, 0 to 1. */ c?: number }
   | { t: 'gameover' }
   | { t: 'start' }
   // guest -> host

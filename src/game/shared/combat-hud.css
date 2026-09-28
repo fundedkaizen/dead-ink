@@ -37,3 +37,8 @@
 .hud-slot.empty { opacity: 0.5; }
 @media (prefers-reduced-motion: reduce) { .hud-slot { transition: none; } }
 @media (max-width: 640px) { .hud-slot { width: 58px; height: 42px; } .hud-slot-name { font-size: 11px; } }
+/* A wonder weapon's own mark, drawn in ink at the cell's top left; empty (and taking no room) for every other gun. */
+.hud-slot-icon-slot:empty { display: none; }
+.hud-slot-icon-slot { position: absolute; top: 3px; left: 5px; line-height: 0; }
+.hud-slot-icon { width: 24px; height: 15px; color: var(--ink); }
+.hud-slot:has(.hud-slot-icon) .hud-slot-name { margin-top: 10px; }

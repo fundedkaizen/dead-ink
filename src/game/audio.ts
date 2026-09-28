@@ -19,6 +19,10 @@ const SAMPLES: Record<string, { files: string[]; gain: number; pitch?: number }>
   'shot-sniper': { files: series('shot_rifle', 5), gain: 0.9, pitch: 0.72 },
   'shot-magnum': { files: series('shot_pistol', 4), gain: 1, pitch: 0.68 },
   'shot-lmg': { files: series('shot_rifle', 5), gain: 0.88, pitch: 0.86 },
+  // Dead Ink's newer guns: the burst pistol a snappier pistol, the PDW a light high chatter, the lever rifle a deep boom.
+  'shot-burst': { files: series('shot_pistol', 4), gain: 0.7, pitch: 1.14 },
+  'shot-pdw': { files: series('shot_rifle', 5), gain: 0.56, pitch: 1.45 },
+  'shot-lever': { files: series('shot_rifle', 5), gain: 0.95, pitch: 0.64 },
   'enemy-shot-pistol': { files: series('shot_pistol', 4), gain: 0.7 },
   'enemy-shot-ak': { files: series('shot_rifle', 5), gain: 0.75 },
   'enemy-shot-smg': { files: series('shot_rifle', 5), gain: 0.6, pitch: 1.28 },

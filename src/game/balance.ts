@@ -28,7 +28,21 @@ export const WEAPON_RULES = {
   // Dead Ink's Mystery Box launcher: one rocket to a load. Its rocket does its damage by bursting
   // (zombies/rockets.ts), so these are its handling; `damage` only scales that burst with rarity.
   rocket: { label: 'Ink Rocket', capacity: 1, reload: 2.6, interval: 0.8, range: 150, damage: 40, automatic: false, kick: 0.07, settle: 0.8 },
+  // Dead Ink's newer guns. The burst pistol: three rounds a pull (BURST_FIRE), a step up from the pistol.
+  burst: { label: 'Burst pistol', capacity: 18, reload: 1.9, interval: 0.34, range: 110, damage: 32, automatic: false, kick: 0.02, settle: 0.55 },
+  // The PDW: a compact, fast SMG with a long magazine and a lighter round.
+  pdw: { label: 'PDW', capacity: 40, reload: 2.3, interval: 0.07, range: 90, damage: 22, automatic: true, kick: 0.01, settle: 0.62 },
+  // The lever-action rifle: eight heavy rounds through a tube, each one worked by the lever, and they go through two bodies.
+  lever: { label: 'Lever rifle', capacity: 8, reload: 2.8, interval: 0.62, range: 190, damage: 120, automatic: false, kick: 0.06, settle: 0.8 },
+  // The Ink Cannon, the Mystery Box's second wonder weapon: hold to charge, let go to lob a blob of ink
+  // (zombies/ink-cannon.ts does the damage by bursting; `damage` is unused).
+  cannon: { label: 'Ink Cannon', capacity: 3, reload: 2.8, interval: 0.7, range: 90, damage: 60, automatic: false, kick: 0.1, settle: 0.85 },
 } as const
+
+/** Guns that fire a burst per trigger pull: how many rounds, and the gap between them (seconds). */
+export const BURST_FIRE: Partial<Record<keyof typeof WEAPON_RULES, { count: number; gap: number }>> = {
+  burst: { count: 3, gap: 0.065 },
+}
 
 export const ENEMY_WEAPONS = {
   pistol: { magazine: 12, reload: 1.9, damage: 10, burst: 3, gap: 0.2, pause: [0.65, 0.95] },

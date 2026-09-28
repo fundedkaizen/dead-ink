@@ -80,11 +80,13 @@ export function pierceOf(item: { name: WeaponName; special?: string; packLevel?:
   const level = item.packLevel ?? (item.packed ? 1 : 0)
   // The Deadline's rounds are explosive: each bursts in the first body it strikes (Mustang & Sally).
   if (item.name === 'magnum' && level > 0) return 1
-  const base = item.name === 'sniper' ? 3 : item.name === 'magnum' || item.name === 'lmg' ? 2 : 1
+  const base = item.name === 'sniper' ? 3 : item.name === 'magnum' || item.name === 'lmg' || item.name === 'lever' ? 2 : 1
   return base + (level > 0 ? (item.name === 'sniper' ? 2 : 1) : 0)
 }
 export const PACKED_NAMES: Record<WeaponName, string> = { pistol: 'Fountain Pen', smg: 'Inkjet', ak: 'Blotter', shotgun: 'Splatter', sniper: 'Quill',
-  magnum: 'Deadline', lmg: 'Printing Press', rocket: 'Press Ram' }
+  magnum: 'Deadline', lmg: 'Printing Press', rocket: 'Press Ram',
+  // Three dots for a three-round burst; the PDW's clatter; a signature at the end of the page; the cannon's flood.
+  burst: 'Ellipsis', pdw: 'Typewriter', lever: 'Signature', cannon: 'Ink Deluge' }
 /**
  * Two upgrades change a gun's handling, as in Call of Duty. The Deadline is a pair of Magnums, one in
  * each hand, as Mustang & Sally: six rounds a gun, and the two take turns, so shots come quicker. The
@@ -93,14 +95,22 @@ export const PACKED_NAMES: Record<WeaponName, string> = { pistol: 'Fountain Pen'
 export const PACKED_HANDLING: Partial<Record<WeaponName, { capacity: number; interval?: number }>> = {
   magnum: { capacity: 12, interval: 0.3 },
   rocket: { capacity: 2 },
+  // The Ellipsis holds eight bursts; the Typewriter a longer belt; the Signature a longer tube; the Deluge four blobs.
+  burst: { capacity: 24 },
+  pdw: { capacity: 60 },
+  lever: { capacity: 12, interval: 0.5 },
+  cannon: { capacity: 4 },
 }
 
-export function weaponRules(item: { name: WeaponName; rarity?: Rarity; special?: 'deathMachine' | 'rayGun'; packed?: boolean; packLevel?: number }): ScaledRules {
+export function weaponRules(item: { name: WeaponName; rarity?: Rarity; special?: 'deathMachine' | 'rayGun' | 'inkCannon'; packed?: boolean; packLevel?: number }): ScaledRules {
   const base = WEAPON_RULES[item.name]
   // The Ink Ray's bolts do their damage by bursting (the runtime's blast), so its rules are its handling.
   // Upgraded, it is Porter's X2: twice the magazine and a little faster.
   if (item.special === 'rayGun') return { ...base, label: item.packed ? 'Ink Ray X2' : 'Ink Ray', capacity: item.packed ? 40 : 20,
     interval: item.packed ? 0.26 : 0.3, kick: 0.02, settle: 0.5, range: 120 }
+  // The Ink Cannon's blobs do their damage by bursting (zombies/ink-cannon.ts); upgraded once, to the Ink Deluge.
+  if (item.special === 'inkCannon') return { ...base, label: item.packed ? PACKED_NAMES.cannon : base.label,
+    capacity: item.packed ? PACKED_HANDLING.cannon!.capacity : base.capacity, reload: base.reload * (item.packed ? 0.85 : 1) }
   if (item.special === 'deathMachine') return { ...base, label: 'Death Machine', automatic: true,
     interval: DEATH_MACHINE.interval, damage: base.damage * DEATH_MACHINE.damage, kick: DEATH_MACHINE.kick, settle: DEATH_MACHINE.settle }
   const rules: ScaledRules = { ...base }
