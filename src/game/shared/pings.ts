@@ -270,10 +270,14 @@ export class Pings {
     if (this.options.sound !== false) inkTick(true, ping.by === this.options.me())
   }
 
+  /** The teammate's name on a marker ("Ana: "), empty for your own. */
+  private who(ping: Ping) { return this.options.nameOf && ping.by !== this.options.me() && ping.n >= 0 ? `${this.options.nameOf(ping.by)}: ` : '' }
+
   private draw(ping: Ping) {
     const element = ping.element
     if (!element) return
-    const who = this.options.nameOf && ping.by !== this.options.me() ? `${this.options.nameOf(ping.by)}: ` : ''
+    const who = this.who(ping)
+    element.dataset.who = who
     const label = ping.danger ? `Danger${ping.kind === 'spot' ? '' : `: ${ping.label}`}` : ping.label
     element.innerHTML = `<svg class="ping-drop" viewBox="0 0 24 30" aria-hidden="true"><path d="M12 29c-1.4-2.3-9.5-10-9.5-17A9.5 9.5 0 0 1 12 2.5 9.5 9.5 0 0 1 21.5 12c0 7-8.1 14.7-9.5 17z" fill="var(--ping-fill)" stroke="#000" stroke-width="1.6" stroke-linejoin="round"/>${ICONS[ping.danger ? 'danger' : ping.kind]}</svg>
       <span class="ping-text"><b>${escapeHtml(who + label)}</b><small class="ping-distance"></small></span><i class="ping-arrow" aria-hidden="true"></i>`
@@ -286,6 +290,8 @@ export class Pings {
     const camera = this.options.camera
     const eye = camera.getWorldPosition(new THREE.Vector3())
     const distance = eye.distanceTo(ping.position)
+    // A teammate's name can arrive after their first ping: draw it again once it does.
+    if (element.dataset.who !== this.who(ping)) this.draw(ping)
     const text = `${Math.round(distance)} m`
     const small = element.querySelector<HTMLElement>('.ping-distance')
     if (small && small.textContent !== text) small.textContent = text

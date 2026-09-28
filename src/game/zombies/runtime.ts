@@ -75,7 +75,7 @@ import { BuildGuide, buildGuide, partToast, partsGot, siteWanted, type BuildStat
 import { inkwingHealth, stormNumber } from './rules'
 
 /** A fresh game's numbers for the end-of-game awards. */
-const freshStats = () => ({ revives: 0, spent: 0, clutch: 0, dollKills: 0, explosiveKills: 0, wonderKills: 0, planks: 0, boxSpins: 0, damageTaken: 0, downs: 0 })
+const freshStats = () => ({ revives: 0, spent: 0, clutch: 0, dollKills: 0, explosiveKills: 0, wonderKills: 0, planks: 0, boxSpins: 0, downs: 0 })
 
 export type ZombieState = {
   phase: 'active' | 'dead' | 'complete'
@@ -340,7 +340,7 @@ export class ZombiesRuntime {
   private shotsHit = 0
   /**
    * This game's numbers for the end-of-game awards (../shared/awards.ts): revives, points spent, kills with the
-   * back to the wall, by Ink Doll, by explosive, by wonder weapon, planks nailed back, box spins, damage taken.
+   * back to the wall, by Ink Doll, by explosive, by wonder weapon, planks nailed back, box spins, times down.
    */
   private stats = freshStats()
   /** Co-op, on the host: each guest's numbers, as they last sent them. */
@@ -1404,6 +1404,8 @@ export class ZombiesRuntime {
     this.zombieHud.announce('You are down', 2.5)
     this.hud.notify('Crawl and keep shooting: a teammate can pick you up.', 4, true)
     this.coop.send({ t: 'down', dn: 1 })
+    // The host may end the game any moment now: let it have this player's numbers for the awards.
+    if (this.isGuest) this.coop.send({ t: 'stats', v: this.awardValues() })
   }
 
   /** Out comes the best pistol you carry (the Ink Ray first, as the Ray Gun in Call of Duty), or a spare one. */
@@ -2674,7 +2676,6 @@ export class ZombiesRuntime {
         return
       }
     }
-    this.stats.damageTaken += Math.min(amount, this.state.health)
     this.state.health = Math.max(0, this.state.health - amount)
     this.lastHurt = this.state.elapsed
     const dead = this.state.health === 0

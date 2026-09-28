@@ -47,7 +47,7 @@ export const ZOMBIE_AWARDS: readonly AwardDef[] = [
   { id: 'knife', title: 'Up close', stat: 'knifeKills', better: 'high', min: 5, detail: v => `${n(v)} knife kills` },
   { id: 'planks', title: 'Carpenter', stat: 'planks', better: 'high', min: 5, detail: v => `${n(v)} planks nailed back` },
   { id: 'box', title: 'Box addict', stat: 'boxSpins', better: 'high', min: 3, detail: v => `${n(v)} spins of the box` },
-  { id: 'untouchable', title: 'Untouchable', stat: 'damageTaken', better: 'low', team: true, detail: v => `only ${n(v)} damage taken` },
+  { id: 'survivor', title: 'Survivor', stat: 'downs', better: 'low', team: true, detail: v => v === 0 ? 'never went down' : `down only ${n(v)} time${v === 1 ? '' : 's'}` },
 ]
 
 /** Given to a player who won nothing, so every player has at least one. */

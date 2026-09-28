@@ -69,10 +69,10 @@ test('Game over files the game in the right table and the summary says New best'
 // ---------------------------------------------------------------- awards
 
 const four: AwardStats[] = [
-  { player: 0, name: 'Kai', color: '#2878d0', values: { kills: 210, headshots: 60, revives: 1, spent: 18000, clutch: 2, damageTaken: 400 } },
-  { player: 1, name: 'Ana', color: '#2e9b45', values: { kills: 180, headshots: 75, revives: 4, spent: 9000, dollKills: 12, damageTaken: 150 } },
-  { player: 2, name: 'Sam', color: '#e08a1e', values: { kills: 90, headshots: 10, revives: 0, spent: 30000, explosiveKills: 40, damageTaken: 900 } },
-  { player: 3, name: 'Lee', color: '#9b4fd6', values: { kills: 40, headshots: 2, revives: 0, spent: 500, damageTaken: 1200 } },
+  { player: 0, name: 'Kai', color: '#2878d0', values: { kills: 210, headshots: 60, revives: 1, spent: 18000, clutch: 2, downs: 3 } },
+  { player: 1, name: 'Ana', color: '#2e9b45', values: { kills: 180, headshots: 75, revives: 4, spent: 9000, dollKills: 12, downs: 2 } },
+  { player: 2, name: 'Sam', color: '#e08a1e', values: { kills: 90, headshots: 10, revives: 0, spent: 30000, explosiveKills: 40, downs: 4 } },
+  { player: 3, name: 'Lee', color: '#9b4fd6', values: { kills: 40, headshots: 2, revives: 0, spent: 500, downs: 5 } },
 ]
 
 test('Every player gets one or two awards, in their colour, in player order', () => {
@@ -89,8 +89,8 @@ test('Every player gets one or two awards, in their colour, in player order', ()
 })
 
 test('Alone: no team awards, the best one or two of what you did', () => {
-  const [solo] = awardsFor([{ player: 0, name: 'Kai', values: { kills: 120, headshots: 30, revives: 3, dollKills: 4, damageTaken: 20 } }])
-  assert(!solo.awards.some(a => a.id === 'revives' || a.id === 'untouchable'), 'team awards need a team')
+  const [solo] = awardsFor([{ player: 0, name: 'Kai', values: { kills: 120, headshots: 30, revives: 3, dollKills: 4, downs: 0 } }])
+  assert(!solo.awards.some(a => a.id === 'revives' || a.id === 'survivor'), 'team awards need a team')
   assert(solo.awards.length >= 1 && solo.awards.length <= 2)
 })
 

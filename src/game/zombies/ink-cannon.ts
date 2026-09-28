@@ -257,6 +257,9 @@ export class InkPools {
       mesh = new THREE.Mesh(new THREE.ShapeGeometry(shape).rotateX(-Math.PI / 2), this.material.clone())
       const border = new THREE.Mesh(new THREE.ShapeGeometry(rim).rotateX(-Math.PI / 2), this.edge.clone())
       border.position.y = -0.005
+      // Both are see-through and write no depth: draw the rim first so the ink lies over it.
+      border.renderOrder = 1
+      mesh.renderOrder = 2
       mesh.add(border)
       mesh.position.set(at.x, floor + 0.03, at.z)
       mesh.userData.noCollision = true
