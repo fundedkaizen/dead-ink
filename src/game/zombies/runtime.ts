@@ -18,6 +18,7 @@ import { PlayerDeathSequence } from '../player-death'
 import type { MenuCopy } from '../menu'
 import type { MissionWorld, Shot, SoundEvent, WeaponItem, WeaponName, WeaponSnapshot } from '../types'
 import { HitMarkers } from '../shared/hitmarkers'
+import { createPings, type PingTarget, type Pings } from '../shared/pings'
 import { DamageIndicator } from '../shared/damage-indicator'
 import { Hotbar } from '../shared/hotbar'
 import { seeded, weighted, type Random } from '../shared/random'
@@ -202,6 +203,9 @@ export class ZombiesRuntime {
   readonly hits: HitMarkers
   readonly indicator: DamageIndicator
   readonly hotbar: Hotbar
+  /** Pings (../shared/pings.ts): middle mouse, Z, the pad's D-pad right, or the phone's ping button. */
+  readonly pings: Pings
+  private unbindPings: () => void
   readonly zombieHud: ZombieHud
   readonly riseMarks: RiseMarks
   readonly sparks: MuzzleSparks
@@ -429,6 +433,12 @@ export class ZombiesRuntime {
     this.powerMarker = new WorldMarker(hudRoot, POWER_ICON, 'The power switch')
     this.indicator = new DamageIndicator(hudRoot)
     this.chargeMeter = new ChargeMeter(hudRoot)
+    this.pings = createPings({ camera: camera.perspective, parent: hudRoot, me: () => this.coop.id,
+      colorOf: id => PLAYER_CSS[id] ?? PLAYER_CSS[0], nameOf: id => this.mateName(id),
+      pick: (origin, direction) => this.pingTarget(origin, direction),
+      resolve: id => { const z = this.director?.zombies.find(zombie => zombie.id === id && zombie.state === 'chase'); return z ? z.position.clone().setY(z.position.y + (z.boss ? BOSS.scale * 1.95 : 1.95)) : null },
+      send: message => this.coop.send(message) })
+    this.unbindPings = this.pings.bind(document.querySelector<HTMLElement>('#world')!, () => this.isActive())
     // One more cell than you start with, for Spare Nib's third gun; the hotbar hides cells you do not have.
     this.hotbar = new Hotbar(hudRoot, ZOMBIE_SLOTS + 1)
     this.addDifficultySetting()
@@ -669,6 +679,7 @@ export class ZombiesRuntime {
     this.downWeapons = null; this.player.crawling = false; this.player.actions.disabled = false; this.syringe.stop(); this.zombieHud.lastStand(null)
     this.lastTick = null
     this.partnerLures = []
+    this.pings.clear()
     if (this.coop.role === 'host') { this.sendSync(); this.coop.send({ t: 'start' }) }
   }
 
@@ -1580,6 +1591,13 @@ export class ZombiesRuntime {
         break
       }
       case 'down': { const mate = this.mates.get(from); if (mate?.state) mate.state.dn = m.dn; break }
+      case 'ping': {
+        // A guest's ping reaches the host marked with who sent it; the host passes it on to the other guests.
+        const { from: sender, ...ping } = m
+        if (this.coop.role === 'host' && sender !== undefined) { ping.by = sender; this.coop.send(ping, { skip: sender }) }
+        this.pings.receive(ping)
+        break
+      }
     }
   }
 
@@ -1741,6 +1759,49 @@ export class ZombiesRuntime {
     if (!old) return
     this.player.world.removeObject(old)
     this.solids.delete(owner)
+  }
+
+  /**
+   * What a ping points at, along the view: a zombie under the crosshair, else the station, part or power-up
+   * the view passes closest to (within a few degrees, and not far behind the first wall), else the spot where
+   * the view meets the ground or a wall.
+   */
+  private pingTarget(origin: THREE.Vector3, direction: THREE.Vector3): PingTarget | null {
+    const dir = direction.clone().normalize()
+    const wall = this.player.world.raySurface(origin, dir, 120)?.distance ?? 120
+    // A zombie: the nearest living body close to the line of sight, in front of the wall.
+    let enemy: Zombie | null = null, enemyAlong = Infinity
+    for (const zombie of this.director?.zombies ?? []) {
+      if (zombie.state !== 'chase') continue
+      const chest = zombie.position.clone().setY(zombie.position.y + 1.1 * (zombie.boss ? BOSS.scale : 1))
+      const to = chest.clone().sub(origin), along = to.dot(dir)
+      if (along <= 0.5 || along > wall + 0.6) continue
+      const off = to.addScaledVector(dir, -along).length()
+      if (off < (zombie.boss ? 1.6 : 0.85) + along * 0.012 && along < enemyAlong) { enemy = zombie; enemyAlong = along }
+    }
+    if (enemy) return { kind: 'enemy', id: enemy.id, label: enemy.brute?.editor ? 'The Editor' : enemy.boss ? 'The Brute' : 'Zombie',
+      position: enemy.position.clone().setY(enemy.position.y + (enemy.boss ? BOSS.scale * 1.95 : 1.95)) }
+    // Things you can use or pick up.
+    const items: { point: THREE.Vector3; label: string }[] = []
+    for (const buy of this.wallBuys) items.push({ point: buy.point, label: WEAPON_RULES[buy.weapon].label })
+    if (this.box) items.push({ point: this.box.point, label: 'Mystery Box' })
+    for (const machine of this.perkMachines) items.push({ point: machine.point, label: PERKS[machine.kind].name })
+    if (this.pack && this.packBuilt) items.push({ point: this.pack.point, label: 'Pack-a-Punch' })
+    if (this.dollBuy) items.push({ point: this.dollBuy.point, label: 'Ink Dolls' })
+    if (this.powerSwitch && this.powerSwitch.state !== 'on') items.push({ point: this.powerSwitch.point, label: 'Power switch' })
+    for (const part of this.parts) if (part.root.visible) items.push({ point: part.point, label: PARTS[part.id].label })
+    for (const drop of this.powerups.active) items.push({ point: drop.position.clone().setY(drop.position.y + 0.8), label: POWERUP_INFO[drop.kind].label })
+    for (const gate of this.zones?.gates ?? []) if (gate.state === 'closed') items.push({ point: this.zones!.nearestPoint(gate, origin).setY(origin.y - 0.4), label: `Door to ${gate.spec.zone}` })
+    let item: { point: THREE.Vector3; label: string } | null = null, best = Infinity
+    for (const candidate of items) {
+      const to = candidate.point.clone().sub(origin), along = to.dot(dir)
+      if (along <= 0.3 || along > Math.min(80, wall + 2.5)) continue
+      const angle = to.angleTo(dir)
+      if (angle < THREE.MathUtils.degToRad(5) + 0.5 / along && angle < best) { best = angle; item = candidate }
+    }
+    if (item) return { kind: 'item', label: item.label, position: item.point.clone() }
+    if (wall >= 120) return null
+    return { kind: 'spot', position: origin.clone().addScaledVector(dir, wall - 0.05) }
   }
 
   /** A challenge done: a short toast with what it unlocked. */
@@ -2978,6 +3039,7 @@ export class ZombiesRuntime {
     this.hits.update(running, this.camera.perspective, window.innerWidth, window.innerHeight)
     this.indicator.update(running, this.camera.perspective.position, yaw)
     this.hotbar.update(this.weapons.slots, this.weapons.selectedSlot)
+    this.pings.update(dt)
     this.chargeMeter.update(this.player.playing && held?.special === 'inkCannon' ? this.weapons.chargeLevel : null, !!held?.packed)
     this.zombieHud.update(running, this.state.round, this.state.points)
     const boss = this.liveBoss()
@@ -3016,7 +3078,7 @@ export class ZombiesRuntime {
     for (const machine of this.perkMachines) machine.dispose()
     this.pack?.dispose(); this.bottle.dispose(); this.packedLook.dispose()
     this.director?.dispose()
-    this.hits.dispose(); this.indicator.dispose(); this.hotbar.dispose(); this.zombieHud.dispose()
+    this.hits.dispose(); this.indicator.dispose(); this.hotbar.dispose(); this.unbindPings(); this.pings.dispose(); this.zombieHud.dispose()
     this.minimap?.dispose()
     this.uninstallCosmetics(); this.lowHealth.dispose(); this.stopSettings(); this.bulletTrails.dispose(); this.weapons.dispose(); this.blood.dispose(); this.impacts.dispose(); this.riseMarks.dispose(); this.sparks.dispose(); this.shockwaves.dispose(); this.explosions.dispose(); this.nukeCloud.dispose(); this.undress?.(); this.grenades.dispose(); this.dolls.dispose(); this.dollBuy?.dispose(); this.bolts.dispose(); this.rockets.dispose(); this.blobs.dispose(); this.inkPools.dispose(); this.chargeMeter.dispose(); this.powerups.dispose()
     for (const skull of this.skulls) skull.object.removeFromParent()

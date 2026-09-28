@@ -1,0 +1,24 @@
+/* Pings (pings.ts): an ink drop in the player's colour over what was pinged, seen through walls, with how far. */
+.ping { position: fixed; left: 0; top: 0; z-index: 6; pointer-events: none; display: flex; flex-direction: column; align-items: center;
+  --ping-fill: var(--ping); margin: -32px 0 0 -40px; width: 80px; transition: opacity 0.2s; }
+.ping.danger { --ping-fill: #d4332a; }
+.ping-drop { width: 26px; height: 32px; filter: drop-shadow(0 1px 0 #fff) drop-shadow(0 -1px 0 #fff); animation: ping-land 0.32s cubic-bezier(0.2, 1.6, 0.4, 1) both; transform-origin: 50% 100%; }
+.ping.danger .ping-drop { animation: ping-land 0.32s cubic-bezier(0.2, 1.6, 0.4, 1) both, ping-throb 0.7s ease-in-out 0.32s infinite; }
+.ping-text { display: flex; flex-direction: column; align-items: center; margin-top: 1px; line-height: 1.05; white-space: nowrap;
+  font: 700 12px/1.1 var(--font-hand, 'Segoe Print', 'Comic Sans MS', cursive); color: #000;
+  text-shadow: 0 0 2px #fff, 0 0 3px #fff, 0 0 4px #fff; }
+.ping-text b { color: #000; border-bottom: 2px solid var(--ping-fill); padding: 0 2px; }
+.ping-text small { font-size: 11px; font-weight: 700; }
+.ping-arrow { display: none; position: absolute; top: 8px; left: 50%; width: 0; height: 0; margin-left: 13px;
+  border-left: 9px solid var(--ping-fill); border-top: 6px solid transparent; border-bottom: 6px solid transparent; transform-origin: -13px 50%; }
+.ping.edge .ping-arrow { display: block; }
+.ping.edge .ping-drop { width: 20px; height: 25px; }
+@keyframes ping-land { from { transform: scale(0.2) translateY(-10px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes ping-throb { 50% { transform: scale(1.18); } }
+body[data-reduced-motion='true'] .ping-drop { animation: none !important; }
+
+/* The phone's ping button: a small round ink button above the hotbar's right end. */
+.ping-button { position: fixed; right: 16px; bottom: 132px; z-index: 7; width: 48px; height: 48px; border-radius: 50%;
+  border: 2px solid #000; background: #fff; color: #2878d0; display: grid; place-items: center; padding: 0; box-shadow: 2px 2px 0 #000; touch-action: manipulation; }
+.ping-button svg { width: 26px; height: 26px; }
+.ping-button:active { transform: translate(1px, 1px); box-shadow: 1px 1px 0 #000; }

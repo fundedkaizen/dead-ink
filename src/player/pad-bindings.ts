@@ -51,6 +51,8 @@ export function padBindings(canvas: HTMLCanvasElement, player: FirstPersonContro
       // Q throws a grenade in Dead Ink unless a sniper is scoped: only ever send it to zoom.
       case 'zoomOut': if (scoped() || (!zombies && aiming())) key('KeyQ'); break
       case 'map': if (!zombies) key('KeyM'); break
+      // Pings (game/shared/pings.ts) listen for Z, in both modes.
+      case 'ping': key('KeyZ'); break
       // Straight to the pause menu: a synthetic Escape would also reach the menu, which reads it as Resume.
       case 'pause': player.pause(); break
     }

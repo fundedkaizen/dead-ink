@@ -3,6 +3,7 @@ import type { WeaponName } from '../types'
 import type { ZombieSnap } from './director'
 import type { BlastKind } from './blasts'
 import type { PowerupKind } from './rules'
+import type { PingMessage } from '../shared/pings'
 
 /**
  * Dead Ink co-op: up to four players, each in their own browser, talking through the relay
@@ -83,6 +84,8 @@ export type CoopMessage =
   // either way (a guest reviving another guest goes through the host: `target`)
   | { t: 'revive'; target?: number; by?: string }
   | { t: 'down'; dn: 0 | 1 | 2 }
+  // Pings (../shared/pings.ts): a guest's go to the host, which passes them on to the other guests.
+  | PingMessage
 
 /** A message as it arrives: the relay marks a guest's messages to the host with who sent them. */
 export type CoopIncoming = CoopMessage & { from?: number }
