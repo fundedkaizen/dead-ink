@@ -47,6 +47,8 @@ export type CampaignRun = {
   stones: number; charges: number
   /** Boost spot -> the player lifting there (co-op). */
   boosts?: Record<string, number>
+  /** Cameras shot out (checkpoints keep them out; co-op guests see them dead). */
+  camerasOut?: string[]
   /** Spotter marks the team shares: a guard (by index) or a camera (by id), until a mission time. */
   marks?: { kind: 'guard' | 'camera'; ref: string; until: number }[]
   // What the run counted, for the stars and the summary.

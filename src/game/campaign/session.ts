@@ -218,6 +218,8 @@ export class CampaignSession {
     const tiers = rulesFor(run.difficulty).tiers
     for (const [id, kennel] of this.props.kennels) { const dog = this.map.dogs[id]; kennel.visible = this.mission.dogs.includes(id) && (!dog?.tier || tiers.includes(dog.tier)) }
     for (const [id, nest] of this.props.nests) { const guard = this.map.guards[id]; nest.visible = this.mission.guards.includes(id) && (!guard?.tier || tiers.includes(guard.tier)) }
+    // Cameras shot out stay out (after a checkpoint, and on co-op guests).
+    for (const id of run.camerasOut ?? []) this.r.security.destroy(id)
     // Helicopters and boats: campaign/visuals.ts brings them in from the run.
     const jeep = this.r.world.rescue?.jeep
     if (jeep) jeep.visible = this.extraction.kind === 'jeep' || this.r.escape.active
@@ -578,7 +580,7 @@ export class CampaignSession {
       if (existing) existing.until = until
       else run.marks.push({ kind: a as 'guard' | 'camera', ref: b, until })
     } else if (kind === 'camera') {
-      if (r.security.destroy(a)) note('Camera down.')
+      if (r.security.destroy(a)) { note('Camera down.'); run.camerasOut = [...(run.camerasOut ?? []), a] }
     }
   }
 

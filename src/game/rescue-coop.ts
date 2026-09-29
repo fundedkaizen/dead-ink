@@ -744,7 +744,7 @@ export class RescueCoop {
    */
   private mirror(mirror: MissionMirror) {
     const r = this.r, state = r.state
-    const key = () => `${state.gateOpen}|${state.hostages.map(hostage => hostage.status).join()}|${state.camerasActive}|${state.alarm}`
+    const key = () => `${state.gateOpen}|${state.hostages.map(hostage => hostage.status).join()}|${state.camerasActive}|${state.alarm}|${state.run?.used.length}|${state.run?.unlocked.length}|${state.run?.camerasOut?.length}|${state.run?.arrived}`
     const before = key()
     const failing = !r.escape.active && state.phase === 'active' && mirror.phase === 'dead'
     const escaping = !r.escape.active && state.phase === 'active' && (mirror.jeep === 'escaping' || mirror.jeep === 'escaped')
