@@ -64,6 +64,7 @@ export class CampaignSession {
   private lzNoise = 0
   private recorded = false
   private lastAlarm: MissionState['alarm'] = 'inactive'
+  private shutLocked = true
 
   constructor(private r: MissionRuntime, scene: THREE.Scene) {
     this.worldGuards = structuredClone(r.world.enemies)
@@ -141,7 +142,7 @@ export class CampaignSession {
     this.charges = mission.tools.charges
     this.boosting = null; this.hold = null; this.summary = null; this.recorded = false
     this.plantedCharges = []; this.turns.clear(); this.syncs.clear(); this.ammoTaken.clear()
-    this.combatFor = 0; this.lastStage = 0; this.lzNoise = 0; this.lastAlarm = 'inactive'
+    this.combatFor = 0; this.lastStage = 0; this.lzNoise = 0; this.lastAlarm = 'inactive'; this.shutLocked = true
     this.loading = false
     return mission
   }
@@ -174,7 +175,10 @@ export class CampaignSession {
       door.userData.missionLocked = !open
       // The guards carry keys: they still come and go through it (and a door a guard leaves open is a chance).
       door.userData.guardKey = true
+      // A new mission starts with its locked doors shut (later, a guard may leave one open).
+      if (!open && this.shutLocked && door.userData.open) setDoorOpen(door, false, true)
     }
+    this.shutLocked = false
     for (const name of this.mission.alarmLocks) {
       const door = this.doors.get(name)
       if (!door || run.unlocked.includes(name) || this.mission.lockedDoors.some(locked => locked.door === name && !run.unlocked.includes(name))) continue
