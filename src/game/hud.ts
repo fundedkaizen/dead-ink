@@ -141,7 +141,7 @@ export class MissionHUD {
       <path d="M${point(-40,-62.3)} L${point(-53,-62.3)} L${point(-61.8,-52)} L${point(-61.8,-44)} L${point(-53,-44)} L${point(-50,-30)} L${point(-50,4)} L${point(-20,4)} L${point(-20,20.1)} L${point(-11.75,20.1)} L${point(-11.75,14)} L${point(0,13)} L${point(55,16)} L${point(99,11)} L${point(110,5)} L${point(117,-2)} L${point(117,-9)}" stroke="var(--ink)" stroke-dasharray="4 3" stroke-width="1.4" fill="none"/>
       ${buildingsInk}
       <text x="${x(-43)}" y="${z(-59)}">Mess hall</text><text x="${x(-92)}" y="${z(-50)}">Service gate</text><text x="${x(7)}" y="${z(5)}">Warehouse</text><text x="${x(64)}" y="${z(3)}">Workshop</text><text x="${x(132)}" y="${z(15)}">Barracks</text><text x="${x(108)}" y="${z(-18)}">Detention</text>
-      ${world.stations.filter(s => ['cameras', 'gate', 'jeep'].includes(s.kind)).map(s => `<circle cx="${x(s.point.x)}" cy="${z(s.point.z)}" r="2.6" fill="var(--ink)"/><text text-anchor="${s.kind === 'gate' ? 'end' : 'start'}" x="${x(s.point.x)+(s.kind === 'gate' ? -5 : 5)}" y="${z(s.point.z)-5}">${s.id === SIGNALS_COMPUTER_ID ? 'Office terminal' : stationNames[s.kind]}</text>`).join('')}
+      ${world.stations.filter(s => ['cameras', 'gate', 'jeep'].includes(s.kind) && !s.id.includes(':')).map(s => `<circle cx="${x(s.point.x)}" cy="${z(s.point.z)}" r="2.6" fill="var(--ink)"/><text text-anchor="${s.kind === 'gate' ? 'end' : 'start'}" x="${x(s.point.x)+(s.kind === 'gate' ? -5 : 5)}" y="${z(s.point.z)-5}">${s.id === SIGNALS_COMPUTER_ID ? 'Office terminal' : stationNames[s.kind]}</text>`).join('')}
       <path id="field-player" d="M0 -5 3.5 4 0 2 -3.5 4Z" fill="var(--ink-deep)" stroke="var(--paper)" stroke-width="1"/>
     </svg>`
   }

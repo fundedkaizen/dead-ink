@@ -76,6 +76,24 @@ export function campaignMenuCopy(r: MissionRuntime, copy: MenuCopy): MenuCopy {
     if (html === lastHome) return
     lastHome = html
     home.innerHTML = html
+    renderField()
+  }
+
+  /** The Mission page (M): this mission's name, its stages so far, and its tips, over the field map. */
+  let lastField = ''
+  const renderField = () => {
+    const c = campaign(), run = r.state.run
+    const page = document.querySelector<HTMLElement>('[data-menu-page="mission"]')
+    if (!page || !run) return
+    const stages = c.mission.stages.map((stage, i) => `<li class="${i < run.stage ? 'done' : i === run.stage ? 'now' : ''}">${escape(stage.title)}</li>`).join('')
+    const html = `<summary>${escape(c.mission.name)}: stages and tips</summary><p>${escape(c.mission.briefing)}</p><ol class="campaign-stages">${stages}</ol>
+      <p>Crouch (C) to move quietly and stay low; lean round corners (Q, E); a guard's eye fills as he grows sure of you. Throw a stone (T) to pull a guard away, fly the drone (X) to mark the guards, take them down from behind (F), and breach a locked door (B). Tell ${escape(c.mission.hostageName)} to wait or follow (H).</p>`
+    if (html === lastField) return
+    lastField = html
+    const tips = page.querySelector<HTMLDetailsElement>('.mission-tips')
+    if (tips) { tips.innerHTML = html; tips.open = true }
+    const title = page.querySelector<HTMLElement>('#mission-page-title')
+    if (title) title.textContent = `Mission ${c.mission.number}: ${c.mission.name}`
   }
 
   const play = async (id: string, d: Difficulty) => {

@@ -95,3 +95,6 @@ body[data-mission="true"] .walk-card .campaign-summary .stars { font-size: 26px;
 }
 /* The campaign's home slot (the mission in play, the win summary) shows on every home page, not only the title. */
 .menu-card[data-title="false"] .menu-home-extra:has(.campaign-home) { display: block; }
+.campaign-stages { margin: 6px 0 10px; padding-left: 20px; font-size: 13px; color: var(--ink-muted); }
+.campaign-stages li.done { text-decoration: line-through; }
+.campaign-stages li.now { color: var(--ink); font-weight: 600; }
