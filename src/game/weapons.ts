@@ -226,8 +226,8 @@ export class FirstPersonWeapons {
   private scratchPose: HandPose | null = null
   private cuffs: THREE.Mesh[] = []
   private gloves: GloveId | null = null
-  private strapGeometry = new THREE.CylinderGeometry(0.0435, 0.0435, 0.012, 20, 1, true)
-  private buckleGeometry = new THREE.BoxGeometry(0.016, 0.014, 0.004)
+  private strapGeometry = new THREE.CylinderGeometry(0.0335, 0.0335, 0.008, 20, 1, true)
+  private buckleGeometry = new THREE.BoxGeometry(0.012, 0.01, 0.004)
   private strapMaterial = new THREE.MeshBasicMaterial({ color: 0x1c1c1c, toneMapped: false, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 })
 
   constructor(private context: WeaponContext) {
@@ -440,7 +440,8 @@ export class FirstPersonWeapons {
     const handMaterial = id ? gloveMaterial(id, 'hand') : this.armMaterial
     for (const shape of this.handShapes) shape.material = handMaterial
     if (id && !this.cuffs.length) {
-      const geometry = new THREE.CylinderGeometry(0.04, 0.042, 0.036, 20, 1, true)
+      // Sized to the hand's narrowing wrist, not the sleeve: it comes out of the sleeve's end and closes round the wrist.
+      const geometry = new THREE.CylinderGeometry(0.031, 0.033, 0.022, 20, 1, true)
       for (let i = 0; i < 2; i++) {
         const cuff = new THREE.Mesh(geometry, material)
         const contour = createPenSilhouette(geometry, 2.4)
@@ -450,7 +451,7 @@ export class FirstPersonWeapons {
         const strap = new THREE.Mesh(this.strapGeometry, this.strapMaterial)
         strap.add(createPenSilhouette(this.strapGeometry, 2))
         const buckle = new THREE.Mesh(this.buckleGeometry, this.strapMaterial)
-        buckle.position.set(0, 0, 0.044)
+        buckle.position.set(0, 0, 0.0345)
         buckle.add(createPenSilhouette(this.buckleGeometry, 2))
         cuff.add(strap, buckle)
         cuff.name = i ? 'Left glove cuff' : 'Right glove cuff'
@@ -461,7 +462,7 @@ export class FirstPersonWeapons {
     for (const cuff of this.cuffs) { cuff.material = material; cuff.visible = !!id }
   }
 
-  /** Each cuff sits just behind its hand, along the forearm. */
+  /** Each cuff sits round the wrist, along the forearm, just out of the sleeve's end. */
   private placeCuffs(wrists: [THREE.Vector3, THREE.Vector3]) {
     if (!this.gloves) return
     this.cuffs.forEach((cuff, i) => {
@@ -469,7 +470,7 @@ export class FirstPersonWeapons {
       cuff.visible = arm.fore.visible
       if (!cuff.visible) return
       const elbow = arm.elbow.position, axis = wrists[i].clone().sub(elbow).normalize()
-      cuff.position.copy(elbow).lerp(wrists[i], 0.965)
+      cuff.position.copy(wrists[i]).addScaledVector(axis, 0.008)
       cuff.quaternion.setFromUnitVectors(up, axis)
     })
   }
