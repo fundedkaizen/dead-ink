@@ -1345,6 +1345,8 @@ export class ZombiesRuntime {
   /** Every frame, playing or not: draw the teammates and the scoreboard, keep the lobby current, send our state. */
   private coopIdle(dt: number) {
     const paired = this.paired
+    // A guest's numbers for the awards go to the host about once a second (real time, however slow the frames).
+    this.statsTimer -= dt
     for (const mate of this.mates.values()) {
       const state = paired ? mate.state : null
       // A reviver kneels facing whoever they are reviving: us, or another teammate.
@@ -1367,7 +1369,7 @@ export class ZombiesRuntime {
         storm: this.storm, pw: this.power ? 1 : 0, pk: this.packBuilt ? 1 : 0, w: this.worldState(), ...(debris.length ? { bd: debris } : {}) })
     } else {
       this.coop.send({ t: 'me', me: this.myState() })
-      if ((this.statsTimer -= 1 / COOP.sendRate) <= 0) { this.statsTimer = 1; this.coop.send({ t: 'stats', v: this.awardValues() }) }
+      if (this.statsTimer <= 0) { this.statsTimer = 1; this.coop.send({ t: 'stats', v: this.awardValues() }) }
     }
   }
 

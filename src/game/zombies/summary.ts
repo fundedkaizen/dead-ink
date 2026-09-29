@@ -136,7 +136,7 @@ export const DEAD_INK_GAME_OVER: NonNullable<MenuCopy['gameOver']> = {
   build: slot => {
     body = slot; slot.classList.add('summary')
     // The host's awards arrive a moment after the game ends: show them as they come.
-    onReport(report => { if (!slot.closest('[hidden]')) showSummary(report) })
+    onReport(report => showSummary(report))
   },
   show: state => showSummary(lastReport() ?? reportFromState(state)),
 }
