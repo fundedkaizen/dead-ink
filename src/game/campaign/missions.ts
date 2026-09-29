@@ -16,10 +16,10 @@ export const MISSIONS: MissionDef[] = [
     extraction: 'east-jeep',
     cameras: ['detention-camera', 'jeep-camera', 'security-camera', 'mess-hall-exit-camera', 'rail-pole-camera'],
     panels: ['ammo-yard', 'ammo-annex'], lockedDoors: [], keycards: [], boosts: ['rail-fence', 'annex-fence'],
-    guards: ['world', 'annex-rail-watch', 'detention-yard', 'mess-yard-2', 'rail-yard-2', 'annex-night-1', 'annex-night-2', 'yard-night', 'warehouse-night'],
+    guards: ['world', 'reserve-extra-1', 'reserve-extra-2', 'reserve-extra-3', 'reserve-extra-4', 'annex-rail-watch', 'detention-yard', 'mess-yard-2', 'rail-yard-2', 'annex-night-1', 'annex-night-2', 'yard-night', 'warehouse-night'],
     dogs: [], alarmLocks: [],
     stages: [
-      { id: 'in', title: 'Get inside', objectives: [{ id: 'reach-rail', kind: 'reach', zone: 'rail-yard', text: 'Get through the mess hall to the rail yard' }] },
+      { id: 'in', title: 'Get inside', objectives: [{ id: 'reach-inside', kind: 'reach', zone: 'inside', text: 'Get into the compound: through the mess hall, or round by the west service gate' }] },
       { id: 'blind', title: 'Blind the cameras', objectives: [{ id: 'cameras', kind: 'use', panels: ['signals-office-computer', 'security-computer'], text: 'Shut the cameras down: the office terminal (60 s) or the security cabin (for good)' }] },
       { id: 'find', title: 'Find Tomas', objectives: [{ id: 'reach-annex', kind: 'reach', zone: 'detention', text: 'Reach the detention block in the east annex' }, { id: 'find', kind: 'find', text: 'Search the cells below the detention block' }] },
       { id: 'free', title: 'Free Tomas', objectives: [{ id: 'free', kind: 'free', text: 'Unlock his cell' }] },
@@ -44,7 +44,7 @@ export const MISSIONS: MissionDef[] = [
     ],
     keycards: [{ id: 'stores-card', label: 'the stores keycard', at: ['card-gatehouse', 'card-mess'] }],
     boosts: ['rail-fence', 'inner-fence'],
-    guards: ['world', 'warehouse-stores', 'warehouse-rear', 'stores-yard', 'stores-inside', 'shed-watch', 'west-fence', 'gatehouse-yard', 'admin-inside',
+    guards: ['world', 'reserve-extra-1', 'reserve-extra-2', 'reserve-extra-3', 'reserve-extra-4', 'warehouse-stores', 'warehouse-rear', 'stores-yard', 'stores-inside', 'shed-watch', 'west-fence', 'gatehouse-yard', 'admin-inside',
       'court-patrol', 'court-night', 'yard-lz', 'mess-yard-2', 'yard-night', 'west-night', 'mess-roof-sniper', 'warehouse-night'],
     dogs: ['dog-yard', 'dog-stores'], alarmLocks: ['West administration wing · entry 1'],
     stages: [
@@ -73,7 +73,7 @@ export const MISSIONS: MissionDef[] = [
     ],
     keycards: [{ id: 'barracks-card', label: 'the barracks keycard', at: ['card-medical', 'card-shed', 'card-gatehouse'] }],
     boosts: ['inner-fence', 'rail-fence'],
-    guards: ['world', 'south-yard-a', 'south-yard-b', 'barracks-a-inside', 'barracks-b-inside', 'huts-patrol', 'medical-inside', 'gatehouse-yard',
+    guards: ['world', 'reserve-extra-1', 'reserve-extra-2', 'reserve-extra-3', 'reserve-extra-4', 'south-yard-a', 'south-yard-b', 'barracks-a-inside', 'barracks-b-inside', 'huts-patrol', 'medical-inside', 'gatehouse-yard',
       'court-patrol', 'court-night', 'crew-yard', 'detention-yard', 'south-night', 'annex-night-2', 'warehouse-night'],
     dogs: ['dog-south-a', 'dog-south-b', 'dog-huts', 'dog-court', 'dog-annex'], alarmLocks: ['South barracks A · entry 1', 'South barracks B · long wing · entry 1'],
     stages: [
@@ -103,7 +103,7 @@ export const MISSIONS: MissionDef[] = [
     ],
     keycards: [{ id: 'annex-card', label: 'the annex keycard', at: ['card-crew', 'card-mess'] }],
     boosts: ['annex-fence', 'rail-fence', 'inner-fence'],
-    guards: ['world', 'annex-rail-watch', 'detention-yard', 'annex-apron', 'security-inside', 'crew-yard', 'rail-yard-2', 'warehouse-stores', 'warehouse-rear',
+    guards: ['world', 'reserve-extra-1', 'reserve-extra-2', 'reserve-extra-3', 'reserve-extra-4', 'annex-rail-watch', 'detention-yard', 'annex-apron', 'security-inside', 'crew-yard', 'rail-yard-2', 'warehouse-stores', 'warehouse-rear',
       'mess-roof-sniper', 'maintenance-roof-sniper', 'annex-night-1', 'annex-night-2', 'yard-night', 'warehouse-night', 'court-night'],
     dogs: ['dog-annex', 'dog-yard'], alarmLocks: ['Detention entrance', 'Security cabin · north door', 'Crew house · north door'],
     stages: [
@@ -137,7 +137,7 @@ export const MISSIONS: MissionDef[] = [
     ],
     keycards: [{ id: 'master-card', label: 'the master keycard', at: ['card-gatehouse', 'card-medical', 'card-crew'] }],
     boosts: ['rail-fence', 'annex-fence', 'inner-fence'],
-    guards: ['world', 'stores-yard', 'stores-inside', 'shed-watch', 'west-fence', 'gatehouse-yard', 'admin-inside', 'south-yard-a', 'south-yard-b', 'barracks-b-inside',
+    guards: ['world', 'reserve-extra-1', 'reserve-extra-2', 'reserve-extra-3', 'reserve-extra-4', 'stores-yard', 'stores-inside', 'shed-watch', 'west-fence', 'gatehouse-yard', 'admin-inside', 'south-yard-a', 'south-yard-b', 'barracks-b-inside',
       'huts-patrol', 'medical-inside', 'court-patrol', 'court-night', 'detention-yard', 'annex-rail-watch', 'crew-yard', 'mess-roof-sniper', 'maintenance-roof-sniper',
       'south-night', 'west-night', 'yard-night', 'warehouse-night', 'annex-night-1'],
     dogs: ['dog-south-a', 'dog-south-b', 'dog-stores', 'dog-huts', 'dog-court', 'dog-yard'],

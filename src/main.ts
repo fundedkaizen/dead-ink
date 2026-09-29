@@ -180,8 +180,9 @@ const initialView = new URLSearchParams(location.search).get('view')
 if (initialView && initialView in views) camera.setView(initialView as ViewName)
 else player.enable()
 
-// Development inspection surface, intentionally absent from production builds and the page UI.
-if (import.meta.env.DEV) {
+// Development inspection surface, intentionally absent from production builds and the page UI. A build made
+// with VITE_TEST_HOOKS=1 keeps it, for checks run against a built copy (never the published one).
+if (import.meta.env.DEV || import.meta.env.VITE_TEST_HOOKS === '1') {
   Object.assign(window, {
     __environment: {
       scene, renderer, camera,

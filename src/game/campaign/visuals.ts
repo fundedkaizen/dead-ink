@@ -225,10 +225,26 @@ export class CampaignVisuals {
     if (!visible) { this.sound.update(0, 999, false); this.wash.update(dt, null, 0); return }
     rig.root.position.copy(position)
     rig.root.rotation.set(0, yaw.value, 0)
+    this.windsock(dt, position, park, rig.rpm)
     poseHelicopter(rig, { rpm, doors, rope, searchlight, pitch, roll, time: this.clock }, dt)
     const altitude = position.y - park.y
     this.wash.update(dt, park.clone().setX(position.x).setZ(position.z), rig.rpm * Math.max(0, 1 - altitude / 16))
     this.sound.update(rig.rpm, position.distanceTo(r.view.position), true)
+  }
+
+  /** The landing zone's windsock: streaming away from the rotor when it is close and low, lazily drifting otherwise. */
+  private windsock(dt: number, rotor: THREE.Vector3, park: THREE.Vector3, rpm: number) {
+    const campaign = this.r.campaign
+    const sock = campaign?.props.windsocks.get(campaign.mission.extraction)
+    if (!sock) return
+    const at = sock.getWorldPosition(new THREE.Vector3())
+    const blow = rpm * Math.max(0, 1 - (rotor.y - park.y) / 18) * Math.max(0, 1 - at.distanceTo(rotor) / 22)
+    const away = Math.atan2(at.x - rotor.x, at.z - rotor.z) - Math.PI / 2
+    const target = blow > 0.05 ? away : Math.sin(this.clock * 0.3) * 0.6
+    const parentYaw = sock.parent ? sock.parent.getWorldQuaternion(new THREE.Quaternion()) : new THREE.Quaternion()
+    const local = target - new THREE.Euler().setFromQuaternion(parentYaw, 'YXZ').y
+    sock.rotation.y += Math.atan2(Math.sin(local - sock.rotation.y), Math.cos(local - sock.rotation.y)) * Math.min(1, dt * 3)
+    sock.rotation.z = -0.9 * (1 - Math.min(1, blow * 1.5)) + Math.sin(this.clock * (6 + blow * 20)) * 0.05 * (0.3 + blow)
   }
 
   /** During the escape: the rotors race, the nose dips as it pulls away, the team sits in the doorway. */

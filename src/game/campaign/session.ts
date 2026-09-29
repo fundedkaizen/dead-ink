@@ -10,6 +10,7 @@ import { MISSIONS, MISSION_IDS, mapFor, missionById } from './missions'
 import { CampaignStore, type Stars } from './progress'
 import { buildMapProps, type MapProps } from './props'
 import { FollowEscort } from './escort'
+import { guardGear } from './detail'
 import { awardsFor, grantReward, grantXp } from './rewards'
 import { bleedHostage, createRun, currentStage, hurtHostage, insideZone, resolveGuards, reviveHostage, updateObjectives } from './run'
 import { NOISE, starsFor, stealthRating, type RunStats, type StealthRating } from './stealth'
@@ -60,6 +61,7 @@ export class CampaignSession {
   private syncs = new Map<number, { guard: number; at: number; direction: THREE.Vector3 }>()
   private lzNoise = 0
   private recorded = false
+  private lastAlarm: MissionState['alarm'] = 'inactive'
 
   constructor(private r: MissionRuntime, scene: THREE.Scene) {
     this.worldGuards = structuredClone(r.world.enemies)
@@ -102,6 +104,11 @@ export class CampaignSession {
     else await r.ai.init()
     const rules = rulesFor(difficulty)
     r.ai.options = { accuracy: rules.accuracy, alertness: rules.alertness, sight: rules.sight, gradual: true }
+    // Their kit: helmets and radios, a hood for the marksmen.
+    for (const enemy of r.ai.enemies) {
+      const bones = (enemy.actor as { rig?: { bones: Record<string, THREE.Object3D> } }).rig?.bones
+      if (bones?.head && bones.chest) guardGear(bones.head, bones.chest, enemy.spec.role === 'sniper')
+    }
     const extraction = this.extraction
     if (r.escort instanceof FollowEscort) await r.escort.setup(run.cells.map(cell => ({ position: this.map.cells[cell].hostage, facing: this.map.cells[cell].facing })), extraction)
     const state = initialMission()
@@ -123,7 +130,7 @@ export class CampaignSession {
     this.charges = mission.tools.charges
     this.boosting = null; this.hold = null; this.summary = null; this.recorded = false
     this.plantedCharges = []; this.turns.clear(); this.syncs.clear(); this.ammoTaken.clear()
-    this.combatFor = 0; this.lastStage = 0; this.lzNoise = 0
+    this.combatFor = 0; this.lastStage = 0; this.lzNoise = 0; this.lastAlarm = 'inactive'
     this.loading = false
     return mission
   }
@@ -173,6 +180,28 @@ export class CampaignSession {
       setDoorOpen(door, released, true)
     }
     for (const station of this.props.stations) station.object.visible = this.visible(station)
+    // The props' own state: a thrown fuse lever and its dark lamp, turned keys, the radio's lamp.
+    for (const station of this.props.stations) {
+      const parts = station.object.userData.parts as import('./props').PanelParts | undefined
+      if (!parts) continue
+      const used = run.used.includes(station.id)
+      if (parts.lever) parts.lever.rotation.x = used ? -1.15 : 0
+      if (parts.lamp) (parts.lamp.material as THREE.MeshBasicMaterial).color.setHex(station.kind === 'power' ? (used ? 0x3a3a3a : 0x3fae4a) : station.kind === 'heli' ? (run.called ? 0x3fae4a : 0xf0a020) : used ? 0x3fae4a : 0xf0a020)
+      if (parts.key) parts.key.rotation.z = used ? -Math.PI / 2 : 0
+    }
+    // Door hardware: readers only on this mission's keycard doors (green once open), padlocks while locked.
+    const lockedHere = new Map(this.mission.lockedDoors.map(locked => [locked.door, locked]))
+    for (const [name, hardware] of this.props.doorHardware) {
+      const locked = lockedHere.get(name), open = run.unlocked.includes(name)
+      for (const reader of hardware.readers) {
+        reader.root.visible = locked?.lock === 'keycard'
+        ;(reader.led.material as THREE.MeshBasicMaterial).color.setHex(open ? 0x3fae4a : 0xd0302a)
+      }
+      if (hardware.padlock) hardware.padlock.visible = !!locked && locked.lock !== 'keycard' && !open
+    }
+    const tiers = rulesFor(run.difficulty).tiers
+    for (const [id, kennel] of this.props.kennels) { const dog = this.map.dogs[id]; kennel.visible = this.mission.dogs.includes(id) && (!dog?.tier || tiers.includes(dog.tier)) }
+    for (const [id, nest] of this.props.nests) { const guard = this.map.guards[id]; nest.visible = this.mission.guards.includes(id) && (!guard?.tier || tiers.includes(guard.tier)) }
     // Helicopters: campaign/visuals.ts flies them in from the run.
     for (const [id, vehicle] of this.props.vehicles) if (!this.props.helicopters.has(id)) vehicle.visible = id === this.mission.extraction && run.arrived
     const jeep = this.r.world.rescue?.jeep
@@ -640,6 +669,12 @@ export class CampaignSession {
       if (bleedHostage(vitals, dt)) r.failMission(`${this.hostageName(index)} died. The rescue failed.`)
     })
     run.marks = run.marks?.filter(mark => mark.until > state.elapsed)
+    // The alarm locks (and its end unlocks) the mission's alarm doors.
+    if (state.alarm !== this.lastAlarm) {
+      if (state.alarm === 'active' && this.lastAlarm !== 'active' && this.mission.alarmLocks.length) this.announce('The alarm has locked doors down. Silence it at a panel, or breach them.')
+      this.lastAlarm = state.alarm
+      r.syncWorld()
+    }
   }
 
   private announce(text: string) {

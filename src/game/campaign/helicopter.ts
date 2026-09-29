@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import { Draft, wallText, type Point } from '../../render/ink'
 import { synthOutput } from '../ui-slot-sound'
 
@@ -41,7 +42,6 @@ export type HelicopterRig = {
 const blackMaterial = new THREE.MeshBasicMaterial({ color: INK, toneMapped: false })
 const glassMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.32, depthWrite: false, side: THREE.DoubleSide, toneMapped: false })
 const blueMaterial = new THREE.MeshBasicMaterial({ color: HELI_BLUE, toneMapped: false })
-const darkMaterial = new THREE.MeshBasicMaterial({ color: 0x1a1a1a, toneMapped: false })
 
 /** The cabin seen through an open door: dark, with the bench, a seat back and a strap sketched in grey. */
 let doorway: THREE.MeshBasicMaterial | null = null
@@ -110,6 +110,24 @@ function passenger(color: number) {
   return figure
 }
 
+/** Merge shapes (each with its own place and turn) into one geometry: one draw for many small solid parts. */
+function mergedShapes(parts: { shape: THREE.BufferGeometry; at: Point; turn?: Point; scale?: Point; color?: number }[], colors = false) {
+  const placed = parts.map(({ shape, at, turn = [0, 0, 0], scale = [1, 1, 1], color }) => {
+    const g = shape.index ? shape.toNonIndexed() : shape
+    g.deleteAttribute('uv'); g.deleteAttribute('normal')
+    g.applyMatrix4(new THREE.Matrix4().compose(new THREE.Vector3(...at), new THREE.Quaternion().setFromEuler(new THREE.Euler(...turn)), new THREE.Vector3(...scale)))
+    if (colors) {
+      const c = new THREE.Color(color ?? 0xffffff), count = g.getAttribute('position').count, tint = new Float32Array(count * 3)
+      for (let i = 0; i < count; i++) { tint[i * 3] = c.r; tint[i * 3 + 1] = c.g; tint[i * 3 + 2] = c.b }
+      g.setAttribute('color', new THREE.BufferAttribute(tint, 3))
+    }
+    return g
+  })
+  const merged = mergeGeometries(placed)!
+  placed.forEach(g => g.dispose())
+  return merged
+}
+
 export function createHelicopter(): HelicopterRig {
   const root = new THREE.Group()
   root.name = 'Extraction helicopter'
@@ -117,7 +135,9 @@ export function createHelicopter(): HelicopterRig {
   const body = new THREE.Group()
   root.add(body)
 
-  // ---- fuselage: cabin, nose, belly, engine deck, tail boom
+  // ---- everything that never moves, in one drawing: fuselage, nose, belly, engine deck, boom, fin and
+  // stabiliser, skids and struts, intakes, vents and exhausts, mast, panel lines, rails, steps, boom seams, the
+  // canopy frame, wipers, cockpit seats and console, the side windows, the searchlight housing and the winch.
   const hull = new Draft('Helicopter hull')
   smooth(hull, new RoundedBoxGeometry(2.3, 1.85, 3.9, 4, 0.5), [0, 1.78, 0])
   const nose = new THREE.SphereGeometry(1, 24, 16, 0, Math.PI * 2, 0, Math.PI)
@@ -125,9 +145,7 @@ export function createHelicopter(): HelicopterRig {
   smooth(hull, nose, [0, 1.62, 1.72])
   smooth(hull, new RoundedBoxGeometry(1.6, 0.35, 3.2, 3, 0.15), [0, 0.92, 0.2])
   smooth(hull, new RoundedBoxGeometry(1.35, 0.62, 2.4, 3, 0.25), [0, 2.95, -0.35])
-  const boom = new THREE.CylinderGeometry(0.2, 0.46, 5.8, 20, 1)
-  smooth(hull, boom, [0, 2.12, -4.55], [-Math.PI / 2 + 0.05, 0, 0])
-  // Fin and stabiliser.
+  smooth(hull, new THREE.CylinderGeometry(0.2, 0.46, 5.8, 20, 1), [0, 2.12, -4.55], [-Math.PI / 2 + 0.05, 0, 0])
   const finShape = new THREE.Shape()
   finShape.moveTo(0, 0); finShape.lineTo(0.95, 0.15); finShape.lineTo(1.05, 1.45); finShape.lineTo(0.55, 1.5); finShape.lineTo(0.05, 0.55); finShape.closePath()
   const fin = new THREE.ExtrudeGeometry(finShape, { depth: 0.12, bevelEnabled: false })
@@ -135,13 +153,11 @@ export function createHelicopter(): HelicopterRig {
   hull.solid(fin, [0, 2.15, -6.55], 'paper', 'edge', [0, -Math.PI / 2, 0])
   hull.box(2.1, 0.07, 0.55, 0, 2.18, -5.9, 'paper', 'edge')
   for (const x of [-1.05, 1.05]) hull.box(0.07, 0.36, 0.5, x, 2.2, -5.9, 'paper', 'detail')
-  // Skids on struts, turned up at the front.
   for (const x of [-1.22, 1.22]) {
     hull.beam([x, 0.1, -1.8], [x, 0.1, 2.25], 0.1, 'paper', 'edge')
     hull.beam([x, 0.1, 2.25], [x, 0.36, 2.72], 0.1, 'paper', 'edge')
     for (const z of [-1.05, 1.35]) hull.beam([x, 0.13, z], [x * 0.68, 0.88, z], 0.08, 'paper', 'detail')
   }
-  // Engine intakes, vents and exhausts.
   for (const side of [-1, 1]) {
     hull.box(0.08, 0.34, 0.6, side * 0.7, 2.98, 0.45, 'paper', 'detail')
     hull.hatch([side * 0.745, 2.84, 0.18], [0, 0, 0.55], [0, 0.28, 0], { spacing: 0.06, inset: 0.02, stroke: 'detail' })
@@ -149,50 +165,27 @@ export function createHelicopter(): HelicopterRig {
     hull.cylinder(0.13, 0.42, side * 0.45, 3.05, -1.62, 'paper', 0.11)
     hull.ring(0.09, 3.26, side * 0.45, -1.62, 'detail', 16)
   }
-  // Rotor mast and the belly.
   hull.cylinder(0.12, 0.55, 0, 3.52, 0.05, 'paper')
   hull.box(0.5, 0.16, 0.5, 0, 0.72, -0.9, 'paper', 'detail')
-  // Panel lines and seams on the cabin sides, the belt line, the boom joints.
   for (const side of [-1, 1]) {
     const x = side * 1.155
     for (const z of [-1.55, -0.55, 1.35]) hull.line([[x, 1.02, z], [x, 2.55, z]], 'mesh')
     hull.line([[x, 1.28, -1.8], [x, 1.28, 1.7]], 'mesh')
     hull.line([[x, 2.55, -1.8], [x, 2.55, 1.6]], 'mesh')
-    // The sliding door's rail.
     hull.line([[x + side * 0.03, 2.47, -1.7], [x + side * 0.03, 2.47, 1.25]], 'detail')
     hull.line([[x + side * 0.03, 1.05, -1.7], [x + side * 0.03, 1.05, 1.25]], 'detail')
-    // A step below the door.
     hull.box(0.34, 0.05, 0.8, side * 1.35, 0.72, 0.4, 'paper', 'detail')
     hull.beam([side * 1.15, 0.9, 0.4], [side * 1.35, 0.74, 0.4], 0.04, 'paper', 'detail')
+    // The rear cabin window, glazed and hatched, with its frame.
+    hull.box(0.02, 0.55, 0.75, side * 1.162, 2.05, -1.1, 'glass', 'detail')
+    hull.hatch([side * 1.175, 1.82, -1.4], [0, 0, 0.3], [0, 0.4, 0], { spacing: 0.08, inset: 0.02 })
+    hull.line([[side * 1.176, 1.77, -1.48], [side * 1.176, 2.33, -1.48], [side * 1.176, 2.33, -0.72], [side * 1.176, 1.77, -0.72]], 'detail', true)
   }
-  // Seams round the tail boom.
   for (const z of [-2.6, -4.2, -5.6]) {
     const r = 0.44 - (Math.abs(z) - 2.2) * 0.058
     hull.line(Array.from({ length: 24 }, (_, i): Point => [Math.sin(i / 24 * Math.PI * 2) * r, 2.12 + Math.cos(i / 24 * Math.PI * 2) * r, z]), 'mesh', true)
   }
-  hull.finish()
-  body.add(hull)
-
-  // ---- the blue rescue stripe, and RESCUE on the boom
-  for (const side of [-1, 1]) {
-    // The stripe runs either side of the doorway.
-    for (const [from, to] of [[-1.85, -0.3], [1.12, 1.75]]) {
-      const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.16, to - from), blueMaterial)
-      stripe.position.set(side * 1.162, 1.42, (from + to) / 2)
-      body.add(stripe)
-    }
-    const text = wallText('RESCUE', [side * 0.37, 2.18, -3.9], 0.26, side * Math.PI / 2)
-    body.add(text)
-  }
-
-  // ---- cockpit: see-through glass, its frame, two seats and the pilots
-  const glass = new THREE.SphereGeometry(1.03, 24, 12, -Math.PI * 0.42 + Math.PI / 2, Math.PI * 0.84, Math.PI * 0.12, Math.PI * 0.4)
-  glass.scale(1.08, 0.86, 1.45)
-  const canopy = new THREE.Mesh(glass, glassMaterial)
-  canopy.position.set(0, 1.62, 1.72)
-  canopy.renderOrder = 2
-  body.add(canopy)
-  const frame = new Draft('Helicopter canopy frame')
+  // Canopy frame on the nose, wipers, the two seats and the console behind the glass.
   const onNose = (theta: number, phi: number): Point => {
     const x = Math.sin(phi) * Math.sin(theta), y = Math.cos(phi), z = Math.sin(phi) * Math.cos(theta)
     return [x * 1.08 * 1.04, 1.62 + y * 0.86 * 1.04, 1.72 + z * 1.45 * 1.04]
@@ -200,50 +193,61 @@ export function createHelicopter(): HelicopterRig {
   for (const theta of [-1.25, -0.55, 0, 0.55, 1.25]) {
     const points: Point[] = []
     for (let phi = 0.36; phi <= 1.62; phi += 0.09) points.push(onNose(theta, phi))
-    for (let i = 1; i < points.length; i++) frame.beam(points[i - 1], points[i], 0.045, 'paper', 'detail')
+    for (let i = 1; i < points.length; i++) hull.beam(points[i - 1], points[i], 0.045, 'paper', 'detail')
   }
   for (const phi of [0.38, 1.6]) {
     const points: Point[] = []
     for (let theta = -1.3; theta <= 1.3; theta += 0.13) points.push(onNose(theta, phi))
-    for (let i = 1; i < points.length; i++) frame.beam(points[i - 1], points[i], 0.04, 'paper', 'detail')
+    for (let i = 1; i < points.length; i++) hull.beam(points[i - 1], points[i], 0.04, 'paper', 'detail')
   }
-  // Wipers.
-  for (const x of [-0.3, 0.3]) frame.line([[x, 1.62, 3.1], [x * 1.5, 2.02, 2.95]], 'detail')
-  // Seats inside.
+  for (const x of [-0.3, 0.3]) hull.line([[x, 1.62, 3.1], [x * 1.5, 2.02, 2.95]], 'detail')
   for (const x of [-0.45, 0.45]) {
-    frame.box(0.5, 0.1, 0.5, x, 1.18, 1.35, 'paper', 'detail')
-    frame.box(0.5, 0.75, 0.1, x, 1.58, 1.1, 'paper', 'detail')
+    hull.box(0.5, 0.1, 0.5, x, 1.18, 1.35, 'paper', 'detail')
+    hull.box(0.5, 0.75, 0.1, x, 1.58, 1.1, 'paper', 'detail')
   }
-  frame.box(0.9, 0.5, 0.25, 0, 1.45, 2.35, 'paper', 'detail')
-  frame.finish()
-  body.add(frame)
+  hull.box(0.9, 0.5, 0.25, 0, 1.45, 2.35, 'paper', 'detail')
+  // The searchlight housing under the nose, and the winch over the right door.
+  hull.solid(new THREE.CylinderGeometry(0.14, 0.14, 0.22, 16), [0, 0.85, 2.35], 'paper', 'edge', [Math.PI / 2 + 0.6, 0, 0], true)
+  hull.beam([1.12, 2.62, 1.0], [1.62, 2.66, 1.0], 0.08, 'paper', 'detail')
+  hull.beam([1.12, 2.3, 1.0], [1.5, 2.64, 1.0], 0.05, 'paper', 'detail')
+  hull.cylinder(0.09, 0.12, 1.62, 2.58, 1.0, 'paper')
+  body.add(hull.finish())
+
+  // ---- flat colour, merged: the blue stripes (either side of each doorway), the doorway interiors behind
+  // the doors, the pilots, and RESCUE on the boom (one draw each).
+  const stripes: { shape: THREE.BufferGeometry; at: Point }[] = []
+  for (const side of [-1, 1]) for (const [from, to] of [[-1.85, -0.3], [1.12, 1.75]]) stripes.push({ shape: new THREE.BoxGeometry(0.02, 0.16, to - from), at: [side * 1.162, 1.42, (from + to) / 2] })
+  body.add(new THREE.Mesh(mergedShapes(stripes), blueMaterial))
+  const openings = [-1, 1].map(side => {
+    const plane = new THREE.PlaneGeometry(1.3, 1.3)
+    plane.rotateY(side * Math.PI / 2); plane.translate(side * 1.14, 1.76, 0.42)
+    return plane
+  })
+  const doorway = mergeGeometries(openings)!
+  body.add(new THREE.Mesh(doorway, doorwayMaterial()))
+  const pilots: { shape: THREE.BufferGeometry; at: Point; scale?: Point }[] = []
   for (const x of [-0.45, 0.45]) {
-    const pilot = new THREE.Group()
-    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.16, 0.38, 4, 8), blackMaterial)
-    torso.position.set(0, 1.62, 1.28)
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.15, 12, 8), blackMaterial)
-    head.position.set(0, 2.08, 1.32)
-    const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.17, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), darkMaterial)
-    helmet.position.set(0, 2.1, 1.3)
-    pilot.add(torso, head, helmet)
-    pilot.position.x = x
-    body.add(pilot)
+    pilots.push({ shape: new THREE.CapsuleGeometry(0.16, 0.38, 4, 8), at: [x, 1.62, 1.28] })
+    pilots.push({ shape: new THREE.SphereGeometry(0.15, 12, 8), at: [x, 2.08, 1.32] })
+    pilots.push({ shape: new THREE.SphereGeometry(0.17, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), at: [x, 2.1, 1.3], scale: [1, 1, 1.05] })
+  }
+  body.add(new THREE.Mesh(mergedShapes(pilots), blackMaterial))
+  const lettering = wallText('RESCUE', [0, 0, 0], 0.26)
+  const letterPlane = lettering.children[0] as THREE.Mesh | undefined
+  if (letterPlane) {
+    const planes = [-1, 1].map(side => { const g = letterPlane.geometry.clone(); g.rotateY(side * Math.PI / 2); g.translate(side * 0.37, 2.18, -3.9); return g })
+    body.add(new THREE.Mesh(mergeGeometries(planes)!, letterPlane.material))
   }
 
-  // ---- side windows (see-through), with their frames
-  const windows = new Draft('Helicopter side window frames')
-  for (const side of [-1, 1]) {
-    for (const z of [-1.1]) {
-      const pane = new THREE.Mesh(new THREE.PlaneGeometry(0.75, 0.55), glassMaterial)
-      pane.position.set(side * 1.158, 2.05, z); pane.rotation.y = side * Math.PI / 2
-      body.add(pane)
-      windows.line([[side * 1.16, 1.77, z - 0.38], [side * 1.16, 2.33, z - 0.38], [side * 1.16, 2.33, z + 0.38], [side * 1.16, 1.77, z + 0.38]], 'detail', true)
-    }
-  }
-  windows.finish()
-  body.add(windows)
+  // ---- the canopy's see-through glass
+  const glass = new THREE.SphereGeometry(1.03, 24, 12, -Math.PI * 0.42 + Math.PI / 2, Math.PI * 0.84, Math.PI * 0.12, Math.PI * 0.4)
+  glass.scale(1.08, 0.86, 1.45)
+  const canopy = new THREE.Mesh(glass, glassMaterial)
+  canopy.position.set(0, 1.62, 1.72)
+  canopy.renderOrder = 2
+  body.add(canopy)
 
-  // ---- sliding doors: a panel with its window and handle, which slides back along the rail
+  // ---- sliding doors: each one drawing (panel, glazed window and its frame, handle), sliding back on its rail
   const doors: THREE.Group[] = []
   for (const side of [-1, 1]) {
     const door = new THREE.Group()
@@ -251,21 +255,16 @@ export function createHelicopter(): HelicopterRig {
     panel.box(0.05, 1.36, 1.35, 0, 0, 0, 'paper', 'edge')
     panel.line([[side * 0.03, -0.62, -0.6], [side * 0.03, -0.62, 0.6]], 'mesh')
     panel.box(0.06, 0.05, 0.22, side * 0.03, -0.1, 0.5, 'paper', 'detail')
-    panel.finish()
-    const pane = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.45), glassMaterial)
-    pane.position.set(side * 0.03, 0.3, 0); pane.rotation.y = side * Math.PI / 2
-    const outline = new Draft('Door window frame')
-    outline.line([[side * 0.035, 0.07, -0.4], [side * 0.035, 0.53, -0.4], [side * 0.035, 0.53, 0.4], [side * 0.035, 0.07, 0.4]], 'detail', true)
-    outline.finish()
-    door.add(panel, pane, outline)
+    panel.box(0.012, 0.45, 0.8, side * 0.03, 0.3, 0, 'glass', 'detail')
+    panel.hatch([side * 0.04, 0.12, -0.35], [0, 0, 0.3], [0, 0.35, 0], { spacing: 0.08, inset: 0.02 })
+    for (const y of [0.07, 0.53]) panel.line([[side * 0.04, y, -0.4], [side * 0.04, y, 0.4]], 'detail')
+    for (const z of [-0.4, 0.4]) panel.line([[side * 0.04, 0.07, z], [side * 0.04, 0.53, z]], 'detail')
+    for (let i = 0; i < 6; i++) panel.box(0.01, 0.018, 0.018, side * 0.03, -0.66, -0.6 + i * 0.24, 'paper', 'detail')
+    door.add(panel.finish())
     door.position.set(side * 1.19, 1.76, 0.42)
     door.userData.closedZ = 0.42
     body.add(door)
     doors.push(door)
-    // The dark doorway behind it.
-    const opening = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 1.3), doorwayMaterial())
-    opening.position.set(side * 1.14, 1.76, 0.42); opening.rotation.y = side * Math.PI / 2
-    body.add(opening)
   }
 
   // ---- rivets: one instanced mesh along the seams
@@ -283,23 +282,14 @@ export function createHelicopter(): HelicopterRig {
   rivetPoints.forEach((point, i) => rivets.setMatrixAt(i, matrix.makeTranslation(point.x, point.y, point.z)))
   body.add(rivets)
 
-  // ---- lights: the beacon (top and belly), navigation lights, and the searchlight with its beam
-  const beacon: THREE.Mesh[] = []
-  for (const [y, z] of [[3.3, -1.3], [0.62, -0.3]]) {
-    const light = new THREE.Mesh(new THREE.SphereGeometry(0.08, 10, 8), new THREE.MeshBasicMaterial({ color: 0xe0271e, toneMapped: false }))
-    light.position.set(0, y, z)
-    body.add(light); beacon.push(light)
-  }
-  for (const [x, color] of [[-1.08, 0xe0271e], [1.08, 0x21b04b]] as const) {
-    const nav = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 6), new THREE.MeshBasicMaterial({ color, toneMapped: false }))
-    nav.position.set(x, 2.22, -5.9)
-    body.add(nav)
-  }
-  const lamp = new Draft('Helicopter searchlight')
-  lamp.cylinder(0.14, 0.22, 0, 0, 0, 'paper')
-  lamp.finish()
-  lamp.position.set(0, 0.85, 2.35); lamp.rotation.x = Math.PI / 2 + 0.6
-  body.add(lamp)
+  // ---- lights: the blinking beacon (top and belly, one mesh), the red and green navigation lights (one
+  // mesh, coloured per light), and the searchlight's beam
+  const beacon = new THREE.Mesh(mergedShapes([{ shape: new THREE.SphereGeometry(0.08, 10, 8), at: [0, 3.3, -1.3] }, { shape: new THREE.SphereGeometry(0.08, 10, 8), at: [0, 0.62, -0.3] }]),
+    new THREE.MeshBasicMaterial({ color: 0xe0271e, toneMapped: false }))
+  body.add(beacon)
+  const nav = new THREE.Mesh(mergedShapes([{ shape: new THREE.SphereGeometry(0.06, 8, 6), at: [-1.08, 2.22, -5.9], color: 0xe0271e },
+    { shape: new THREE.SphereGeometry(0.06, 8, 6), at: [1.08, 2.22, -5.9], color: 0x21b04b }], true), new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false }))
+  body.add(nav)
   const beamGeometry = new THREE.ConeGeometry(1.1, 9, 20, 1, true)
   beamGeometry.translate(0, -4.5, 0)
   const searchlight = new THREE.Mesh(beamGeometry, new THREE.MeshBasicMaterial({ color: 0xffd66b, transparent: true, opacity: 0.12, depthWrite: false, side: THREE.DoubleSide, toneMapped: false }))
@@ -308,13 +298,7 @@ export function createHelicopter(): HelicopterRig {
   searchlight.renderOrder = 3
   body.add(searchlight)
 
-  // ---- winch and rope over the right door
-  const winch = new Draft('Helicopter winch')
-  winch.beam([1.12, 2.62, 1.0], [1.62, 2.66, 1.0], 0.08, 'paper', 'detail')
-  winch.beam([1.12, 2.3, 1.0], [1.5, 2.64, 1.0], 0.05, 'paper', 'detail')
-  winch.cylinder(0.09, 0.12, 1.62, 2.58, 1.0, 'paper')
-  winch.finish()
-  body.add(winch)
+  // ---- the winch's rope and hook
   const ropeGeometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, -0.3, 0)])
   const rope = new THREE.Line(ropeGeometry, new THREE.LineBasicMaterial({ color: INK }))
   rope.position.set(1.62, 2.5, 1.0)
@@ -323,34 +307,27 @@ export function createHelicopter(): HelicopterRig {
   hook.position.set(1.62, 2.2, 1.0)
   body.add(hook)
 
-  // ---- main rotor: hub, pitch links, four blades; and the smear disc for speed
+  // ---- main rotor: hub, pitch links and four blades in one drawing; and the smear disc for speed
   const rotor = new THREE.Group()
   rotor.position.set(0, 3.82, 0.05)
-  const hub = new Draft('Helicopter rotor hub')
-  hub.cylinder(0.3, 0.16, 0, 0, 0, 'paper')
-  hub.cylinder(0.08, 0.28, 0, 0.18, 0, 'paper')
-  for (let i = 0; i < 4; i++) {
-    const a = i * Math.PI / 2
-    hub.beam([Math.sin(a) * 0.16, -0.14, Math.cos(a) * 0.16], [Math.sin(a) * 0.3, 0.02, Math.cos(a) * 0.3], 0.035, 'paper', 'detail')
-  }
-  hub.finish()
   const blades = new THREE.Group()
-  const bladeDraft = new Draft('Helicopter main rotor blades')
+  const bladeDraft = new Draft('Helicopter main rotor')
+  bladeDraft.cylinder(0.3, 0.16, 0, 0, 0, 'paper')
+  bladeDraft.cylinder(0.08, 0.28, 0, 0.18, 0, 'paper')
   for (let i = 0; i < 4; i++) {
     const a = i * Math.PI / 2, c = Math.cos(a), s = Math.sin(a)
-    // Root cuff, then the long blade drooping a little toward its tip.
+    bladeDraft.beam([s * 0.16, -0.14, c * 0.16], [s * 0.3, 0.02, c * 0.3], 0.035, 'paper', 'detail')
     bladeDraft.box(0.2, 0.08, 0.5, s * 0.5, 0, c * 0.5, 'paper', 'edge', [0, a, 0])
     bladeDraft.box(0.34, 0.045, 5.1, s * 3.2, -0.04, c * 3.2, 'paper', 'edge', [0, a, 0])
     bladeDraft.line([[s * 5.55 - c * 0.17, -0.05, c * 5.55 + s * 0.17], [s * 5.55 + c * 0.17, -0.05, c * 5.55 - s * 0.17]], 'detail')
   }
-  bladeDraft.finish()
-  blades.add(bladeDraft)
+  blades.add(bladeDraft.finish())
   const texture = smearTexture()
   const disc = new THREE.Mesh(new THREE.CircleGeometry(5.8, 64), new THREE.MeshBasicMaterial({ map: texture, color: 0xffffff, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide, toneMapped: false }))
   disc.rotation.x = -Math.PI / 2
   disc.position.y = -0.03
   disc.renderOrder = 4
-  rotor.add(hub, blades, disc)
+  rotor.add(blades, disc)
   body.add(rotor)
 
   // ---- tail rotor
@@ -371,7 +348,7 @@ export function createHelicopter(): HelicopterRig {
   body.add(passengers)
 
   root.userData.rotors = [rotor, tail]
-  return { root, body, rotor, blades, disc, tail, doors: doors as [THREE.Group, THREE.Group], rope, hook, beacon, searchlight, passengers, rpm: 0, spin: 0 }
+  return { root, body, rotor, blades, disc, tail, doors: doors as [THREE.Group, THREE.Group], rope, hook, beacon: [beacon], searchlight, passengers, rpm: 0, spin: 0 }
 }
 
 /** The team in the doorway for the lift-off: one silhouette per player, in their colours. */

@@ -1,9 +1,11 @@
 import * as THREE from 'three'
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import type { CollisionWorld } from '../../player/collision'
 import { EnemyNavigation } from '../navigation'
 import { synthOutput } from '../ui-slot-sound'
 import type { PlayerSense, Shot, Vec3 } from '../types'
 import type { DogAnchor } from './types'
+import { dogGear } from './detail'
 
 /**
  * Guard dogs. A dog walks its round and smells anyone within its reach, walls or no walls (running doubles the
@@ -26,33 +28,39 @@ export type DogSnapshot = { position: Vec3; yaw: number; state: DogState; health
 
 const ink = new THREE.MeshBasicMaterial({ color: 0x0b0b0b, toneMapped: false })
 
-/** A lean ink dog from rounded parts: body, chest, head and muzzle, pricked ears, a tail, four jointed legs. */
+/**
+ * A lean ink dog from rounded parts: body, chest, head and muzzle, pricked ears, a tail and its harness, all
+ * one mesh; four jointed legs (one mesh each, to swing); a red collar with its tag. Six draw calls.
+ */
 function dogMesh() {
   const root = new THREE.Group()
   root.name = 'Guard dog'
   root.userData = { noCollision: true, dog: true }
-  const part = (geometry: THREE.BufferGeometry, x: number, y: number, z: number, rx = 0, parent: THREE.Object3D = root) => {
-    const mesh = new THREE.Mesh(geometry, ink)
-    mesh.position.set(x, y, z); mesh.rotation.x = rx
-    parent.add(mesh); return mesh
+  const place = (shape: THREE.BufferGeometry, at: [number, number, number], turn: [number, number, number] = [0, 0, 0], scale: [number, number, number] = [1, 1, 1]) => {
+    const g = shape.index ? shape.toNonIndexed() : shape
+    g.deleteAttribute('uv'); g.deleteAttribute('normal')
+    return g.applyMatrix4(new THREE.Matrix4().compose(new THREE.Vector3(...at), new THREE.Quaternion().setFromEuler(new THREE.Euler(...turn)), new THREE.Vector3(...scale)))
   }
-  part(new THREE.CapsuleGeometry(0.13, 0.5, 4, 10), 0, 0.58, -0.02, Math.PI / 2)
-  part(new THREE.SphereGeometry(0.17, 12, 8), 0, 0.62, 0.24).scale.set(0.95, 1.05, 1.1)
-  part(new THREE.SphereGeometry(0.12, 12, 8), 0, 0.8, 0.44)
-  part(new THREE.CapsuleGeometry(0.055, 0.14, 3, 8), 0, 0.76, 0.58, Math.PI / 2 + 0.15)
-  for (const x of [-0.06, 0.06]) part(new THREE.ConeGeometry(0.04, 0.12, 6), x, 0.93, 0.42, -0.25)
-  part(new THREE.CapsuleGeometry(0.025, 0.3, 3, 6), 0, 0.72, -0.45, -0.9)
+  const body = mergeGeometries([
+    place(new THREE.CapsuleGeometry(0.13, 0.5, 4, 10), [0, 0.58, -0.02], [Math.PI / 2, 0, 0]),
+    place(new THREE.SphereGeometry(0.17, 12, 8), [0, 0.62, 0.24], [0, 0, 0], [0.95, 1.05, 1.1]),
+    place(new THREE.SphereGeometry(0.12, 12, 8), [0, 0.8, 0.44]),
+    place(new THREE.CapsuleGeometry(0.055, 0.14, 3, 8), [0, 0.76, 0.58], [Math.PI / 2 + 0.15, 0, 0]),
+    place(new THREE.ConeGeometry(0.04, 0.12, 6), [-0.06, 0.93, 0.42], [-0.25, 0, 0]),
+    place(new THREE.ConeGeometry(0.04, 0.12, 6), [0.06, 0.93, 0.42], [-0.25, 0, 0]),
+    place(new THREE.CapsuleGeometry(0.025, 0.3, 3, 6), [0, 0.72, -0.45], [-0.9, 0, 0]),
+    place(new THREE.TorusGeometry(0.16, 0.018, 6, 18), [0, 0.6, 0.18]),
+  ])!
+  root.add(new THREE.Mesh(body, ink))
   const legs: THREE.Object3D[] = []
   for (const [x, z] of [[-0.08, 0.24], [0.08, 0.24], [-0.08, -0.26], [0.08, -0.26]]) {
     const hip = new THREE.Group()
     hip.position.set(x, 0.55, z)
-    part(new THREE.CapsuleGeometry(0.04, 0.24, 3, 6), 0, -0.16, 0, 0, hip)
-    const knee = new THREE.Group()
-    knee.position.y = -0.3
-    part(new THREE.CapsuleGeometry(0.032, 0.18, 3, 6), 0, -0.1, z > 0 ? 0.02 : -0.03, 0, knee)
-    hip.add(knee)
+    hip.add(new THREE.Mesh(mergeGeometries([place(new THREE.CapsuleGeometry(0.04, 0.24, 3, 6), [0, -0.16, 0]),
+      place(new THREE.CapsuleGeometry(0.032, 0.18, 3, 6), [0, -0.4, z > 0 ? 0.02 : -0.03])])!, ink))
     root.add(hip); legs.push(hip)
   }
+  dogGear(root)
   return { root, legs }
 }
 

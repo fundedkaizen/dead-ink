@@ -109,6 +109,7 @@ const boosts: BoostAnchor[] = [
 
 const zones: NamedZone[] = [
   { id: 'rail-yard', label: 'The rail yard', x: 11, z: -30, r: 16 },
+  { id: 'inside', label: 'Inside the compound', x: 5, z: -5, r: 42 },
   { id: 'south-yard', label: 'The south yard', x: 32, z: 26, r: 18 },
   { id: 'west-yard', label: 'The west yard', x: -50, z: -5, r: 16 },
   { id: 'annex', label: 'The east annex', x: 130, z: -20, r: 26 },
@@ -154,6 +155,10 @@ const guards: GuardAnchor[] = [
   g('yard-lz', 'North-yard watch', [[-40, 0, -24], [-32, 0, -16]], 'ak', { tier: 'hard' }),
   g('south-night', 'South field patrol', [[0, 0, 40], [60, 0, 40]], 'ak', { tier: 'nightmare' }),
   g('west-night', 'West yard night patrol', [[-56, 0, -24], [-56, 0, 8], [-44, 0, 8], [-44, 0, -24]], 'smg', { tier: 'nightmare' }),
+  // More of the barracks response for Hard and Nightmare alarms (the world has four).
+  ...([[141.5, FLOOR, 2.2, 'hard'], [144.5, FLOOR, 4.1, 'hard'], [141.5, FLOOR, 4.1, 'nightmare'], [144.5, FLOOR, 2.2, 'nightmare']] as const).map(([x, y, z, tier], i) =>
+    g(`reserve-extra-${i + 1}`, `Barracks response ${i + 5}`, [[x, y, z], [143, FLOOR, 3], [143, FLOOR, -1.5], [143, 0, -5], [151, 0, -8], [151, 0, -22], [154, 0, -35], [146, 0, -37], [146, FLOOR, -42]],
+      'ak', { tier, reserve: true, alarmExit: [143, 0, -5] })),
   // Roof and tower marksmen (glints give them away).
   g('mess-roof-sniper', 'Mess-hall roof marksman', [[-30, 6.38, -50]], 'sniper', { role: 'sniper', facing: Math.PI * 0.9 }),
   g('maintenance-roof-sniper', 'Maintenance roof marksman', [[108, 4.2, -44]], 'sniper', { role: 'sniper', facing: Math.PI * 0.6 }),

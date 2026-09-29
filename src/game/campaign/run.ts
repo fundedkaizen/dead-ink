@@ -58,7 +58,9 @@ export const HOSTAGE_BLEED_SECONDS = 50
 const pick = <T>(random: Random, items: readonly T[]) => items[Math.floor(random() * items.length)]
 
 export function createRun(mission: MissionDef, map: MapModule, difficulty: Difficulty, seed: number): CampaignRun {
-  const random = seeded(seed)
+  // Scramble the seed first: nearby seeds (1, 2, 3...) would otherwise start their streams alike.
+  const random = seeded(Math.imul(seed ^ 0x9e3779b9, 0x85ebca6b) ^ Math.imul(mission.number, 0xc2b2ae35))
+  random(); random()
   const spawn = pick(random, mission.spawns)
   const cells = shuffled(random, mission.cells).slice(0, mission.hostages)
   const cards: Record<string, string> = {}
