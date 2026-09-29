@@ -90,8 +90,17 @@ export function createRun(mission: MissionDef, map: MapModule, difficulty: Diffi
 export function resolveGuards(mission: MissionDef, map: MapModule, run: CampaignRun, worldGuards: readonly EnemySpec[]): EnemySpec[] {
   const tiers = rulesFor(run.difficulty).tiers
   const guards: EnemySpec[] = []
+  // The world's own patrols walk their rounds one way or the other, as this run's seed says.
+  const turn = seeded(Math.imul(run.seed ^ 0x51ed27, 0x2c1b3c6d))
   for (const id of mission.guards) {
-    if (id === 'world') { guards.push(...worldGuards.map(spec => structuredClone(spec))); continue }
+    if (id === 'world') {
+      for (const spec of worldGuards) {
+        const copy = structuredClone(spec)
+        if (!copy.reserve && copy.role !== 'sniper' && !copy.patrolMode && copy.patrol.length >= 3 && turn() < 0.5) copy.patrol = [copy.patrol[0], ...copy.patrol.slice(1).reverse()]
+        guards.push(copy)
+      }
+      continue
+    }
     const anchor = map.guards[id]
     if (!anchor || (anchor.tier && !tiers.includes(anchor.tier))) continue
     const { tier: _tier, routes, ...spec } = structuredClone(anchor)

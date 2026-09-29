@@ -107,6 +107,11 @@ test('runs are seeded: the same seed picks the same cell, way in, keycard spot a
     assert.equal(new Set(run.cells).size, mission.hostages, 'two hostages never share a cell')
     for (const card of mission.keycards) assert(card.at.includes(run.cards[card.id]))
   }
+  // The world's patrols turn one way or the other by seed (the same way on every co-op browser).
+  const worldPatrols = [{ id: 'loop', name: 'Loop', position: [0, 0, 0] as [number, number, number], patrol: [[0, 0, 0], [10, 0, 0], [10, 0, 10], [0, 0, 10]] as [number, number, number][], weapon: 'ak' as const }]
+  const m1 = MISSIONS[0], ways = new Set(Array.from({ length: 20 }, (_, seed) => JSON.stringify(resolveGuards(m1, mapFor(m1), createRun(m1, mapFor(m1), 'normal', seed), worldPatrols)[0].patrol)))
+  assert.equal(ways.size, 2, 'both ways round')
+  assert.deepEqual(resolveGuards(m1, mapFor(m1), createRun(m1, mapFor(m1), 'normal', 4), worldPatrols), resolveGuards(m1, mapFor(m1), createRun(m1, mapFor(m1), 'normal', 4), worldPatrols))
   const routed = MISSIONS.find(m => m.guards.some(id => mapFor(m).guards[id]?.routes?.length))!
   const variants = new Set(Array.from({ length: 30 }, (_, seed) => JSON.stringify(createRun(routed, mapFor(routed), 'nightmare', seed).routes)))
   assert(variants.size > 1, 'guard patrols change between runs')
