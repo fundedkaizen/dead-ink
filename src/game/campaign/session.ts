@@ -592,10 +592,13 @@ export class CampaignSession {
 
   private takedown(index: number, direction: THREE.Vector3, by: number) {
     const r = this.r, enemy = r.ai.enemies[index]
-    if (!enemy || !r.ai.takedown(enemy, direction.lengthSq() > 0.1 ? direction : enemy.position.clone().sub(r.player.body.position))) return
+    // The guard's dropped gun counts the kill for whoever's round it was (co-op: `shooter`); a takedown is theirs.
+    if (r.coop) r.coop.shooter = by
+    const done = !!enemy && r.ai.takedown(enemy, direction.lengthSq() > 0.1 ? direction : enemy.position.clone().sub(r.player.body.position))
+    if (r.coop) r.coop.shooter = 0
+    if (!done || !enemy) return
     this.run!.takedowns++
     if (by) r.coop?.link.send({ t: 'hit', p: [enemy.position.x, enemy.position.y + 1.2, enemy.position.z], z: 'torso', l: 1 }, { to: by })
-    else { r.state.kills++; r.audio.play({ kind: 'takedown', position: enemy.position.clone(), radius: NOISE.takedown }) }
   }
 
   // ---------------------------------------------------------------- each frame

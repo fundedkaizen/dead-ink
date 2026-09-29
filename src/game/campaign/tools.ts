@@ -107,6 +107,7 @@ export class CampaignTools {
     this.droneBefore.copy(r.player.body.position)
     this.dronePosition.copy(r.view.position)
     this.droneModel.visible = true
+    r.weapons.setHidden(true)
     r.player.movementLocked = true
     r.cancelInput()
     r.hud.notify('Scout drone up: WASD to fly, X to land. Every guard it sees is marked for the team.', 4)
@@ -118,6 +119,7 @@ export class CampaignTools {
     this.drone = 0
     this.cooldown = DRONE.cooldown
     this.droneModel.visible = false
+    r.weapons.setHidden(false)
     if (!r.campaign?.boosting) r.player.movementLocked = false
     r.hud.notify('Drone down.', 1.5)
   }

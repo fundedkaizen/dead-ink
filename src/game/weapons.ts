@@ -119,6 +119,9 @@ export class FirstPersonWeapons {
   private nextId = 1
   private loose = new Map<string, LooseWeapon>()
   private root = new THREE.Group()
+  /** Out of sight for a while (the rescue campaign's scout drone view). */
+  private hidden = false
+  setHidden(hidden: boolean) { this.hidden = hidden; this.root.visible = this.enabled && !!this.current && !hidden }
   private mount = new THREE.Group()
   private rightHand = new THREE.Group()
   private leftHand = new THREE.Group()
@@ -345,7 +348,7 @@ export class FirstPersonWeapons {
       if (isAkimbo(this.current)) this.offhand = new Offhand(this.root, createMissionGun(this.current.name), this.model, this.rightHand.clone(), this.flash.clone())
     }
     if (animate) this.swap = { time: outgoing ? 0 : SWAP_OUT, outgoing }
-    this.root.visible = this.enabled && !!this.current
+    this.root.visible = this.enabled && !!this.current && !this.hidden
     this.pose(0)
   }
 
@@ -660,7 +663,7 @@ export class FirstPersonWeapons {
     const enabled = frame.active && !frame.climbing
     if (!enabled) { this.cancel(); this.lastLook = null }
     this.enabled = enabled
-    this.root.visible = enabled && !!this.current
+    this.root.visible = enabled && !!this.current && !this.hidden
     if (!enabled) return
     const delta = Math.max(0, Math.min(Number.isFinite(dt) ? dt : 0, 0.1))
     this.time += delta

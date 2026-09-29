@@ -744,7 +744,7 @@ export class MissionRuntime {
       // The field of view from settings, except while the escape cinematic or a scope owns it.
       const fov = getSettings().fov, cam = this.camera.perspective
       if (this.player.playing && !this.escape.active && !this.weapons.scoped && cam.fov !== fov) { cam.fov = fov; cam.updateProjectionMatrix() }
-      this.weapons.update(dt,{active:reactionActive&&this.interactionTime===0&&(coop?.canShoot() ?? true),climbing:this.player.actions.traversing,
+      this.weapons.update(dt,{active:reactionActive&&this.interactionTime===0&&(coop?.canShoot() ?? true)&&!this.tools?.flying,climbing:this.player.actions.traversing,
         moving:this.player.body.velocity.length(),aiming:this.aiming,reducedMotion:this.hud.reducedMotion,feet:this.player.body.position,hitPose})
     }
     this.audio.update(this.camera.perspective)
