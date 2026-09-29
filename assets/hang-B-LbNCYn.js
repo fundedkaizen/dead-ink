@@ -1,0 +1,1 @@
+var e={"upper_arm.L":[-78,0,0],"upper_arm.R":[-78,0,0],"forearm.L":[0,0,-10],"forearm.R":[0,0,10]};export{e as t};
