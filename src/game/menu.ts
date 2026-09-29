@@ -197,7 +197,7 @@ export class MissionMenu {
         ${back}
         <h2 id="settings-page-title">Settings</h2>
         <div class="settings-groups">
-          <fieldset class="settings-group mission-settings"><legend>Game</legend>${minimap ? toggle('settings-minimap', 'Mini map', getSettings().minimap) + toggle('settings-coop-pause', 'Co-op: pausing pauses everyone', getSettings().coopPause) : ''}</fieldset>${minimap ? `<fieldset class="settings-group save-transfer"><legend>Transfer progress</legend><p>Moving to a new link or another device? Copy your save code here and load it there.</p><button type="button" id="save-copy">Copy save code</button> <button type="button" id="save-load">Load save code</button> <span id="save-status" role="status"></span></fieldset>` : ''}
+          <fieldset class="settings-group mission-settings"><legend>Game</legend>${minimap ? toggle('settings-minimap', 'Mini map', getSettings().minimap) + toggle('settings-coop-pause', 'Co-op: pausing pauses everyone', getSettings().coopPause) : ''}</fieldset><fieldset class="settings-group save-transfer"><legend>Transfer progress</legend><p>Moving to a new link or another device? Copy your save code here and load it there. It carries Dead Ink's profile and the rescue missions you have opened.</p><button type="button" id="save-copy">Copy save code</button> <button type="button" id="save-load">Load save code</button> <span id="save-status" role="status"></span></fieldset>
           <fieldset class="settings-group"><legend>Look</legend>
             ${slider('settings-fov', 'Field of view', SETTING_LIMITS.fov.min, SETTING_LIMITS.fov.max, SETTING_LIMITS.fov.step)}
             ${slider('settings-sensitivity', 'Mouse sensitivity', SETTING_LIMITS.sensitivity.min, SETTING_LIMITS.sensitivity.max, SETTING_LIMITS.sensitivity.step)}
@@ -421,6 +421,12 @@ export class MissionMenu {
     if (!this.pause.hidden && !this.pause.inert && !primary.hidden && !primary.disabled) primary.focus({ preventScroll: true })
   }
   ready() { this.loaded = true; this.start.disabled = false; this.start.textContent = this.copy.begin; if (this.page === 'home') this.focusPrimary() }
+  /** A new mission loading (the rescue campaign): Begin waits, and the game starts fresh from its title. */
+  loading(on: boolean) {
+    if (!on) return
+    this.loaded = false; this.hasPlayed = false; this.phase = 'active'; this.mainMenu = false
+    this.start.disabled = true; this.start.textContent = 'Loading the mission…'
+  }
   error(message: string) { this.loadError = message; this.start.textContent = 'Unable to load'; this.start.disabled = true; this.show('home'); this.showError() }
   private showError() { const debrief = this.element('#mission-debrief'); debrief.hidden = false; delete debrief.dataset.summary; debrief.textContent = this.loadError }
   reset() { this.phase = 'active'; this.loadError = ''; this.mainMenu = false; this.show('home', undefined, false) }

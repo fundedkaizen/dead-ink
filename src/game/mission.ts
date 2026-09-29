@@ -1,5 +1,8 @@
 import type { StationKind, Vec3 } from './types'
 import { RESCUE_LAYOUT } from './rescue-layout'
+import type { CampaignRun } from './campaign/run'
+import { objectiveLine } from './campaign/run'
+import { missionById } from './campaign/missions'
 
 export const CAMERA_SHUTDOWN_SECONDS = 60
 export const SIGNALS_COMPUTER_ID = 'signals-office-computer'
@@ -14,6 +17,8 @@ export type MissionState = {
   detentionFound: boolean; cellsReached: boolean
   health: number; elapsed: number; supplies: string[]; distractionUntil: number
   shots: number; kills: number; detections: number
+  /** The rescue campaign's mission in play (campaign/run.ts); absent in the classic single mission. */
+  run?: CampaignRun
 }
 export const initialMission = (): MissionState => ({
   phase: 'active', camerasActive: true, camerasDisabledUntil: null, alarm: 'inactive', alarmElapsed: 0, silencedElapsed: 0,
@@ -74,6 +79,8 @@ export function useStation(state: MissionState, kind: StationKind, id: string): 
 export function missionObjective(state: MissionState) {
   if (state.phase === 'dead') return 'Rescue interrupted. Retry the insertion checkpoint.'
   if (state.phase === 'complete') return 'Hostage extracted. Mission complete.'
+  const mission = state.run && missionById(state.run.mission)
+  if (mission && state.run) return objectiveLine(mission, state.run)
   if (state.jeep === 'escaping') return 'Escape the compound'
   if (releasedCount(state) < state.hostages.length) {
     if (!state.detentionFound) return 'Find the detention building in the east annex'

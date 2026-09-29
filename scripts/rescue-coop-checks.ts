@@ -73,7 +73,7 @@ const player = (id: number, x: number, z: number): PlayerSense => ({ feet: v(x, 
   assert(near(back.point, hit.point) && near(back.direction, hit.direction))
   // Guard rows: a live guard in full, a body in brief.
   const [live, body] = guardRows(f.ai.enemies)
-  assert.equal(GUARD_STATES[live[1]], 'combat'); assert.equal(live.length, 13); assert.equal(live[8], 1); assert.deepEqual(live.slice(9, 12), [1, 1.65, 9])
+  assert.equal(GUARD_STATES[live[1]], 'combat'); assert.equal(live.length, 14); assert.equal(live[13], 0); assert.equal(live[8], 1); assert.deepEqual(live.slice(9, 12), [1, 1.65, 9])
   assert.equal(GUARD_STATES[body[1]], 'dead'); assert.equal(body.length, 6)
   f.dispose()
   console.log('PASS Every co-op message survives the relay; the mirror keeps each player\'s own health, shots and kills; guard rows and hits encode')

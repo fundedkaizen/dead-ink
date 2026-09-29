@@ -16,5 +16,5 @@ console.log('PASS a save code carries the profile, name and settings to a new ad
 const before = [...to.m.entries()].join()
 for (const bad of ['', 'hello', 'DEADINK1:!!!', 'DEADINK1:' + btoa('[]'), 'DEADINK1:' + btoa(JSON.stringify({ other: 'x' }))]) assert.equal(importSave(bad, to), false, bad)
 assert.equal([...to.m.entries()].join(), before, 'a bad code changes nothing')
-assert.equal(SAVE_KEYS.length, 4)
+assert.equal(SAVE_KEYS.length, 5)
 console.log('PASS anything that is not a save code is refused and changes nothing')

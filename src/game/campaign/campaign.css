@@ -1,0 +1,100 @@
+/* The rescue campaign's HUD (campaign/hud.ts) and its menu pages (campaign/menu.ts): ink on paper, like the rest. */
+.campaign-hud { position: absolute; inset: 0; pointer-events: none; font-family: var(--notes); color: var(--ink); }
+.campaign-hud[hidden] { display: none; }
+.campaign-objectives { position: absolute; left: 20px; top: 18px; max-width: min(340px, calc(100vw - 40px)); padding: 10px 14px 10px;
+  background: #ffffffe6; border: 1.5px solid var(--ink); border-radius: 3px 6px 4px 5px; box-shadow: 2px 3px 0 #00000014; }
+.campaign-objectives .campaign-stage { margin: 0; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-muted); }
+.campaign-objectives h3 { margin: 2px 0 6px; font: 600 20px/1.15 var(--hand); }
+.campaign-objectives ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+.campaign-objectives li { position: relative; padding-left: 20px; font-size: 13px; line-height: 1.35; }
+.campaign-objectives li::before { content: ''; position: absolute; left: 2px; top: 3px; width: 10px; height: 10px; border: 1.5px solid var(--ink); border-radius: 2px 3px 2px 3px; }
+.campaign-objectives li.done { color: var(--ink-muted); text-decoration: line-through; text-decoration-thickness: 1px; }
+.campaign-objectives li.done::before { background: var(--ink); }
+.campaign-objectives li.optional { font-size: 12px; }
+.campaign-objectives li i { font-style: normal; color: var(--ink-muted); }
+.campaign-eta { margin: 8px 0 0; font-size: 13px; }
+.campaign-eta b { color: #c8322b; font-weight: 600; }
+.campaign-hostages { position: absolute; left: 50%; top: 18px; transform: translateX(-50%); display: flex; gap: 14px; }
+.campaign-hostage { display: grid; justify-items: center; gap: 3px; min-width: 150px; padding: 6px 10px; background: #ffffffe0; border: 1.5px solid var(--ink); border-radius: 4px 3px 5px 3px; }
+.campaign-hostage span { font: 600 15px/1 var(--hand); }
+.campaign-hostage div { width: 130px; height: 9px; border: 1.5px solid var(--ink); border-radius: 2px 4px 2px 3px; overflow: hidden; background: #fbfaf5; }
+.campaign-hostage i { display: block; height: 100%; background: #2878d0; transform-origin: left center; }
+.campaign-hostage.down i { background: #c8322b; }
+.campaign-hostage small { font-size: 11px; color: var(--ink-muted); }
+.campaign-hostage.down small { color: #c8322b; font-weight: 600; }
+.campaign-tools { position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); padding: 5px 12px; font-size: 12px; white-space: nowrap;
+  background: #ffffffcc; border-top: 1.5px solid var(--ink); color: var(--ink-deep); }
+.campaign-tools b { color: var(--ink); }
+.campaign-toast { position: absolute; left: 50%; top: 32%; transform: translateX(-50%); max-width: min(560px, calc(100vw - 40px)); padding: 9px 16px;
+  background: #fffffff0; border: 1.5px solid var(--ink); border-radius: 5px 3px 6px 4px; font: 600 16px/1.35 var(--notes); text-align: center; box-shadow: 2px 3px 0 #00000018; }
+.campaign-toast[hidden] { display: none; }
+.campaign-eye { position: absolute; left: 0; top: 0; width: 26px; height: 26px; margin: -13px 0 0 -13px; display: grid; place-items: center; }
+.campaign-eye[hidden] { display: none; }
+.campaign-eye > svg { width: 18px; height: 18px; stroke: var(--ink); stroke-width: 1.6; filter: drop-shadow(0 0 1.5px #fff); grid-area: 1 / 1; }
+.campaign-eye .ring { width: 26px; height: 26px; grid-area: 1 / 1; transform: rotate(-90deg); }
+.campaign-eye .ring circle { fill: none; stroke: var(--ink); stroke-width: 3; }
+.campaign-eye.sure > svg { fill: #c8322b; }
+.campaign-eye.sure .ring circle { stroke: #c8322b; }
+.world-marker.campaign-waypoint svg { fill: #fff; }
+.world-marker.campaign-mark svg { fill: #d4332a; }
+.world-marker.campaign-hostage-marker { opacity: 1; }
+.world-marker.campaign-hostage-marker.down svg { animation: campaign-down 0.8s ease-in-out infinite alternate; }
+@keyframes campaign-down { from { opacity: 0.45; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .world-marker.campaign-hostage-marker.down svg { animation: none; } }
+/* Above the shared ping button (bottom right) and clear of the weapon readout. */
+.campaign-touch { position: absolute; right: 14px; bottom: 196px; display: none; gap: 8px; flex-direction: column; pointer-events: auto; }
+.campaign-touch button { min-width: 96px; min-height: 44px; padding: 8px 12px; font: 600 13px var(--notes); color: var(--ink); background: #ffffffe6; border: 1.5px solid var(--ink); border-radius: 4px 6px 3px 5px; }
+@media (pointer: coarse) { .campaign-touch { display: flex; } }
+@media (max-width: 640px) {
+  .campaign-objectives { left: 12px; top: 12px; max-width: calc(100vw - 24px); padding: 8px 10px; }
+  .campaign-objectives h3 { font-size: 17px; }
+  .campaign-objectives li { font-size: 12px; }
+  .campaign-hostages { top: auto; bottom: 96px; }
+  .campaign-hostage { min-width: 120px; }
+  .campaign-hostage div { width: 100px; }
+  .campaign-tools { left: 12px; transform: none; bottom: 92px; font-size: 11px; white-space: normal; width: calc(100vw - 140px); text-align: left; }
+  .campaign-hostages:not(:empty) ~ .campaign-tools { display: none; }
+}
+
+/* The Campaign page: the missions in order, locked or open, their stars and best times, a map and the briefing. */
+body[data-mission="true"] .walk-card[data-page="campaign"] { width: min(820px, 100%); }
+.campaign-page { display: grid; gap: 18px; }
+.campaign-difficulty { display: flex; gap: 6px; flex-wrap: wrap; }
+.campaign-difficulty button { min-height: 40px; padding: 6px 14px; border: 1.5px solid var(--ink-rule); border-radius: 3px; background: transparent; color: var(--ink); font: 14px var(--notes); }
+.campaign-difficulty button[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: var(--paper); }
+.campaign-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.campaign-mission { display: grid; grid-template-columns: 34px 1fr auto; align-items: center; gap: 12px; width: 100%; padding: 10px 12px; text-align: left;
+  border: 1.5px solid var(--ink-rule); border-radius: 4px 6px 3px 5px; background: transparent; color: var(--ink); font: 14px var(--notes); }
+.campaign-mission[aria-pressed="true"] { border-color: var(--ink); box-shadow: 2px 3px 0 #00000014; }
+.campaign-mission:disabled { opacity: 0.55; cursor: not-allowed; }
+.campaign-mission .number { font: 600 26px/1 var(--hand); text-align: center; }
+.campaign-mission strong { display: block; font: 600 19px/1.15 var(--hand); }
+.campaign-mission small { color: var(--ink-muted); font-size: 12px; }
+.campaign-mission .stars { font-size: 16px; letter-spacing: 1px; white-space: nowrap; color: var(--ink); }
+.campaign-mission .stars .off { color: #cfcfcf; }
+.campaign-detail { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+.campaign-detail svg { width: 100%; height: auto; display: block; border: 1px solid var(--ink-rule); border-radius: 3px; background: #fff; }
+.campaign-detail svg text { font: 7px var(--notes); fill: var(--ink-deep); }
+body[data-mission="true"] .walk-card .campaign-detail p { margin: 0 0 10px; font-size: 13px; }
+.campaign-bests { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 10px 0 0; }
+.campaign-bests div { padding: 6px 8px; border-top: 1px solid var(--ink-rule); }
+.campaign-bests dt { font-size: 11px; color: var(--ink-muted); }
+.campaign-bests dd { margin: 2px 0 0; font: 600 15px var(--notes); }
+.campaign-legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 11px; color: var(--ink-muted); margin-top: 6px; }
+.campaign-home { display: grid; gap: 6px; margin-top: 10px; }
+.campaign-home .campaign-now { font-size: 13px; color: var(--ink-muted); }
+.campaign-home .campaign-now b { color: var(--ink); font-weight: 600; }
+.campaign-summary { display: grid; gap: 8px; margin-top: 8px; }
+body[data-mission="true"] .walk-card .campaign-summary .stars { font-size: 26px; letter-spacing: 2px; margin: 0; line-height: 1.2; color: var(--ink); }
+.campaign-summary .stars .off { color: #cfcfcf; }
+.campaign-summary ul { margin: 0; padding-left: 18px; font-size: 13px; }
+@media (max-width: 640px) {
+  .campaign-detail { grid-template-columns: 1fr; }
+  .campaign-mission { grid-template-columns: 26px 1fr; }
+  .campaign-mission .stars { grid-column: 2; }
+}
+/* The campaign's home slot (the mission in play, the win summary) shows on every home page, not only the title. */
+.menu-card[data-title="false"] .menu-home-extra:has(.campaign-home) { display: block; }
+.campaign-stages { margin: 6px 0 10px; padding-left: 20px; font-size: 13px; color: var(--ink-muted); }
+.campaign-stages li.done { text-decoration: line-through; }
+.campaign-stages li.now { color: var(--ink); font-weight: 600; }

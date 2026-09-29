@@ -25,6 +25,7 @@ npm run test:<area>  # focused suite, see table
 | `src/game/ai.ts`, `navigation.ts`                           | `test:ai`, `test:tower-patrol`                                               |
 | `src/game/weapons.ts`, `weapon-models.ts`, bullets, impacts | `test:weapons`, `test:bullets`, `test:polish`                                |
 | mission flow, hostage, jeep, security, gate                 | `test:rescue`, `test:escape`, `test:mission`                                 |
+| `src/game/campaign/` rescue missions, maps, escort, dogs    | `test:campaign`, `test:rescue`                                               |
 | player damage / death                                       | `test:player-hits`, `test:player-death`                                      |
 | `src/lab/` rig, clips, gait, deaths                         | `test:gait`, `test:deaths`, `test:combat-animations`, `test:npc-transitions` |
 | `src/world/` geometry                                       | `test:map`, `test:trees`, `test:player`, `test:expansion`                    |

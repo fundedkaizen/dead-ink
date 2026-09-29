@@ -1,4 +1,6 @@
 import * as THREE from 'three'
+import { shotRadius } from './campaign/stealth'
+import { suppressorModel } from './campaign/detail'
 import { applyPenMaterial, createPenSilhouette, penPalette } from '../render/ballpoint'
 import { disposeGun, type Gun } from '../lab/weapons/models'
 import type { WeaponContext, WeaponFrame, WeaponItem, WeaponName, WeaponSnapshot } from './types'
@@ -117,6 +119,9 @@ export class FirstPersonWeapons {
   private nextId = 1
   private loose = new Map<string, LooseWeapon>()
   private root = new THREE.Group()
+  /** Out of sight for a while (the rescue campaign's scout drone view). */
+  private hidden = false
+  setHidden(hidden: boolean) { this.hidden = hidden; this.root.visible = this.enabled && !!this.current && !hidden }
   private mount = new THREE.Group()
   private rightHand = new THREE.Group()
   private leftHand = new THREE.Group()
@@ -342,13 +347,16 @@ export class FirstPersonWeapons {
         this.partRotation.set(part, part.rotation.clone())
       }
       this.flash.position.copy(this.model.userData.muzzle).z += 0.035
+      // The rescue campaign's suppressed pistol: a can on the muzzle, and a small, dim flash at its end.
+      this.flash.scale.setScalar(this.current.suppressed ? 0.45 : 1)
+      if (this.current.suppressed) { this.model.add(suppressorModel(this.model.userData.muzzle)); this.flash.position.z += 0.17 }
       this.dress()
       if (outgoing) this.model.visible = false
       // The Deadline: a second Magnum in the left hand, the right hand's mirror image.
       if (isAkimbo(this.current)) this.offhand = new Offhand(this.root, createMissionGun(this.current.name), this.model, this.rightHand.clone(), this.flash.clone())
     }
     if (animate) this.swap = { time: outgoing ? 0 : SWAP_OUT, outgoing }
-    this.root.visible = this.enabled && !!this.current
+    this.root.visible = this.enabled && !!this.current && !this.hidden
     this.pose(0)
   }
 
@@ -708,7 +716,7 @@ export class FirstPersonWeapons {
     const enabled = frame.active && !frame.climbing
     if (!enabled) { this.cancel(); this.lastLook = null }
     this.enabled = enabled
-    this.root.visible = enabled && !!this.current
+    this.root.visible = enabled && !!this.current && !this.hidden
     if (!enabled) return
     const delta = Math.max(0, Math.min(Number.isFinite(dt) ? dt : 0, 0.1))
     this.time += delta
@@ -1409,9 +1417,11 @@ export class FirstPersonWeapons {
     const yaw = (Math.random() - 0.5) * rules.kick * (item.name === 'shotgun' ? 0.55 : 1)
     this.nudge(pitch, yaw)
     this.settle.pitch += pitch * rules.settle; this.settle.yaw += yaw * 0.35
-    this.context.emit({ kind: item.special === 'rayGun' ? 'shot-raygun' : `shot-${item.name}`, position: origin.clone(), radius: item.name === 'pistol' || item.name === 'burst' ? 38 : 55,
+    this.context.emit({ kind: item.special === 'rayGun' ? 'shot-raygun' : `shot-${item.name}`, position: origin.clone(),
+      radius: item.suppressed ? shotRadius(item.name, true) : item.name === 'pistol' || item.name === 'burst' ? 38 : 55,
       intensity: charges(item) ? this.chargeLevel : undefined,
-      text: `${rules.label} fired`, packed: item.packed ? item.packLevel ?? 1 : 0 })
+      // A suppressed pistol (the rescue campaign's) is a muffled cough: a short reach and a quiet report.
+      volume: item.suppressed ? 0.3 : undefined, text: `${item.suppressed ? 'Suppressed pistol' : rules.label} fired`, packed: item.packed ? item.packLevel ?? 1 : 0 })
     this.pose(0)
   }
 

@@ -8,6 +8,7 @@ import { ENEMY_HEALTH, ENEMY_RUN_SPEED, ENEMY_WEAPONS as WEAPON, ENEMY_COMBAT as
 import { rayCapsuleDistance, reactionClipName, type HitReaction, type HitZone } from './hit-reactions'
 import { playerHitTarget, type PlayerBulletHit } from './player-hit-reactions'
 import type { AIContext, EnemySnapshot, EnemySpec, EnemyState, PlayerSense, Shot, SoundEvent, Vec3, WeaponName } from './types'
+import { POINT_BLANK, SUSPECT_AT, detectionRate } from './campaign/stealth'
 
 const ignore = new THREE.Object3D()
 const direction = new THREE.Vector3()
@@ -52,6 +53,14 @@ export function rayBodyDistance(origin: THREE.Vector3, rayDirection: THREE.Vecto
 }
 
 export type Tactic = 'hold' | 'cover' | 'peek' | 'flank' | 'charge' | 'retreat'
+
+/**
+ * How sharp the guards are (the rescue campaign's difficulty). `gradual`: a guard who sees you is not sure at
+ * once; his awareness fills (fast up close, slowly far off, slower still while you crouch) and he turns to look
+ * before he opens fire. Off, as the checks and the classic mission expect: sight is contact.
+ */
+export type DirectorOptions = { accuracy: number; alertness: number; sight: number; gradual: boolean }
+export const DEFAULT_DIRECTOR_OPTIONS: DirectorOptions = { accuracy: 1, alertness: 1, sight: 1, gradual: false }
 
 export type Enemy = {
   spec: EnemySpec
@@ -115,6 +124,9 @@ export type Enemy = {
   defensiveTimer: number
   /** The player this guard is after (co-op: the one it saw, or who shot it; the host, or a solo player, is 0). */
   target: number
+  /** Gradual detection: how sure he is that he sees someone (0 to 1), and whom he is looking at (-1: nobody). */
+  awareness: number
+  spotting: number
 }
 
 const tuple = (point: THREE.Vector3): Vec3 => [point.x, point.y, point.z]
@@ -122,7 +134,7 @@ const vector = (value: unknown) => Array.isArray(value) && value.length === 3 &&
 const number = (value: unknown, fallback = 0) => typeof value === 'number' && Number.isFinite(value) ? value : fallback
 const NUMBERS = ['repath', 'stuck', 'senseTimer', 'lostFor', 'shotTimer', 'shots', 'magazine', 'reloadTimer', 'calloutTimer', 'communicationTimer', 'wait',
   'patrolStop', 'visitedWaypoints', 'distanceWalked', 'footstepDistance', 'pathFailures', 'tacticTimer', 'burst', 'aimTime', 'blockedFor', 'contactMemory', 'suppress', 'settledFor', 'hitPause', 'moveSpeed', 'searchIndex',
-  'scanTimer', 'scanDuration', 'scanCooldown', 'scanYaw', 'defensiveTimer', 'target'] as const
+  'scanTimer', 'scanDuration', 'scanCooldown', 'scanYaw', 'defensiveTimer', 'target', 'awareness', 'spotting'] as const
 
 export class EnemyDirector {
   readonly enemies: Enemy[] = []
@@ -139,6 +151,7 @@ export class EnemyDirector {
   private reserveDestination: THREE.Vector3 | null = null
   private elapsed = 0
   readonly bulletTrails: BulletTrails
+  options: DirectorOptions = { ...DEFAULT_DIRECTOR_OPTIONS }
 
   constructor(private context: AIContext, private actorFactory: (weapon: WeaponName) => Promise<EnemyActor> = EnemyActor.create) {
     this.navigation = new EnemyNavigation(context.world, context.doors, context.emit)
@@ -168,7 +181,7 @@ export class EnemyDirector {
         reserveRoute: false, alarmResponse: false, alarmExit: null, post: null, visitedWaypoints: 0, distanceWalked: 0, footstepDistance: 0, pathFailures: 0,
         tactic: 'hold', tacticTimer: 0, tacticPoint: null, burst: 0, aimTime: 0, blockedFor: 0, contactMemory: 0, suppress: 0, settledFor: 0, hitPause: 0, moveSpeed: 0,
         searchPoints: [], searchIndex: 0, woundArm: false, woundLeg: false, deathClip: 'dieBody', speaker: i % 4, noticedBodies: [],
-        scanTimer: 0, scanDuration: 0, scanCooldown: 0, scanYaw: 0, defensiveTimer: 0, target: 0,
+        scanTimer: 0, scanDuration: 0, scanCooldown: 0, scanYaw: 0, defensiveTimer: 0, target: 0, awareness: 0, spotting: -1,
       }
       if (spec.patrolMode === 'perimeter') {
         enemy.wait = 2 + this.random(enemy) * 2
@@ -179,6 +192,23 @@ export class EnemyDirector {
       this.context.scene.add(actor.root)
     }
     this.loaded = true
+  }
+
+  /**
+   * A different set of guards (the rescue campaign's next mission): the old ones go, the new ones load and
+   * take their posts. Resolves once every guard is in the scene.
+   */
+  async respawn(specs: EnemySpec[]) {
+    this.plans.clear()
+    this.clearTraces()
+    for (const enemy of this.enemies) enemy.actor.dispose()
+    this.enemies.length = 0
+    this.context.specs = specs
+    this.reserveDestination = null
+    this.elapsed = 0
+    this.navigation.clear()
+    this.loaded = false
+    await this.init()
   }
 
   get alertLevel() {
@@ -252,7 +282,7 @@ export class EnemyDirector {
     const origin = this.eye(enemy)
     const sniper = enemy.spec.role === 'sniper'
     const range = enemy.contactMemory > 0 ? (sniper ? COMBAT.sniperEngagedRange : COMBAT.engagedRange) :
-      (sniper ? COMBAT.sniperPassiveRange : COMBAT.passiveRange)
+      (sniper ? COMBAT.sniperPassiveRange : COMBAT.passiveRange) * this.options.sight * (player.exposure?.crouched ? 0.8 : 1)
     if (!insideVisionCone(origin, enemy.yaw, player.eye, range, enemy.state === 'combat' ? 70 : 55)) return false
     return this.context.world.visible(origin, player.eye, ignore) ||
       this.context.world.visible(origin, player.feet.clone().add(new THREE.Vector3(0, 0.95, 0)), ignore)
@@ -402,7 +432,12 @@ export class EnemyDirector {
       enemy.senseTimer -= dt
       if (enemy.senseTimer <= 0) {
         enemy.senseTimer = enemy.state === 'combat' ? COMBAT.senseCombat : COMBAT.senseIdle
-        const seen = this.sight(enemy)
+        let seen = this.sight(enemy)
+        // Gradual detection: until he is sure, seeing someone only makes him look (see detect()).
+        if (this.options.gradual && enemy.state !== 'combat') {
+          enemy.spotting = seen ? seen.id ?? 0 : -1
+          if (seen && enemy.awareness < 1) { enemy.lastKnown = seen.feet.clone(); seen = null }
+        }
         enemy.canSee = !!seen
         // Only an actual sight query supplies a position; cached visibility never tracks a hidden player.
         if (seen) {
@@ -411,6 +446,7 @@ export class EnemyDirector {
           enemy.lastKnown = seen.feet.clone(); enemy.contactMemory = COMBAT.contactMemory
         } else this.noticeBody(enemy)
       }
+      if (this.options.gradual) this.detect(enemy, dt)
       if (enemy.canSee) {
         if (enemy.scanTimer > 0 && this.posture(enemy) === 'crouch') enemy.actor.setPosture?.('crouch', false)
         enemy.scanTimer = 0
@@ -494,6 +530,57 @@ export class EnemyDirector {
       enemy.actor.root.userData.alertScan = enemy.scanTimer > 0 && this.posture(enemy) !== 'prone' && this.posture(enemy) !== 'kneel' ? 1 - enemy.scanTimer / enemy.scanDuration : undefined
       enemy.actor.update(dt, enemy.state, moving, enemy.canSee && enemy.lastKnown ? aimPoint.copy(enemy.lastKnown).setY(enemy.lastKnown.y + 1.65) : undefined, enemy.moveSpeed)
     }
+  }
+
+  /**
+   * Gradual detection, each frame: a guard looking at someone grows surer (detectionRate); past SUSPECT_AT he
+   * stops and turns to look (his cone shows), and at 1 it is contact. Looking away, it fades again.
+   */
+  private detect(enemy: Enemy, dt: number) {
+    if (enemy.state === 'combat' || enemy.state === 'dead' || enemy.state === 'reserve') { enemy.awareness = enemy.state === 'combat' ? 1 : 0; return }
+    const player = enemy.spotting >= 0 ? this.players.find(candidate => (candidate.id ?? 0) === enemy.spotting && candidate.alive) : undefined
+    if (!player) { enemy.awareness = Math.max(0, enemy.awareness - dt * 0.2); return }
+    const eye = this.eye(enemy), distance = eye.distanceTo(player.eye)
+    const alert = enemy.state === 'patrol' || enemy.state === 'guard' ? 1 : 1.4
+    const rate = detectionRate(distance, player.exposure ?? { moving: player.velocity.lengthSq() > 0.25, running: player.velocity.lengthSq() > 25 }, this.options.alertness * alert)
+    enemy.awareness = Math.min(1, enemy.awareness + (distance <= POINT_BLANK ? 1 : rate * dt))
+    enemy.lastKnown = player.feet.clone()
+    enemy.lostFor = 0
+    if (enemy.awareness >= 1) {
+      enemy.canSee = true
+      if ((player.id ?? 0) !== enemy.target) { enemy.target = player.id ?? 0; enemy.aimTime = 0 }
+      enemy.contactMemory = COMBAT.contactMemory
+      enemy.spotting = -1
+    } else if (enemy.awareness >= SUSPECT_AT && enemy.state !== 'suspicious') {
+      enemy.suspicion = Math.max(enemy.suspicion, enemy.awareness)
+      this.enter(enemy, 'suspicious')
+    }
+  }
+
+  /**
+   * A silent takedown from behind: only a guard who is not sure he has seen anyone. He drops where he stands,
+   * without a cry; the body can still be found. `direction`: the way the player was facing.
+   */
+  takedown(enemy: Enemy, direction: THREE.Vector3) {
+    if (!this.enemies.includes(enemy) || ['dead', 'reserve', 'combat'].includes(enemy.state) || enemy.awareness >= 1) return false
+    const normalized = direction.clone().setY(0).normalize()
+    enemy.health = 0
+    const point = enemy.position.clone().add(new THREE.Vector3(0, 1.2, 0))
+    const reaction: HitReaction = { zone: 'torso', point, direction: normalized, lethal: true, targetId: enemy.spec.id }
+    reaction.clip = reactionClipName(reaction, true)
+    reaction.travel = 0.3
+    enemy.actor.react(reaction.clip, true, normalized, reaction.travel)
+    enemy.deathClip = enemy.actor.deathClip
+    this.context.onHit?.(reaction)
+    this.enter(enemy, 'dead')
+    enemy.actor.update(0, 'dead', false)
+    this.context.emit({ kind: 'enemy-down', position: enemy.position.clone(), radius: 3 })
+    if (!enemy.dropped) {
+      enemy.dropped = true
+      this.context.dropWeapon({ id: `enemy-${enemy.spec.id}`, name: enemy.spec.weapon, magazine: enemy.magazine,
+        reserve: WEAPON[enemy.spec.weapon].magazine, position: tuple(enemy.position) })
+    }
+    return true
   }
 
   private nextPatrolStop(enemy: Enemy, from: number) {
@@ -925,7 +1012,7 @@ export class EnemyDirector {
     const round = enemy.burst > 0 ? weapon.burst - enemy.burst : 0
     const recoil = round * 0.025
     const rangePenalty = enemy.spec.weapon === 'sniper' ? 0.004 : enemy.spec.weapon === 'smg' ? 0.017 : enemy.spec.weapon === 'pistol' ? 0.016 : 0.012
-    const hitChance = blind ? 0 : clamp(0.72 - distance * rangePenalty - Math.min(0.18, player.velocity.length() * 0.025) - recoil - (enemy.woundArm ? 0.16 : 0) + Math.min(enemy.aimTime, 1.5) * 0.06, 0.08, 0.8)
+    const hitChance = blind ? 0 : this.options.accuracy * clamp(0.72 - distance * rangePenalty - Math.min(0.18, player.velocity.length() * 0.025) - recoil - (enemy.woundArm ? 0.16 : 0) + Math.min(enemy.aimTime, 1.5) * 0.06, 0.08, 0.8)
     const hit = this.random(enemy) < hitChance
     let bodyHit: Pick<PlayerBulletHit, 'region' | 'side' | 'point'> = {
       region: target.y - player.feet.y > 1.5 ? 'head' : 'torso', side: 0, point: target.clone(),

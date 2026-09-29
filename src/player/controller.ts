@@ -33,6 +33,8 @@ export class FirstPersonController {
   /** Downed (Dead Ink's last stand): a slow crawl at this share of walking pace, no sprint, no jump. */
   crawling = false
   crawlScale = 0.22
+  /** The rescue campaign's crouch: walking pace times this, and no sprint below 1. */
+  stanceScale = 1
   /** F held on the keyboard, or the pad's use button held: a teammate's revive runs only while one is. */
   private useKey = false
   padUse = false
@@ -260,8 +262,8 @@ export class FirstPersonController {
       this.forward.normalize()
       this.direction.set(-this.forward.z, 0, this.forward.x).multiplyScalar(x).addScaledVector(this.forward, z)
       if (!analog || this.direction.lengthSq() > 1) this.direction.normalize()
-      const wantsSprint = !this.crawling && (this.pressed.has('ShiftLeft') || this.pressed.has('ShiftRight') || this.padSprint)
-      this.body.speedScale = this.crawling ? this.crawlScale : 1
+      const wantsSprint = !this.crawling && this.stanceScale >= 1 && (this.pressed.has('ShiftLeft') || this.pressed.has('ShiftRight') || this.padSprint)
+      this.body.speedScale = (this.crawling ? this.crawlScale : 1) * this.stanceScale
       this.body.update(dt, this.direction, this.stamina.update(dt, wantsSprint, this.direction.lengthSq() > 0.01))
     } else this.stamina.update(dt, false, false)
     if (this.body.position.y < -20 || Math.max(Math.abs(this.body.position.x), Math.abs(this.body.position.z)) > 1150) this.respawn()

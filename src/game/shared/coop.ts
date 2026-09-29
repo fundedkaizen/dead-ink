@@ -43,6 +43,8 @@ export type PlayerState = {
   ps?: 0 | 1
   /** Dead Ink: off the ground (a jump), so the Brute's slam wave passes under them. */
   air?: 1
+  /** The rescue campaign: crouched (the guards see a crouched player less). */
+  cr?: 1
 }
 
 /** Where a host's message goes: one guest (`to`), every guest but one (`skip`), or every guest (neither). */

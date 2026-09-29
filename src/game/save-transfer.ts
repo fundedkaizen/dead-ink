@@ -1,9 +1,10 @@
 /**
  * Moving your progress between addresses or devices. Each web address keeps its own storage, so Dead Ink's
- * profile (unlocks, knives, stats), name, difficulty and settings stay behind when the game moves to a new
+ * profile (unlocks, knives, stats), name, difficulty, settings and the rescue campaign's progress (missions
+ * opened, stars and best times) stay behind when the game moves to a new
  * link. A save code carries exactly those keys, nothing else, as text you can paste anywhere.
  */
-export const SAVE_KEYS = ['dead-ink-profile', 'dead-ink-name', 'dead-ink-difficulty', 'stickman-settings'] as const
+export const SAVE_KEYS = ['dead-ink-profile', 'dead-ink-name', 'dead-ink-difficulty', 'stickman-settings', 'dead-ink-campaign'] as const
 const PREFIX = 'DEADINK1:'
 
 type Store = Pick<Storage, 'getItem' | 'setItem'>
