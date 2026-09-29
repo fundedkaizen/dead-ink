@@ -55,7 +55,7 @@ export const STILL_STANDING = (kills: number): Award => ({ id: 'standing', title
 
 /**
  * Every player's best one or two awards. An award goes to whoever has the best number for it (tied players
- * both win it). A player who wins several keeps the ones they won by the widest margin; one who wins none
+ * both win it, unless every player is tied). A player who wins several keeps the ones they won by the widest margin; one who wins none
  * gets "In it together".
  */
 export function awardsFor(stats: readonly AwardStats[], defs: readonly AwardDef[] = ZOMBIE_AWARDS, perPlayer = 2): PlayerAwards[] {
@@ -68,6 +68,8 @@ export function awardsFor(stats: readonly AwardStats[], defs: readonly AwardDef[
     if (!entries.length || (def.better === 'high' && entries.every(e => e.v <= 0))) return
     entries.sort((a, b) => def.better === 'high' ? b.v - a.v : a.v - b.v)
     const best = entries[0].v, runnerUp = entries.find(e => e.v !== best)?.v
+    // Everyone level (every player down once): nobody stands out, so nobody gets it.
+    if (players.length > 1 && entries.length === players.length && runnerUp === undefined) return
     // How convincingly it was won: against the runner-up, or the award's minimum when nobody came close.
     const strength = def.better === 'high' ? best / Math.max(1, runnerUp ?? def.min ?? 1) : (Math.max(0, runnerUp ?? best * 2) + 1) / (best + 1)
     for (const entry of entries.filter(e => e.v === best)) {

@@ -97,8 +97,12 @@ test('Alone: no team awards, the best one or two of what you did', () => {
 test('Minimums and ties: nobody is Headhunter for one headshot; tied players both win', () => {
   const low = awardsFor([{ player: 0, name: 'A', values: { kills: 3, headshots: 1 } }, { player: 1, name: 'B', values: { kills: 2, headshots: 1 } }])
   assert(!low.some(r => r.awards.some(a => a.id === 'headshots')))
-  const tied = awardsFor([{ player: 0, name: 'A', values: { kills: 50 } }, { player: 1, name: 'B', values: { kills: 50 } }])
-  assert(tied.every(r => r.awards.some(a => a.id === 'kills')))
+  const tied = awardsFor([{ player: 0, name: 'A', values: { kills: 50 } }, { player: 1, name: 'B', values: { kills: 50 } }, { player: 2, name: 'C', values: { kills: 20 } }])
+  assert(tied[0].awards.some(a => a.id === 'kills') && tied[1].awards.some(a => a.id === 'kills') && !tied[2].awards.some(a => a.id === 'kills'))
+  // Everyone level: nobody gets it (every player went down once).
+  const level = awardsFor([{ player: 0, name: 'A', values: { kills: 5, downs: 1 } }, { player: 1, name: 'B', values: { kills: 9, downs: 1, wonderKills: 9 } }])
+  assert(!level.some(r => r.awards.some(a => a.id === 'survivor')), 'no Survivor when all went down the same')
+  assert.deepEqual(level[1].awards.map(a => a.id), ['kills', 'wonder'])
   assert(ZOMBIE_AWARDS.length >= 8)
   assert(ZOMBIE_AWARDS.some(a => a.id === 'clutch') && ZOMBIE_AWARDS.some(a => a.id === 'dolls') && ZOMBIE_AWARDS.some(a => a.id === 'spent'))
 })
