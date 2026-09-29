@@ -157,7 +157,7 @@ test('No pad: nothing happens and the loop can sleep', () => {
     assert.deepEqual(keys(), ['KeyR', 'KeyF', 'KeyV', 'KeyG', 'KeyT', 'Digit3'], 'Dead Ink: R, F, V, G, T, and slot 3 (slot 2 is empty)')
     sent.length = 0
     for (const action of ['knife', 'grenade', 'special', 'map'] as const) hostage.action(action, true)
-    assert.deepEqual(keys(), ['KeyG', 'KeyM'], 'hostage: no knife or grenade; B drops the weapon (G); View opens the map')
+    assert.deepEqual(keys(), ['KeyC', 'KeyH', 'KeyG', 'KeyM'], 'hostage: the knife button crouches (C), the grenade button tells the hostage to wait or follow (H); B drops the weapon (G); View opens the map')
     sent.length = 0
     zombie.action('zoomOut', true)
     assert.deepEqual(keys(), [], 'Q is never sent unscoped in Dead Ink (it would throw a grenade)')

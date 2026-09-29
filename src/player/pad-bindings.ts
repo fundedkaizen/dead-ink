@@ -42,8 +42,9 @@ export function padBindings(canvas: HTMLCanvasElement, player: FirstPersonContro
       case 'jump': player.padJump(); break
       case 'reload': key('KeyR'); break
       case 'use': key('KeyF'); break
-      case 'knife': if (zombies) key('KeyV'); break
-      case 'grenade': if (zombies) key('KeyG'); break
+      // In the hostage mission the knife button crouches and the grenade button tells the hostage to wait or follow.
+      case 'knife': key(zombies ? 'KeyV' : 'KeyC'); break
+      case 'grenade': key(zombies ? 'KeyG' : 'KeyH'); break
       // Dead Ink's Ink Doll; in the hostage mission B drops the weapon, as G does.
       case 'special': key(zombies ? 'KeyT' : 'KeyG'); break
       case 'switch': { const slot = nextSlot(); if (slot >= 0) key(`Digit${slot + 1}`); break }
