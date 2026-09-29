@@ -522,6 +522,9 @@ export class MissionRuntime {
   }
   restart(local = false) {
     if (!local && this.coop?.asksHost('restart')) return
+    // The campaign starts over as a new run (a new cell, new patrols); a co-op guest gets the host's.
+    const run = this.state.run
+    if (this.campaign && run) { if (!this.coop?.isGuest) void this.loadMission(run.mission, run.difficulty); return }
     if(!this.initial) return
     this.checkpoint=structuredClone(this.initial); this.deaths=0; this.restore(this.initial)
     this.hud.notify('Mission restarted.',3)
