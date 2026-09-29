@@ -2,12 +2,13 @@ import * as THREE from 'three'
 import { applyPenMaterial, createPenSilhouette, penPalette } from '../render/ballpoint'
 import { disposeGun, type Gun } from '../lab/weapons/models'
 import type { WeaponContext, WeaponFrame, WeaponItem, WeaponName, WeaponSnapshot } from './types'
-import { WEAPON_RULES, WEAPON_SLOTS, SHOTGUN_PELLETS, SHOTGUN_BALLISTICS, SNIPER_ZOOM, startingLoadout } from './balance'
+import { BURST_FIRE, WEAPON_RULES, WEAPON_SLOTS, SHOTGUN_PELLETS, SHOTGUN_BALLISTICS, SNIPER_ZOOM, startingLoadout } from './balance'
+import { setCannonCharge } from '../lab/weapons/models/cannon'
 import { createMissionGun } from './weapon-models'
 import { RARITY_INFO, weaponRules } from './loot'
 import { createRarityBeam } from '../render/ink'
-import type { EquippedCosmetics, KnifeId } from './zombies/cosmetics/catalogue'
-import { CHARM_ANCHORS, CHARM_LENGTH, KNIFE_BUILDERS, animateCosmetics, applyCamo, buildCharm, buildWatch, removeCamo } from './zombies/cosmetics/models'
+import type { EquippedCosmetics, GloveId, KnifeId } from './zombies/cosmetics/catalogue'
+import { CHARM_ANCHORS, CHARM_LENGTH, KNIFE_BUILDERS, animateCosmetics, applyCamo, buildCharm, buildWatch, gloveMaterial, removeCamo } from './zombies/cosmetics/models'
 import { applyDragonSkin, removeDragonSkin } from './zombies/mythic'
 import { Offhand, firingHand, isAkimbo, type Kick } from './akimbo'
 export { WEAPON_RULES } from './balance'
@@ -50,6 +51,11 @@ const FEEL: Record<WeaponName, { kick: number; roll: number; shake: number; flas
   magnum: { kick: 1.8, roll: 0.09, shake: 0.014, flash: 1.35 },
   lmg: { kick: 0.75, roll: 0.04, shake: 0.006, flash: 1.15 },
   rocket: { kick: 2.3, roll: 0.06, shake: 0.03, flash: 2.1 },
+  burst: { kick: 0.75, roll: 0.04, shake: 0.004, flash: 0.95 },
+  pdw: { kick: 0.5, roll: 0.03, shake: 0.0028, flash: 0.75 },
+  lever: { kick: 1.9, roll: 0.07, shake: 0.016, flash: 1.3 },
+  // The Ink Cannon: a heavy, soft shove, no flash to speak of (the blob is the show).
+  cannon: { kick: 2.4, roll: 0.05, shake: 0.024, flash: 0.4 },
 }
 const DEATH_MACHINE_FEEL = { kick: 0.3, roll: 0.02, shake: 0.002, flash: 1.1 }
 /** Where a watch face points: up and toward the eye, so a glance at the wrist shows it. */
@@ -61,6 +67,14 @@ const WATCH_FACE = new THREE.Vector3(-0.35, 0.75, 0.6).normalize()
 const CHARM_SWING = { follow: 0.9, damping: 0.8, limit: 0.45 } as const
 /** Charms are drawn facing +Z; the eye sits behind the gun and off its +X side. */
 const CHARM_FACING = new THREE.Quaternion().setFromAxisAngle(up, 2.6)
+/**
+ * Charge weapons (Dead Ink's Ink Cannon): hold the trigger to charge, let go to fire. A tap fires at the
+ * weakest charge; CHARGE_TIME seconds held is full.
+ */
+export const CHARGE_TIME = 1.1
+const charges = (item: WeaponItem | null) => item?.special === 'inkCannon'
+/** The lever rifle's lever swings down and back after every shot, over this share of its interval. */
+const LEVER_THROW = 0.75
 /** An upgraded shotgun loads this many shells per reload cycle, as in Call of Duty. */
 const PACKED_SHELLS = 4
 const upgraded = (item: WeaponItem) => item.packed === true || ((item as { packLevel?: number }).packLevel ?? 0) >= 1
@@ -134,6 +148,10 @@ export class FirstPersonWeapons {
   private barrelAngle = 0
   private held = false
   private pendingShot = false
+  /** Rounds still to come in this trigger pull's burst (the burst pistol). */
+  private burstLeft = 0
+  /** Seconds a charge weapon has been held for this shot; null while not charging. */
+  private charge: number | null = null
   private enabled = false
   private reloadElapsed: number | null = null
   private reloadAim = 0
@@ -181,6 +199,13 @@ export class FirstPersonWeapons {
   private charm: { pivot: THREE.Group; model: Gun; bob: THREE.Vector3; previous: THREE.Vector3; anchor: THREE.Vector3; ready: boolean } | null = null
   /** The Deadline's second Magnum, in the left hand (akimbo.ts); null for every other gun. */
   private offhand: Offhand | null = null
+  /** Every mitten shape of both hands (their material is the gloves'), and the two cuffs round the wrists. */
+  private handShapes: THREE.Mesh[] = []
+  private cuffs: THREE.Mesh[] = []
+  private gloves: GloveId | null = null
+  private strapGeometry = new THREE.CylinderGeometry(0.0435, 0.0435, 0.012, 20, 1, true)
+  private buckleGeometry = new THREE.BoxGeometry(0.016, 0.014, 0.004)
+  private strapMaterial = new THREE.MeshBasicMaterial({ color: 0x1c1c1c, toneMapped: false, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 })
 
   constructor(private context: WeaponContext) {
     this.root.name = 'First-person stickman arms'
@@ -210,7 +235,9 @@ export class FirstPersonWeapons {
   get blocked() { return this.obstructed }
   get selected() { return this.slot }
   get scoped() { return this.scopeActive }
-  get canAim() { return this.current?.name === 'ak' || this.current?.name === 'smg' || this.current?.name === 'sniper' || this.current?.name === 'lmg' }
+  get canAim() { const name = this.current?.name; return name === 'ak' || name === 'smg' || name === 'sniper' || name === 'lmg' || name === 'pdw' || name === 'lever' }
+  /** How charged the shot being held is, 0 to 1 (0 when not charging): the Ink Cannon's HUD meter reads it. */
+  get chargeLevel() { return this.charge === null ? 0 : Math.min(1, this.charge / CHARGE_TIME) }
   get scopeMagnification() { return this.scopeZoom }
   get lookSensitivity() { return this.scopeActive ? 1 / this.scopeZoom : 1 }
   get current(): WeaponItem | null { return this.inventory[this.slot] }
@@ -248,6 +275,7 @@ export class FirstPersonWeapons {
 
   private mitten(parent: THREE.Group, position: [number, number, number], scale: [number, number, number]) {
     const shape = this.armShape(this.palmGeometry)
+    this.handShapes.push(shape)
     shape.position.set(...position)
     shape.scale.set(scale[0] * 1.12, scale[1] * 1.06, scale[2] * 1.08)
     parent.add(shape)
@@ -302,7 +330,7 @@ export class FirstPersonWeapons {
     this.partRest.clear()
     this.partRotation.clear()
     if (this.current) {
-      this.model = createMissionGun(this.current.name, this.current.special)
+      this.model = createMissionGun(this.current.name, this.current.special, !!this.current.packed)
       // A slight muzzle-up tilt reveals the top of the barrel while aiming.
       // Measure that pose before parenting so its sights stay below the reticle.
       this.model.rotation.x = AIM_PITCH
@@ -374,6 +402,7 @@ export class FirstPersonWeapons {
       this.watch.name = `Watch: ${cosmetics.watch}`
       this.root.add(this.watch)
     }
+    this.wearGloves(cosmetics?.gloves ?? null)
     this.endFlourish()
     this.idleTime = 0
     if (this.knifeModel && this.knifeTime === null) this.hideKnife()
@@ -381,6 +410,50 @@ export class FirstPersonWeapons {
     if (cosmetics) this.knifeFor(cosmetics.knife)
     this.dress()
     this.pose(0)
+  }
+
+  /**
+   * Gloves on both hands: every mitten shape takes the glove's material and a cuff closes round each wrist.
+   * Null goes back to bare paper hands.
+   */
+  private wearGloves(id: GloveId | null) {
+    if (id === this.gloves) return
+    this.gloves = id
+    const material = id ? gloveMaterial(id) : this.armMaterial
+    for (const shape of this.handShapes) shape.material = material
+    if (id && !this.cuffs.length) {
+      const geometry = new THREE.CylinderGeometry(0.04, 0.042, 0.036, 20, 1, true)
+      for (let i = 0; i < 2; i++) {
+        const cuff = new THREE.Mesh(geometry, material)
+        const contour = createPenSilhouette(geometry, 2.4)
+        contour.name = 'Glove cuff contour'
+        cuff.add(contour)
+        // The wrist strap: a band round the cuff with its buckle and tongue on the outside of the wrist.
+        const strap = new THREE.Mesh(this.strapGeometry, this.strapMaterial)
+        strap.add(createPenSilhouette(this.strapGeometry, 2))
+        const buckle = new THREE.Mesh(this.buckleGeometry, this.strapMaterial)
+        buckle.position.set(0, 0, 0.044)
+        buckle.add(createPenSilhouette(this.buckleGeometry, 2))
+        cuff.add(strap, buckle)
+        cuff.name = i ? 'Left glove cuff' : 'Right glove cuff'
+        this.root.add(cuff)
+        this.cuffs.push(cuff)
+      }
+    }
+    for (const cuff of this.cuffs) { cuff.material = material; cuff.visible = !!id }
+  }
+
+  /** Each cuff sits just behind its hand, along the forearm. */
+  private placeCuffs(wrists: [THREE.Vector3, THREE.Vector3]) {
+    if (!this.gloves) return
+    this.cuffs.forEach((cuff, i) => {
+      const arm = this.arms[i]
+      cuff.visible = arm.fore.visible
+      if (!cuff.visible) return
+      const elbow = arm.elbow.position, axis = wrists[i].clone().sub(elbow).normalize()
+      cuff.position.copy(elbow).lerp(wrists[i], 0.965)
+      cuff.quaternion.setFromUnitVectors(up, axis)
+    })
   }
 
   trigger(pressed: boolean) {
@@ -464,6 +537,9 @@ export class FirstPersonWeapons {
   cancel() {
     this.held = false
     this.pendingShot = false
+    this.burstLeft = 0
+    this.charge = null
+    if (this.model) setCannonCharge(this.model, 0)
     this.reloadElapsed = null
     this.reloadAim = 0
     this.switchTime = 0
@@ -642,6 +718,11 @@ export class FirstPersonWeapons {
     const previousCooldown = this.cooldown
     this.cooldown = Math.max(0, this.cooldown - delta)
     if (this.current?.name === 'shotgun' && previousCooldown > 0.72 && this.cooldown <= 0.72) this.context.emit({ kind: 'weapon-pump', position: this.feet.clone(), radius: 3 })
+    // The lever rifle's lever, worked halfway through its interval: the same metal clack as the pump.
+    if (this.current?.name === 'lever') {
+      const half = weaponRules(this.current).interval * this.fireScale * 0.5
+      if (previousCooldown > half && this.cooldown <= half) this.context.emit({ kind: 'weapon-pump', position: this.feet.clone(), radius: 3 })
+    }
     this.switchTime = Math.max(0, this.switchTime - delta)
     this.recoil = Math.max(0, this.recoil - delta * 7)
     // Spins up while the trigger is held and runs down after, like a real rotary gun.
@@ -678,9 +759,19 @@ export class FirstPersonWeapons {
     this.updateFalling(delta)
     const item = this.current
     // A launcher reloads by itself once its rocket is away, as launchers do in Call of Duty.
-    if (item?.name === 'rocket' && item.magazine === 0 && item.reserve > 0 && this.cooldown <= 0 && !this.reloading && this.switchTime <= 0) this.reload()
-    if (item && this.cooldown <= 0 && !this.reloading && this.switchTime <= 0 && !this.obstructed &&
-        (this.pendingShot || (this.held && WEAPON_RULES[item.name].automatic))) this.shoot(item)
+    if ((item?.name === 'rocket' || item?.name === 'cannon') && item.magazine === 0 && item.reserve > 0 && this.cooldown <= 0 && !this.reloading && this.switchTime <= 0) this.reload()
+    const ready = !!item && this.cooldown <= 0 && !this.reloading && this.switchTime <= 0 && !this.obstructed
+    if (item && charges(item)) {
+      // Charging: held, the charge builds (and the ink rises in the tank); let go and it fires.
+      if (ready && this.held && item.magazine > 0) {
+        // The ink starts to bubble up in the tank as the charge begins.
+        if (this.charge === null) this.context.emit({ kind: 'cannon-charge', position: this.feet.clone(), radius: 4, duration: CHARGE_TIME, packed: item.packed ? 1 : 0 })
+        this.charge = (this.charge ?? 0) + delta
+      }
+      else if (this.charge !== null && !this.held) { if (ready) this.shoot(item); this.charge = null }
+      else if (ready && this.pendingShot && item.magazine === 0) this.shoot(item)
+      if (this.model) setCannonCharge(this.model, this.chargeLevel)
+    } else if (item && ready && (this.pendingShot || this.burstLeft > 0 || (this.held && WEAPON_RULES[item.name].automatic))) this.shoot(item)
     else if (this.settle.pitch || this.settle.yaw) {
       // Resolve fire against the displayed sight before recovery moves it on this frame.
       // A shotgun blast has a heavier recovery than an automatic's short pulse.
@@ -848,7 +939,8 @@ export class FirstPersonWeapons {
     // Neither can aim: the launcher on the shoulder, the Deadline's pair spread a little wider.
     if (this.current?.name === 'rocket') return ROCKET_GRIP.clone()
     if (this.offhand) return AKIMBO_GRIP.clone()
-    const rifle = this.current?.name === 'ak' || this.current?.name === 'sniper' || this.current?.name === 'shotgun' || this.current?.name === 'lmg'
+    const name = this.current?.name
+    const rifle = name === 'ak' || name === 'sniper' || name === 'shotgun' || name === 'lmg' || name === 'lever' || name === 'cannon'
     return new THREE.Vector3(THREE.MathUtils.lerp(rifle ? 0.17 : 0.16, 0, this.aim),
       THREE.MathUtils.lerp(rifle ? -0.23 : -0.20, this.aimedGripY, this.aim), rifle ? -0.36 : -0.43)
   }
@@ -928,6 +1020,16 @@ export class FirstPersonWeapons {
       if (pump && !this.reloading) {
         const cycle = WEAPON_RULES.shotgun.interval - this.cooldown
         pump.position.z -= 0.07 * smooth(cycle, 0.12, 0.3) * (1 - smooth(cycle, 0.35, 0.55))
+      }
+      // The lever rifle's lever swings down and forward after a shot and snaps back up.
+      const lever = this.model.userData.parts.lever
+      if (lever && !this.reloading && this.cooldown > 0) {
+        const interval = weaponRules(current).interval * this.fireScale
+        const t = THREE.MathUtils.clamp((interval - this.cooldown) / (interval * LEVER_THROW), 0, 1)
+        lever.rotation.x -= 0.95 * Math.sin(Math.PI * t) * (motion ? 1 : 0)
+        // The hammer rests cocked; the shot drops it forward and the lever throw rocks it back to full cock.
+        const hammer = this.model.userData.parts.hammer
+        if (hammer && current.name === 'lever' && motion) hammer.rotation.x += 0.55 * (1 - THREE.MathUtils.smoothstep(t, 0.15, 0.5))
       }
       // The Magnum's cylinder swings out, spins, and snaps back in on a reload; it turns a chamber a shot.
       const cylinder = this.model.userData.parts.cylinder
@@ -1028,6 +1130,7 @@ export class FirstPersonWeapons {
     this.placeArm(this.arms[0], reachableWrist, shoulders[0])
     this.placeArm(this.arms[1], left, shoulders[1])
     this.placeWatch(left)
+    this.placeCuffs([reachableWrist, left])
     this.swingCharm(dt)
     if (this.cosmetics) animateCosmetics(this.frame.reducedMotion ? 1 : performance.now() / 1000 % 1000, [this.watch, this.charm?.model, this.knifeModel])
   }
@@ -1237,7 +1340,14 @@ export class FirstPersonWeapons {
   private shoot(item: WeaponItem) {
     const rules = weaponRules(item)
     this.cooldown = rules.interval * this.fireScale
+    // A burst: the pull fires the first round, the rest follow a short gap apart; the full interval comes after the last.
+    const burst = BURST_FIRE[item.name]
+    if (burst) {
+      this.burstLeft = this.burstLeft > 0 ? this.burstLeft - 1 : burst.count - 1
+      if (this.burstLeft > 0) this.cooldown = burst.gap * this.fireScale
+    }
     if (item.magazine === 0) {
+      this.burstLeft = 0
       this.held = false
       // As in Call of Duty: the trigger on an empty magazine clicks and starts the reload by itself.
       if (item.reserve > 0) { this.context.emit({ kind: 'empty' }); this.reload(); return }
@@ -1261,7 +1371,7 @@ export class FirstPersonWeapons {
     if (this.context.world.rayDistance(eye, bridge.clone().normalize(), bridge.length() + 0.02) < bridge.length() ||
         this.context.world.rayDistance(origin, direction, 0.15) < 0.15) { this.obstructed = true; return }
     item.magazine--
-    const feel = item.special ? DEATH_MACHINE_FEEL : FEEL[item.name]
+    const feel = item.special === 'deathMachine' || item.special === 'rayGun' ? DEATH_MACHINE_FEEL : FEEL[item.name]
     if (offhand) {
       // The left gun's own flash and kick; the right one stays where it is.
       offhand.flashTime = 0.05
@@ -1292,13 +1402,15 @@ export class FirstPersonWeapons {
         const ray = direction.clone().addScaledVector(right, Math.cos(angle) * radius).addScaledVector(vertical, Math.sin(angle) * radius).normalize()
         this.context.onShot({ origin: origin.clone(), direction: ray, range: rules.range, damage: rules.damage, weapon: item.name, pelletIndex: pellet })
       }
-    } else this.context.onShot({ origin, direction, range: rules.range, damage: rules.damage, weapon: item.name })
+    } else this.context.onShot({ origin, direction, range: rules.range, damage: rules.damage, weapon: item.name,
+      ...(charges(item) ? { charge: this.chargeLevel } : {}) })
     // Shotguns punch upward; limit their sideways pull so the bigger kick stays controllable.
     const pitch = rules.kick * (0.8 + Math.random() * 0.4)
     const yaw = (Math.random() - 0.5) * rules.kick * (item.name === 'shotgun' ? 0.55 : 1)
     this.nudge(pitch, yaw)
     this.settle.pitch += pitch * rules.settle; this.settle.yaw += yaw * 0.35
-    this.context.emit({ kind: item.special === 'rayGun' ? 'shot-raygun' : `shot-${item.name}`, position: origin.clone(), radius: item.name === 'pistol' ? 38 : 55,
+    this.context.emit({ kind: item.special === 'rayGun' ? 'shot-raygun' : `shot-${item.name}`, position: origin.clone(), radius: item.name === 'pistol' || item.name === 'burst' ? 38 : 55,
+      intensity: charges(item) ? this.chargeLevel : undefined,
       text: `${rules.label} fired`, packed: item.packed ? item.packLevel ?? 1 : 0 })
     this.pose(0)
   }

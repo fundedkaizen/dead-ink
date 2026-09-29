@@ -179,3 +179,9 @@ body[data-mission="true"] .walk-card .challenge-heading { margin: 10px 0 0; font
   .challenge-diamond { grid-template-columns: 52px minmax(0, 1fr); }
   .challenge-pips { grid-column: 1 / -1; }
 }
+
+/* The Career level on the home record. */
+.dead-ink-level { display: grid; justify-items: center; gap: 1px; }
+.dead-ink-level span { font: 700 11px/1.2 var(--notes); white-space: nowrap; }
+.dead-ink-record { grid-template-columns: auto auto minmax(0, 1fr) auto; }
+@media (max-width: 540px) { .dead-ink-record { grid-template-columns: auto 1fr 1fr; } .dead-ink-record > div:last-child { grid-column: 2 / -1; } .dead-ink-level { grid-row: span 2; } }

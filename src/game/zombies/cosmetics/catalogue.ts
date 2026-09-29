@@ -8,22 +8,32 @@ import type { WeaponName } from '../../types'
  * Every item is drawn in the game's ink. Colour appears only where rarity earns it (a gold watch, a
  * golden bullet), the same way loot rarity colours guns.
  */
-export type CosmeticKind = 'watch' | 'charm' | 'camo' | 'knife'
-/** `challenge`: earned only from challenges (never in a case), and owned per gun rather than outright. */
-export type CosmeticItem = { id: string; kind: CosmeticKind; name: string; rarity: Rarity; blurb: string; challenge?: true }
+export type CosmeticKind = 'watch' | 'charm' | 'camo' | 'knife' | 'gloves'
+/**
+ * `challenge`: a challenge camo, earned only from the camo challenges (never in a case), and owned per gun.
+ * `source`: where an item comes from when it is not a case: the Shop's permanent shelf, a Career level, or an
+ * account challenge. Such items are never in a case, and are owned outright like any other.
+ */
+export type CosmeticSource = 'shop' | 'level' | 'challenge'
+export type CosmeticItem = { id: string; kind: CosmeticKind; name: string; rarity: Rarity; blurb: string; challenge?: true; source?: CosmeticSource }
 
 export const WATCHES = ['diver', 'president', 'two-tone', 'tactical', 'diamond', 'skeleton'] as const
 export const CHARMS = ['skull', 'dice', 'ink-drop', 'teddy', 'crane', 'golden-bullet', 'ink-heart'] as const
-export const CASE_CAMOS = ['stripes', 'woodland', 'digital', 'obsidian', 'gold', 'nebula'] as const
+export const CASE_CAMOS = ['stripes', 'woodland', 'digital', 'obsidian', 'gold', 'nebula',
+  // The second set: two of them move (Circuit Ink's pulses, Molten Ink's flow).
+  'ink-wash', 'newsprint', 'topo', 'love-letter', 'circuit', 'molten'] as const
 /** Challenge camos, Tier 1 to Tier 4 of each gun's challenges, then Diamond for mastering every gun. */
 export const CHALLENGE_CAMOS = ['crosshatch', 'blueprint', 'red-ink', 'black-gold', 'diamond'] as const
 export const CAMOS = [...CASE_CAMOS, ...CHALLENGE_CAMOS] as const
 export const KNIVES = ['combat', 'bayonet', 'cleaver', 'karambit', 'butterfly', 'heartline'] as const
+/** Gloves, drawn on both first-person hands. */
+export const GLOVES = ['work', 'tactical', 'rubber', 'wraps', 'origami', 'boxing', 'bones', 'brute', 'midas', 'heartstring'] as const
 export type WatchId = typeof WATCHES[number]
 export type CharmId = typeof CHARMS[number]
 export type CamoId = typeof CAMOS[number]
 export type ChallengeCamoId = typeof CHALLENGE_CAMOS[number]
 export type KnifeId = typeof KNIVES[number]
+export type GloveId = typeof GLOVES[number]
 
 /** What the first-person arms wear. `camos` is per gun type; a Pack-a-Punched gun ignores it. */
 export type EquippedCosmetics = {
@@ -31,11 +41,15 @@ export type EquippedCosmetics = {
   charm: CharmId | null
   camos: Partial<Record<WeaponName, CamoId | null>>
   knife: KnifeId
+  gloves: GloveId | null
 }
-export const NO_COSMETICS: EquippedCosmetics = { watch: null, charm: null, camos: {}, knife: 'combat' }
+export const NO_COSMETICS: EquippedCosmetics = { watch: null, charm: null, camos: {}, knife: 'combat', gloves: null }
 
 const item = (kind: CosmeticKind, id: string, name: string, rarity: Rarity, blurb: string): CosmeticItem =>
   ({ id: `${kind}:${id}`, kind, name, rarity, blurb })
+
+const sourced = (kind: CosmeticKind, id: string, name: string, rarity: Rarity, blurb: string, source: CosmeticSource): CosmeticItem =>
+  ({ ...item(kind, id, name, rarity, blurb), source })
 
 function challengeCamo(id: string, name: string, rarity: Rarity, blurb: string): CosmeticItem {
   return { ...item('camo', id, name, rarity, blurb), challenge: true }
@@ -62,6 +76,12 @@ export const CATALOGUE: readonly CosmeticItem[] = [
   item('camo', 'obsidian', 'Obsidian', 'epic', 'Black glass with pale veins'),
   item('camo', 'gold', 'Gold Leaf', 'legendary', 'Every paper face gilded'),
   item('camo', 'nebula', 'Ink Nebula', 'mythic', 'Pink and violet ink swirling, full of stars'),
+  item('camo', 'ink-wash', 'Ink Wash', 'common', 'Watercolour blots, dark at their edges'),
+  item('camo', 'newsprint', 'Newsprint', 'uncommon', 'Halftone dots and columns of tiny type'),
+  item('camo', 'topo', 'Contour Map', 'rare', 'Hand-drawn contour lines over old map paper'),
+  sourced('camo', 'love-letter', 'Love Letter', 'epic', 'Pink letter paper, ruled lines and inked hearts', 'shop'),
+  item('camo', 'circuit', 'Circuit Ink', 'epic', 'Traces on a dark board, pulses racing along them'),
+  item('camo', 'molten', 'Molten Ink', 'legendary', 'Black crust split by rivers of glowing gold'),
   challengeCamo('crosshatch', 'Crosshatch', 'uncommon', 'Dense pen hatching, drawn over and over'),
   challengeCamo('blueprint', 'Blueprint', 'rare', 'White construction lines on blue paper'),
   challengeCamo('red-ink', 'Red Ink', 'epic', 'Paper soaked through with red'),
@@ -73,6 +93,16 @@ export const CATALOGUE: readonly CosmeticItem[] = [
   item('knife', 'karambit', 'Karambit', 'epic', 'Curved claw blade with a finger ring'),
   item('knife', 'butterfly', 'Butterfly', 'legendary', 'Two handles that flip open'),
   item('knife', 'heartline', 'Heartline', 'mythic', 'A karambit whose edge glows pink'),
+  item('gloves', 'work', 'Work Gloves', 'common', 'Canvas work gloves, hatched with wear'),
+  item('gloves', 'tactical', 'Night Ops', 'common', 'Black tactical gloves with padded knuckles'),
+  item('gloves', 'rubber', 'Scrubbers', 'uncommon', 'Green rubber gloves, rolled at the cuff'),
+  item('gloves', 'wraps', 'Knuckle Wraps', 'uncommon', 'Hands wrapped in strips of paper tape'),
+  sourced('gloves', 'origami', 'Origami', 'rare', 'Folded from a blue page of the notebook', 'shop'),
+  item('gloves', 'boxing', 'Blue Corner', 'rare', 'Laced leather in the blue corner\'s colour'),
+  item('gloves', 'bones', 'Bone Hands', 'epic', 'Black gloves with every bone drawn on in white'),
+  sourced('gloves', 'brute', 'Brute Knuckles', 'epic', 'Violet knuckles torn from the Brute\'s own hands', 'challenge'),
+  item('gloves', 'midas', 'Midas Touch', 'legendary', 'Solid gold from the wrist to the fingertips'),
+  item('gloves', 'heartstring', 'Heartstring', 'mythic', 'Rose-gold gloves stitched with pink hearts that glow'),
 ]
 
 /** Owned from the first game, so the Armory is never empty and the knife always has a skin. */

@@ -157,3 +157,27 @@ body[data-dead-ink-revive="true"] #world { animation: dead-ink-revive 2.4s linea
   text-shadow: 1px 1px 0 #fff, -1px 1px 0 #fff, 1px -1px 0 #fff, -1px -1px 0 #fff, 0 0 10px #fff; }
 body[data-dead-ink-over="flying"] #mission-hud, body[data-dead-ink-over="flying"] .mission-death { visibility: hidden; }
 @media (prefers-reduced-motion: reduce) { .dead-ink-over-title { transition: opacity 0.3s linear; transform: none; } }
+
+/* The Ink Cannon's charge: a ring of ink round the crosshair that fills as the shot charges. */
+.ink-charge { position: fixed; left: 50%; top: 50%; width: 64px; height: 64px; margin: -32px 0 0 -32px; pointer-events: none; z-index: 5; }
+.ink-charge svg { width: 100%; height: 100%; transform: rotate(-90deg); overflow: visible; }
+.ink-charge-track { fill: none; stroke: rgba(0, 0, 0, 0.18); stroke-width: 3; }
+.ink-charge-fill { fill: none; stroke: #3b2bd6; stroke-width: 5; stroke-linecap: round; stroke-dasharray: 0 100; filter: drop-shadow(0 0 1px #000); }
+.ink-charge.packed .ink-charge-fill { stroke: #d4332a; }
+.ink-charge.full .ink-charge-fill { stroke-width: 7; }
+
+/* Buildable guidance (build-guide.ts): the hint under the round, with an arrow toward the spot, and the spot's marker. */
+.build-guide { position: fixed; top: 120px; left: 50%; transform: translateX(-50%); z-index: 5; display: flex; align-items: center; gap: 8px; max-width: calc(100vw - 32px);
+  padding: 6px 14px 6px 8px; background: #fff; border: 2px solid #111; border-radius: 6px 4px 7px 5px; box-shadow: 3px 3px 0 #111; pointer-events: none;
+  font: 700 15px/1.2 var(--notes, 'Segoe UI', sans-serif); color: #111; white-space: nowrap; }
+.build-guide span { overflow: hidden; text-overflow: ellipsis; }
+.build-guide b { padding-left: 8px; border-left: 2px solid #111; font-variant-numeric: tabular-nums; }
+.build-guide i { display: grid; place-items: center; width: 26px; height: 26px; flex: none; border-radius: 50%; background: #e8b64a; border: 2px solid #111; }
+.build-guide i svg { width: 16px; height: 16px; fill: #111; }
+.build-guide-marker { position: fixed; left: 0; top: 0; z-index: 5; width: 34px; height: 34px; margin: -17px 0 0 -17px; pointer-events: none; display: grid; place-items: center;
+  background: #fff; border: 2.5px solid #111; border-radius: 50%; box-shadow: 0 0 0 4px rgba(232, 182, 74, 0.55); animation: build-guide-pulse 1.4s ease-in-out infinite; }
+.build-guide-marker svg { width: 20px; height: 20px; fill: #111; }
+.build-guide-marker svg .cut { fill: none; stroke: #fff; stroke-width: 2.2; stroke-linecap: round; }
+@keyframes build-guide-pulse { 50% { box-shadow: 0 0 0 9px rgba(232, 182, 74, 0.2); } }
+body[data-reduced-motion='true'] .build-guide-marker { animation: none; }
+@media (max-width: 640px) { .build-guide { top: 96px; font-size: 13px; } }

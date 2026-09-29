@@ -3,6 +3,7 @@ import type { WeaponName } from '../types'
 import type { ZombieSnap } from './director'
 import type { BlastKind } from './blasts'
 import type { PowerupKind } from './rules'
+import type { PingMessage } from '../shared/pings'
 
 /**
  * Dead Ink co-op: up to four players, each in their own browser, talking through the relay
@@ -46,25 +47,30 @@ export type CoopMessage =
   // `bd`: the Brute's chunks in flight, [id, origin x y z, launch velocity x y z, age] (brute.ts).
   | { t: 'tick'; z: ZombieSnap[]; r: number; ph: 'break' | 'active'; players: PlayerState[]; storm: boolean; /** The host's co-op pause setting: 1 a pause stops everyone. */ fz?: 0 | 1; /** Every door, open (1) or shut (0), in the scene's order: the host's doors are the doors. */ dr?: string; pw: 0 | 1; pk: 0 | 1; w?: WorldState; bd?: number[][] }
   | { t: 'shield' }
-  | { t: 'award'; n: number; k?: number; h?: number }
+  // `c`: what made the kills, for the end-of-game awards (an explosive, a wonder weapon, an Ink Doll, a plank nailed back).
+  | { t: 'award'; n: number; k?: number; h?: number; c?: 'boom' | 'wonder' | 'doll' | 'plank' }
+  // The end-of-game awards for every player, worked out by the host (../shared/awards.ts).
+  | { t: 'awards'; a: import('../shared/awards').PlayerAwards[] }
   | { t: 'hit'; pt: [number, number, number]; dealt: number; id: string; head: 0 | 1; lethal: 0 | 1 }
   // `k`: a shove to add to their speed (the Brute's blows throw a player), m/s.
   | { t: 'hurt'; n: number; s?: [number, number, number]; k?: [number, number, number] }
   | { t: 'announce'; text: string; s: number; tone?: string }
   | { t: 'sting'; name: 'roundStart' | 'boxSpin' | 'song' }
   | { t: 'gate'; id: string }
-  | { t: 'box'; a: 'spin' | 'take' | 'close' | 'move'; r?: { name: WeaponName; rarity: string; special?: 'rayGun' }; teddy?: boolean; by?: number; spot?: number }
+  | { t: 'box'; a: 'spin' | 'take' | 'close' | 'move'; r?: { name: WeaponName; rarity: string; special?: 'rayGun' | 'inkCannon' }; teddy?: boolean; by?: number; spot?: number }
   | { t: 'drop'; k: PowerupKind; p: [number, number, number] }
   | { t: 'grab'; k: PowerupKind; p: [number, number, number]; by: number }
   // `k`: how it looks and sounds (a rocket's, a Deadline round's); a frag's when missing.
   | { t: 'boom'; p: [number, number, number]; r: number; k?: BlastKind }
   | { t: 'soul'; p: [number, number, number]; i: number }
   /** A teammate fired: the tracer from `o` to `e`, the gun (`raygun` for the Ink Ray) and its Pack-a-Punch level, to see and hear. */
-  | { t: 'fire'; o: [number, number, number]; e: [number, number, number]; w: string; pk?: number }
+  | { t: 'fire'; o: [number, number, number]; e: [number, number, number]; w: string; pk?: number; /** The Ink Cannon's charge, 0 to 1. */ c?: number }
   | { t: 'gameover' }
   | { t: 'start' }
   // guest -> host
   | { t: 'me'; me: PlayerState }
+  // A guest's numbers for the end-of-game awards, sent every second.
+  | { t: 'stats'; v: Record<string, number> }
   | { t: 'shot'; o: [number, number, number]; d: [number, number, number]; range: number; damage: number; weapon: WeaponName; scale: number; pierce: number; pellet?: number }
   | { t: 'door'; i: number; o: 0 | 1 }
   | { t: 'knife'; o: [number, number, number]; f: [number, number, number]; range: number; damage: number }
@@ -83,6 +89,8 @@ export type CoopMessage =
   // either way (a guest reviving another guest goes through the host: `target`)
   | { t: 'revive'; target?: number; by?: string }
   | { t: 'down'; dn: 0 | 1 | 2 }
+  // Pings (../shared/pings.ts): a guest's go to the host, which passes them on to the other guests.
+  | PingMessage
 
 /** A message as it arrives: the relay marks a guest's messages to the host with who sent them. */
 export type CoopIncoming = CoopMessage & { from?: number }

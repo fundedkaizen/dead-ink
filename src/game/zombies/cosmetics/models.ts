@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import { applyPenMaterial, penPalette } from '../../../render/ballpoint'
 import { box, gun, metal, part, path, tube, type Gun, type V } from '../../../lab/weapons/models/common'
 import { RARITY_INFO } from '../../loot'
-import type { CamoId, CharmId, KnifeId, WatchId } from './catalogue'
+import type { CamoId, CharmId, GloveId, KnifeId, WatchId } from './catalogue'
 
 /**
  * First-person cosmetics, drawn like the guns: paper faces, black contours, built through the gun
@@ -361,7 +361,10 @@ export const buildCharm = (id: CharmId) => charm(id)
 // ---------------------------------------------------------------- camos
 
 const CAMO_CODE: Record<CamoId, number> = { stripes: 0, woodland: 1, digital: 2, obsidian: 3, gold: 4,
-  crosshatch: 5, blueprint: 6, 'red-ink': 7, 'black-gold': 8, diamond: 9, nebula: 10 }
+  crosshatch: 5, blueprint: 6, 'red-ink': 7, 'black-gold': 8, diamond: 9, nebula: 10,
+  'ink-wash': 11, newsprint: 12, topo: 13, 'love-letter': 14, circuit: 15, molten: 16 }
+/** Camos that move: their shared clock runs while one is drawn. */
+const ANIMATED_CAMOS: readonly CamoId[] = ['diamond', 'nebula', 'circuit', 'molten']
 const camoMaterials = new Map<CamoId, THREE.MeshBasicMaterial>()
 /**
  * Seconds for the animated camos (Diamond's glints), shared by every copy. Advanced as the material draws,
@@ -402,6 +405,13 @@ export function camoMaterial(id: CamoId) {
           return mix(mix(camoHash(i), camoHash(i + vec2(1.0, 0.0)), f.x), mix(camoHash(i + vec2(0.0, 1.0)), camoHash(i + vec2(1.0, 1.0)), f.x), f.y);
         }
         float camoFbm(vec2 p) { return camoNoise(p) * 0.6 + camoNoise(p * 2.13) * 0.28 + camoNoise(p * 4.37) * 0.12; }
+        float camoDot2(vec2 v) { return dot(v, v); }
+        // A heart's signed distance (0 at its outline, negative inside), about a unit tall, point down at y 0.
+        float camoHeart(vec2 p) {
+          p.x = abs(p.x);
+          if (p.y + p.x > 1.0) return sqrt(camoDot2(p - vec2(0.25, 0.75))) - sqrt(2.0) / 4.0;
+          return sqrt(min(camoDot2(p - vec2(0.0, 1.0)), camoDot2(p - 0.5 * max(p.x + p.y, 0.0)))) * sign(p.x - p.y);
+        }
         vec3 camoPattern(vec2 p) {
           #if CAMO == 0
             float band = fract(p.x * 22.0 + p.y * 9.0 + sin(p.y * 70.0 + p.x * 30.0) * 0.25 + camoFbm(p * 60.0) * 0.9);
@@ -463,6 +473,75 @@ export function camoMaterial(id: CamoId) {
             float g = 1.0 - smoothstep(0.01, 0.026, vein);
             g = max(g, (1.0 - smoothstep(0.005, 0.012, fine)) * 0.75);
             return mix(lacquer, camoGold * 1.08, g);
+          #elif CAMO == 11
+            // Ink Wash: watercolour blots, pale in the middle and dark where the water dried at their edges.
+            float n = camoFbm(p * 14.0 + 2.0);
+            float m = camoFbm(p * 31.0 - 5.0);
+            vec3 c = vec3(0.97);
+            c = mix(c, vec3(0.62), smoothstep(0.44, 0.6, n) * 0.85);
+            c = mix(c, vec3(0.16), (1.0 - smoothstep(0.0, 0.025, abs(n - 0.46))) * 0.75);
+            c = mix(c, vec3(0.08), smoothstep(0.67, 0.71, m) * 0.8);
+            return c;
+          #elif CAMO == 12
+            // Newsprint: blocks of halftone dots and blocks of tiny type, on grey-white paper.
+            vec2 block = floor(p / vec2(0.07, 0.05));
+            float kind = camoHash(block + 4.1);
+            vec3 paper = vec3(0.9, 0.89, 0.85);
+            float shade = camoFbm(p * 18.0 + block);
+            vec2 g = fract(p / 0.005) - 0.5;
+            float halftone = 1.0 - step(0.12 + shade * 0.32, length(g));
+            vec2 t = vec2(p.x / 0.01, p.y / 0.0045);
+            float word = step(0.28, camoHash(floor(t) + block * 7.0));
+            float type = step(0.45, fract(t.y)) * word * step(0.06, fract(p.x / 0.07)) * step(fract(p.x / 0.07), 0.94);
+            float rule = 1.0 - smoothstep(0.0, 0.0015, abs(fract(p.y / 0.05) - 0.02) * 0.05);
+            return mix(paper, vec3(0.06), max(kind < 0.45 ? halftone * 0.9 : type * 0.85, rule * 0.9));
+          #elif CAMO == 13
+            // Contour Map: drawn contour lines, every fifth heavier, over tinted map paper.
+            float h = camoFbm(p * 8.5 + 1.3);
+            float ring = abs(fract(h * 16.0) - 0.5);
+            float line = 1.0 - smoothstep(0.035, 0.08, ring);
+            float major = (1.0 - smoothstep(0.02, 0.06, abs(fract(h * 3.2) - 0.5))) ;
+            vec3 base = mix(vec3(0.96, 0.94, 0.86), vec3(0.78, 0.86, 0.7), smoothstep(0.35, 0.7, h));
+            return mix(mix(base, vec3(0.45, 0.28, 0.12), line * 0.8), vec3(0.3, 0.16, 0.06), major * 0.9);
+          #elif CAMO == 14
+            // Love Letter: pink letter paper, faint ruled lines, and hearts inked here and there.
+            vec3 paper = vec3(1.0, 0.86, 0.9);
+            float ruled = 1.0 - smoothstep(0.0, 0.08, abs(fract(p.y / 0.011) - 0.5) - 0.42);
+            vec3 c = mix(paper, vec3(0.62, 0.72, 0.95), ruled * 0.5);
+            vec2 cell = floor(p / 0.028);
+            vec2 f = fract(p / 0.028) - 0.5;
+            float h = camoHash(cell);
+            float a = (h - 0.5) * 1.2;
+            f = mat2(cos(a), -sin(a), sin(a), cos(a)) * f;
+            float d = camoHeart(f * (3.4 - h * 1.2) + vec2(0.0, 0.5));
+            float show = step(0.3, h);
+            c = mix(c, vec3(0.08, 0.0, 0.03), (1.0 - smoothstep(0.0, 0.06, abs(d))) * show);
+            c = mix(c, h > 0.7 ? vec3(0.86, 0.1, 0.32) : vec3(1.0, 0.45, 0.62), step(d, 0.0) * show);
+            return c;
+          #elif CAMO == 15
+            // Circuit Ink: copper-green traces on a dark board, pads at their ends, pulses racing along them.
+            vec2 q = p / 0.013;
+            vec2 i = floor(q), f = fract(q);
+            float h = camoHash(i);
+            float across = step(0.5, h);
+            float trace = across > 0.5 ? 1.0 - smoothstep(0.07, 0.11, abs(f.y - 0.5)) : 1.0 - smoothstep(0.07, 0.11, abs(f.x - 0.5));
+            trace *= step(0.25, camoHash(i + 9.2));
+            float pad = (1.0 - smoothstep(0.18, 0.24, length(f - 0.5))) * step(0.78, camoHash(i + 3.1));
+            float along = across > 0.5 ? f.x : f.y;
+            float pulse = pow(max(0.0, sin((along + camoHash(i + 1.7) * 7.0 - camoTime * 1.6) * 3.14159)), 24.0);
+            vec3 board = vec3(0.012, 0.05, 0.035) + vec3(0.02) * camoNoise(p * 60.0);
+            vec3 c = mix(board, vec3(0.09, 0.5, 0.34), max(trace, pad));
+            return c + vec3(0.55, 1.0, 0.8) * pulse * max(trace, pad * 0.6) * 1.3;
+          #elif CAMO == 16
+            // Molten Ink: a black crust split by cracks of glowing gold that flow slowly along the gun.
+            float t = camoTime * 0.22;
+            vec2 w = p * 15.0;
+            float n = camoFbm(w + vec2(t, -t * 0.4));
+            float crack = abs(camoFbm(w * 1.35 + vec2(-t * 0.5, t * 0.8) + 3.3) - 0.5);
+            float lava = 1.0 - smoothstep(0.015, 0.075, crack);
+            vec3 crust = vec3(0.025, 0.018, 0.016) + vec3(0.05, 0.035, 0.03) * camoNoise(p * 70.0);
+            vec3 hot = mix(vec3(0.85, 0.22, 0.02), camoGold * 1.35, smoothstep(0.35, 0.75, n));
+            return mix(crust, hot, lava) + hot * 0.12 * pow(n, 3.0);
           #elif CAMO == 10
             // Ink Nebula: violet ink swirled through with pink, drifting slowly, pricked with twinkling stars.
             float t = camoTime * 0.12;
@@ -514,7 +593,7 @@ export function camoMaterial(id: CamoId) {
           + camoPattern(vCamoPosition.xy + 0.71) * camoWeights.z;`)
   }
   material.customProgramCacheKey = () => `dead-ink-camo:${id}`
-  if (id === 'diamond' || id === 'nebula') material.onBeforeRender = () => { camoTime.value = reducedMotion() ? 1.2 : performance.now() / 1000 % 1000 }
+  if (ANIMATED_CAMOS.includes(id)) material.onBeforeRender = () => { camoTime.value = reducedMotion() ? 1.2 : performance.now() / 1000 % 1000 }
   camoMaterials.set(id, material)
   return material
 }
@@ -550,6 +629,141 @@ export function applyCamo(model: THREE.Object3D, id: CamoId) {
 export function removeCamo(model: THREE.Object3D) {
   const camos = new Set<THREE.Material>(camoMaterials.values())
   model.traverse(object => { if (object instanceof THREE.Mesh && camos.has(object.material)) object.material = metal })
+}
+
+// ---------------------------------------------------------------- gloves
+
+/**
+ * Gloves: a material for the first-person mittens (both hands) and the cuffs round each wrist. The hands are
+ * unit spheres scaled into mittens, so the patterns are drawn from the sphere's own position (-1 to 1): the
+ * palm faces -Y, the fingers +Z. Colour only where rarity earns it.
+ */
+const GLOVE_CODE: Record<GloveId, number> = { work: 0, tactical: 1, rubber: 2, wraps: 3, origami: 4, boxing: 5, bones: 6, brute: 7, midas: 8, heartstring: 9 }
+const gloveMaterials = new Map<GloveId, THREE.MeshBasicMaterial>()
+const gloveTime = { value: 0 }
+
+export function gloveMaterial(id: GloveId) {
+  const cached = gloveMaterials.get(id)
+  if (cached) return cached
+  const material = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 })
+  // Dark gloves are stitched in pale thread, the rest in dark.
+  material.defines = { GLOVE: GLOVE_CODE[id], ...(id === 'tactical' || id === 'bones' || id === 'brute' || id === 'midas' ? { GLOVE_PALE_THREAD: 1 } : {}) }
+  material.onBeforeCompile = shader => {
+    shader.uniforms.gloveTime = gloveTime
+    shader.uniforms.gloveGold = { value: new THREE.Color(RARITY_INFO.legendary.color) }
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>
+        varying vec3 vGlove;`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        vGlove = position;`)
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+        varying vec3 vGlove;
+        uniform float gloveTime;
+        uniform vec3 gloveGold;
+        float gloveHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        float gloveNoise(vec2 p) {
+          vec2 i = floor(p), f = fract(p);
+          f = f * f * (3.0 - 2.0 * f);
+          return mix(mix(gloveHash(i), gloveHash(i + vec2(1.0, 0.0)), f.x), mix(gloveHash(i + vec2(0.0, 1.0)), gloveHash(i + vec2(1.0, 1.0)), f.x), f.y);
+        }
+        float gloveDot2(vec2 v) { return dot(v, v); }
+        float gloveHeart(vec2 p) {
+          p.x = abs(p.x);
+          if (p.y + p.x > 1.0) return sqrt(gloveDot2(p - vec2(0.25, 0.75))) - sqrt(2.0) / 4.0;
+          return sqrt(min(gloveDot2(p - vec2(0.0, 1.0)), gloveDot2(p - 0.5 * max(p.x + p.y, 0.0)))) * sign(p.x - p.y);
+        }
+        vec3 glovePattern(vec3 g) {
+          vec2 s = g.xz;
+          #if GLOVE == 0
+            // Work gloves: worn canvas, hatched, with a darker palm.
+            float hatch = step(0.7, fract((g.x + g.z) * 9.0 + gloveNoise(s * 6.0) * 0.6));
+            vec3 c = vec3(0.86, 0.83, 0.76) - hatch * 0.18;
+            return mix(c, vec3(0.62, 0.56, 0.46), smoothstep(0.1, -0.3, g.y));
+          #elif GLOVE == 1
+            // Night Ops: black, with grey padded knuckles across the back.
+            float knuckle = (1.0 - smoothstep(0.18, 0.24, abs(fract(g.x * 2.2 + 0.5) - 0.5))) * smoothstep(0.35, 0.55, g.y) * smoothstep(-0.2, 0.3, g.z);
+            return mix(vec3(0.07), vec3(0.34), knuckle);
+          #elif GLOVE == 2
+            // Scrubbers: glossy green rubber, a pale shine band across the back.
+            float shine = 1.0 - smoothstep(0.0, 0.12, abs(g.y - 0.55 - g.x * 0.2));
+            return mix(vec3(0.24, 0.62, 0.28), vec3(0.8, 1.0, 0.8), shine * 0.6);
+          #elif GLOVE == 3
+            // Knuckle wraps: strips of white tape wound at a slant, their edges inked.
+            float band = fract(g.z * 3.2 + g.x * 1.1 + g.y * 0.4);
+            float edge = 1.0 - smoothstep(0.0, 0.06, min(band, 1.0 - band));
+            return mix(vec3(0.97, 0.96, 0.92), vec3(0.12), edge * 0.85);
+          #elif GLOVE == 4
+            // Origami: folded blue paper, each facet its own shade, the folds inked.
+            vec2 q = s * 2.6 + g.y * 0.8;
+            vec2 i = floor(q), f = fract(q);
+            float tri = step(f.x, f.y);
+            float h = gloveHash(i + tri * 3.7);
+            float fold = 1.0 - smoothstep(0.0, 0.05, min(min(f.x, f.y), abs(f.x - f.y)));
+            vec3 blue = mix(vec3(0.33, 0.55, 0.9), vec3(0.72, 0.84, 1.0), h);
+            return mix(blue, vec3(0.08, 0.14, 0.3), fold * 0.8);
+          #elif GLOVE == 5
+            // Blue Corner: blue leather with white laces up the back of the wrist.
+            float lace = (1.0 - smoothstep(0.05, 0.1, abs(fract(g.z * 5.0) - 0.5 + g.x * 0.8))) * (1.0 - smoothstep(0.25, 0.3, abs(g.x))) * step(0.4, g.y) * step(g.z, -0.2);
+            float shine = 1.0 - smoothstep(0.0, 0.2, abs(g.y - 0.6));
+            return mix(mix(vec3(0.12, 0.4, 0.86), vec3(0.55, 0.75, 1.0), shine * 0.5), vec3(1.0), lace);
+          #elif GLOVE == 6
+            // Bone Hands: black, with the bones of the hand drawn on in white.
+            float finger = 1.0 - smoothstep(0.06, 0.1, abs(fract(g.x * 2.4 + 0.5) - 0.5));
+            float joint = step(0.35, abs(fract(g.z * 2.2) - 0.5));
+            float bones = finger * (1.0 - joint * 0.9) * step(0.0, g.y);
+            float knuckle = (1.0 - smoothstep(0.1, 0.16, length(vec2(fract(g.x * 2.4 + 0.5) - 0.5, g.z - 0.05)))) * step(0.0, g.y);
+            return mix(vec3(0.05), vec3(0.95), max(bones, knuckle));
+          #elif GLOVE == 7
+            // Brute Knuckles: bruised violet hide with black studs across the knuckles.
+            float stud = 1.0 - smoothstep(0.12, 0.17, length(vec2(fract(g.x * 2.2 + 0.5) - 0.5, (g.z - 0.25) * 2.2)));
+            vec3 hide = mix(vec3(0.3, 0.12, 0.45), vec3(0.5, 0.25, 0.65), gloveNoise(s * 5.0));
+            return mix(hide, vec3(0.03), stud * step(0.2, g.y));
+          #elif GLOVE == 8
+            // Midas Touch: solid gold, a sweep of light and fine hatching in the shade.
+            float sweep = 1.0 - smoothstep(0.0, 0.25, abs(g.x + g.z * 0.6 - 0.2));
+            float hatch = step(0.82, fract((g.x - g.z) * 14.0)) * smoothstep(0.2, -0.4, g.y);
+            return gloveGold * (0.85 + sweep * 0.45) - hatch * 0.2;
+          #else
+            // Heartstring: rose gold, pink stitched hearts that glow and fade on the back of each hand.
+            vec3 rose = vec3(0.91, 0.64, 0.62);
+            float pulse = 0.55 + 0.45 * sin(gloveTime * 2.2);
+            vec2 q = vec2(g.x, g.z) * 1.6;
+            vec2 cell = floor(q + 0.5), f = q - cell;
+            float d = gloveHeart(f * 2.6 + vec2(0.0, 0.55));
+            float back = step(0.15, g.y);
+            vec3 c = mix(rose, vec3(0.1, 0.02, 0.06), (1.0 - smoothstep(0.0, 0.08, abs(d))) * back);
+            c = mix(c, mix(vec3(0.88, 0.15, 0.56), vec3(1.0, 0.72, 0.86), pulse), step(d, 0.0) * back);
+            float stitch = step(0.5, fract(atan(g.z, g.x) * 6.0)) * (1.0 - smoothstep(0.02, 0.05, abs(length(g.xz) - 0.9)));
+            return mix(c, vec3(0.88, 0.15, 0.56), stitch * 0.8);
+          #endif
+        }
+        // What every glove has, whatever its pattern: a padded knuckle panel across the back, stitched round
+        // its edge, and a seam of running stitches where the back meets the palm.
+        vec3 gloveMake(vec3 c, vec3 g) {
+          #ifdef GLOVE_PALE_THREAD
+            vec3 thread = vec3(0.86);
+          #else
+            vec3 thread = vec3(0.06);
+          #endif
+          float seamDash = step(0.45, fract(atan(g.z, g.x) * 7.0));
+          float seam = (1.0 - smoothstep(0.025, 0.06, abs(g.y - 0.05))) * seamDash;
+          float inPanel = step(abs(g.x), 0.62) * step(0.08, g.z) * step(g.z, 0.62) * step(0.3, g.y);
+          float margin = min(min(0.62 - abs(g.x), g.z - 0.08), 0.62 - g.z);
+          float border = inPanel * (1.0 - step(0.07, margin)) * step(0.02, margin);
+          float panelDash = step(0.5, fract((abs(g.x) + g.z) * 12.0));
+          // Raised: lit on its top edge, shaded below.
+          c = mix(c, c * 0.8 + vec3(0.04), inPanel * 0.85);
+          c = mix(c, thread, max(seam, border * panelDash) * 0.9);
+          return c;
+        }`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        diffuseColor.rgb = gloveMake(glovePattern(vGlove), vGlove);`)
+  }
+  material.customProgramCacheKey = () => `dead-ink-glove:${id}`
+  if (id === 'heartstring') material.onBeforeRender = () => { gloveTime.value = reducedMotion() ? 0.7 : performance.now() / 1000 % 1000 }
+  gloveMaterials.set(id, material)
+  return material
 }
 
 /**

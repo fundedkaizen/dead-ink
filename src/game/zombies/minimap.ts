@@ -64,6 +64,8 @@ export type MinimapStations = {
   readonly packBuilt: boolean
   readonly power: boolean
   readonly zones: { readonly gates: readonly { readonly segment: readonly THREE.Vector3[]; readonly state: string }[] } | null
+  /** Build spots still to use (build-guide.ts): the shield's workbench, the Pack-a-Punch's outline until it stands. */
+  readonly buildSpots?: readonly { readonly build: string; readonly point: THREE.Vector3 }[]
 }
 
 /** The compound seen from above: segments as x1, z1, x2, z2 and buildings as four x, z corners. */
@@ -206,6 +208,7 @@ type Sprites = {
   perk: Record<PerkKind, HTMLCanvasElement>; perkRim: Record<PerkKind, HTMLCanvasElement>
   box: HTMLCanvasElement; boxRim: HTMLCanvasElement; pack: HTMLCanvasElement; packRim: HTMLCanvasElement
   part: HTMLCanvasElement; partRim: HTMLCanvasElement; power: HTMLCanvasElement; north: HTMLCanvasElement
+  bench: HTMLCanvasElement; benchRim: HTMLCanvasElement; site: HTMLCanvasElement; siteRim: HTMLCanvasElement
 }
 
 function makeSprites(icon: number, dpr: number): Sprites {
@@ -254,7 +257,26 @@ function makeSprites(icon: number, dpr: number): Sprites {
     c.save(); c.translate(m, m); c.scale(radius / 13, radius / 13); c.translate(-12, -12)
     c.fillStyle = PAPER; c.fill(new Path2D(BOLT)); c.restore()
   })
+  // The shield's workbench: an ink shield with a paper cross; the Pack-a-Punch's build spot: a dashed ink ring round a cog.
+  const shieldSprite = (size: number) => sprite(size + pad * 2, (c, s) => {
+    halo(c, s)
+    c.save(); c.translate(s / 2, s / 2); c.scale((s - pad * 2) / 24, (s - pad * 2) / 24); c.translate(-12, -12)
+    c.fillStyle = INK; c.fill(new Path2D('M12 2 4 5v6c0 5.2 3.4 9.3 8 11 4.6-1.7 8-5.8 8-11V5z'))
+    c.strokeStyle = PAPER; c.lineWidth = 2.2; c.lineCap = 'round'
+    c.beginPath(); c.moveTo(12, 6.5); c.lineTo(12, 18); c.moveTo(7.5, 10.5); c.lineTo(16.5, 10.5); c.stroke()
+    c.restore()
+  })
+  const siteSprite = (size: number) => sprite(size + pad * 2, (c, s) => {
+    halo(c, s)
+    const m = s / 2, r = m - pad
+    c.strokeStyle = INK; c.lineWidth = Math.max(1.5, r * 0.22); c.setLineDash([r * 0.45, r * 0.3])
+    c.beginPath(); c.arc(m, m, r * 0.8, 0, TAU); c.stroke()
+    c.setLineDash([])
+    c.save(); c.translate(m, m); c.scale(r / 13, r / 13); c.translate(-12, -12)
+    c.fillStyle = INK; c.fill(new Path2D(BOLT)); c.restore()
+  })
   return {
+    bench: shieldSprite(icon), benchRim: shieldSprite(rim), site: siteSprite(icon), siteRim: siteSprite(rim),
     perk: Object.fromEntries((Object.keys(PERKS) as PerkKind[]).map(kind => [kind, perkSprite(kind, icon)])) as Record<PerkKind, HTMLCanvasElement>,
     perkRim: Object.fromEntries((Object.keys(PERKS) as PerkKind[]).map(kind => [kind, perkSprite(kind, rim)])) as Record<PerkKind, HTMLCanvasElement>,
     box: boxSprite(icon), boxRim: boxSprite(rim), pack: packSprite(icon), packRim: packSprite(rim),
@@ -407,6 +429,10 @@ export class Minimap {
     // Icons, upright. The power switch only while the power is off, and only within reach of the map.
     c.setTransform(1, 0, 0, 1, 0, 0)
     if (!stations.power && this.powerPoint) this.icon(this.powerPoint, sprites.power, null, 'power')
+    for (const spot of stations.buildSpots ?? []) {
+      if (spot.build === 'shield') this.icon(spot.point, sprites.bench, sprites.benchRim, 'bench')
+      else if (spot.build === 'pack') this.icon(spot.point, sprites.site, sprites.siteRim, 'build-pack')
+    }
     for (let i = 0; i < parts.length; i++) if (parts[i].root.visible) this.icon(parts[i].root.position, sprites.part, sprites.partRim, parts[i].id)
     const machines = stations.perkMachines
     for (let i = 0; i < machines.length; i++) this.icon(machines[i].root.position, sprites.perk[machines[i].kind], sprites.perkRim[machines[i].kind], machines[i].kind)

@@ -179,6 +179,86 @@ export class PartPickup {
 }
 
 /**
+ * The shield's workbench, drawn as densely as the power switch and in one Draft (a paper fill, two ink
+ * weights: three draw calls): a heavy top with its planks and bolted trestle legs braced across, a drawer with
+ * a pull, a vice at the right end with its screw and handle, a toolbox and a coil of wire on the shelf below,
+ * a clamp lamp on its arm, a pegboard on the wall with a wrench, a hammer and a screwdriver hung on their pegs,
+ * and the shield itself drawn large over the bench, with its blueprint pinned beside it.
+ * In the bench's frame: x along the wall, y up from the floor, z out of the wall (the wall is at z = -0.5).
+ */
+/** A circle standing up on the wall (the XY plane), as points. */
+const circleXY = (x: number, y: number, z: number, r: number, n = 20) =>
+  Array.from({ length: n }, (_, i): [number, number, number] => [x + Math.cos(i / n * Math.PI * 2) * r, y + Math.sin(i / n * Math.PI * 2) * r, z])
+
+function workbench(name: string) {
+  const d = new Draft(name)
+  // The top: three planks with bolt heads, on a frame.
+  d.box(1.6, 0.06, 0.7, 0, 0.9, 0, 'paper', 'edge')
+  for (const z of [-0.117, 0.117]) d.line([[-0.8, 0.931, z], [0.8, 0.931, z]], 'detail')
+  for (const x of [-0.72, -0.24, 0.24, 0.72]) for (const z of [-0.23, 0, 0.23]) d.box(0.018, 0.006, 0.018, x, 0.933, z, 'paper', 'detail')
+  d.box(1.5, 0.08, 0.04, 0, 0.83, 0.32, 'paper', 'edge')
+  // Legs, each with a foot plate and two bolts where it meets the frame; braces crossed between the front pair.
+  for (const x of [-0.7, 0.7]) for (const z of [-0.28, 0.28]) {
+    d.box(0.06, 0.9, 0.06, x, 0.45, z, 'paper', 'edge')
+    d.box(0.1, 0.012, 0.1, x, 0.006, z, 'paper', 'detail')
+    for (const y of [0.8, 0.86]) d.box(0.014, 0.014, 0.006, x, y, z + 0.033, 'paper', 'detail')
+  }
+  d.beam([-0.68, 0.36, 0.3], [0.68, 0.72, 0.3], 0.03)
+  d.beam([-0.68, 0.72, 0.3], [0.68, 0.36, 0.3], 0.03)
+  // The shelf below, a toolbox on it (lid, handle, latch), and a coil of wire.
+  d.box(1.4, 0.04, 0.5, 0, 0.3, 0, 'paper', 'detail')
+  d.box(0.46, 0.16, 0.24, -0.35, 0.4, 0, 'paper', 'edge')
+  d.box(0.48, 0.03, 0.26, -0.35, 0.49, 0, 'paper', 'edge')
+  d.line([[-0.46, 0.505, 0], [-0.46, 0.55, 0], [-0.24, 0.55, 0], [-0.24, 0.505, 0]], 'edge')
+  d.box(0.04, 0.03, 0.01, -0.35, 0.46, 0.125, 'paper', 'detail')
+  d.ring(0.09, 0.335, 0.35, 0.02)
+  d.ring(0.07, 0.345, 0.35, 0.02, 'detail')
+  // The drawer under the top, its pull.
+  d.box(0.5, 0.12, 0.02, 0.28, 0.8, 0.345, 'paper', 'edge')
+  d.box(0.12, 0.018, 0.02, 0.28, 0.8, 0.362, 'paper', 'edge')
+  // The vice at the right end: fixed and moving jaws, the screw, the sliding handle with its knobs.
+  d.box(0.2, 0.1, 0.12, 0.62, 0.98, 0.2, 'paper', 'edge')
+  d.box(0.2, 0.1, 0.05, 0.62, 0.98, 0.33, 'paper', 'edge')
+  for (const z of [0.265, 0.305]) d.line([[0.53, 1.02, z], [0.71, 1.02, z]], 'detail')
+  d.solid(new THREE.CylinderGeometry(0.014, 0.014, 0.16, 12), [0.62, 0.97, 0.42], 'paper', 'edge', [Math.PI / 2, 0, 0], true)
+  d.solid(new THREE.CylinderGeometry(0.008, 0.008, 0.2, 10), [0.62, 0.97, 0.5], 'paper', 'edge', [0, 0, Math.PI / 2], true)
+  for (const x of [0.52, 0.72]) d.solid(new THREE.SphereGeometry(0.016, 10, 8), [x, 0.97, 0.5], 'paper', 'edge', [0, 0, 0], true)
+  // The clamp lamp on the left: a clamp on the bench edge, two arms, the shade.
+  d.box(0.05, 0.08, 0.05, -0.74, 0.92, -0.2, 'paper', 'edge')
+  d.beam([-0.74, 0.96, -0.2], [-0.7, 1.4, -0.28], 0.018)
+  d.beam([-0.7, 1.4, -0.28], [-0.5, 1.55, -0.12], 0.018)
+  d.solid(new THREE.ConeGeometry(0.09, 0.12, 16, 1, true), [-0.47, 1.49, -0.08], 'paper', 'edge', [0.5, 0, -0.5], true)
+  // The pegboard behind the right half: its holes, and three tools hung on their pegs.
+  d.box(0.62, 0.5, 0.02, 0.5, 1.5, -0.47, 'paper', 'edge')
+  for (let i = 0; i < 7; i++) for (let j = 0; j < 5; j++) d.box(0.012, 0.012, 0.004, 0.25 + i * 0.083, 1.3 + j * 0.1, -0.458, 'paper', 'detail')
+  // A wrench: a bar with an open jaw at the top and a ring at the foot.
+  d.box(0.03, 0.3, 0.012, 0.3, 1.47, -0.45, 'paper', 'edge')
+  d.line([[0.28, 1.62, -0.443], [0.26, 1.67, -0.443], [0.3, 1.66, -0.443], [0.34, 1.67, -0.443], [0.32, 1.62, -0.443]], 'edge')
+  d.line(circleXY(0.3, 1.32, -0.443, 0.03), 'edge', true)
+  // A hammer: a handle and a head with a claw.
+  d.box(0.024, 0.3, 0.02, 0.5, 1.46, -0.45, 'paper', 'edge')
+  d.box(0.14, 0.05, 0.04, 0.5, 1.63, -0.45, 'paper', 'edge')
+  d.line([[0.43, 1.61, -0.43], [0.4, 1.58, -0.43]], 'edge')
+  // A screwdriver: a fat grip and a thin shaft.
+  d.box(0.036, 0.11, 0.03, 0.68, 1.62, -0.45, 'paper', 'edge')
+  d.box(0.01, 0.18, 0.01, 0.68, 1.47, -0.45, 'paper', 'edge')
+  // The shield drawn large on the wall over the left half, its strap and grip marked, and the blueprint:
+  // a pinned sheet with the three parts drawn on it.
+  const shield: [number, number, number][] = [[-0.36, 1.9, -0.46], [0.02, 1.9, -0.46], [0.02, 1.58, -0.46], [-0.06, 1.32, -0.46], [-0.17, 1.14, -0.46], [-0.28, 1.32, -0.46], [-0.36, 1.58, -0.46]]
+  const shift = (points: [number, number, number][]) => points.map(([x, y, z]): [number, number, number] => [x - 0.17, y, z])
+  d.line(shift(shield), 'edge', true)
+  d.line(shift([[-0.17, 1.84, -0.46], [-0.17, 1.22, -0.46]]), 'detail')
+  d.line(shift([[-0.32, 1.62, -0.46], [-0.02, 1.62, -0.46]]), 'detail')
+  d.box(0.3, 0.36, 0.004, 0.08, 1.58, -0.466, 'paper', 'edge')
+  d.box(0.02, 0.02, 0.008, 0.08, 1.75, -0.462, 'paper', 'detail')
+  d.line([[-0.02, 1.68, -0.463], [0.06, 1.68, -0.463], [0.06, 1.5, -0.463], [-0.02, 1.5, -0.463]], 'detail', true)
+  d.line(circleXY(0.15, 1.64, -0.463, 0.035), 'detail', true)
+  d.line([[0.12, 1.5, -0.463], [0.18, 1.5, -0.463]], 'detail')
+  d.finish()
+  return d
+}
+
+/**
  * Where a build goes together: a chalk outline of each missing part, drawn in dashes; placed parts appear
  * solid in their spot. `anchor` is the group the finished thing stands in (or null for the shield bench).
  */
@@ -192,6 +272,9 @@ export class BuildSite {
   /** A machine's chalk outline and its name on the wall: gone once the machine stands there. */
   private marks: THREE.Object3D[] = []
   private pop = 0
+  /** A soft column of light over the spot while the team holds one of its parts (build-guide.ts). */
+  private glow: THREE.Object3D
+  private glowTime = 0
 
   constructor(readonly build: BuildId, readonly spot: WallSpot, bench: boolean) {
     this.root.name = `Build site · ${BUILDS[build].label}`
@@ -199,13 +282,7 @@ export class BuildSite {
     this.root.position.copy(spot.wall.clone().addScaledVector(spot.normal, 0.5).setY(spot.stand.y))
     this.root.rotation.y = Math.atan2(spot.normal.x, spot.normal.z)
     if (bench) {
-      // A trestle workbench against the wall.
-      const table = new Draft(`Workbench · ${BUILDS[build].label}`)
-      table.box(1.6, 0.06, 0.7, 0, 0.9, 0, 'paper', 'edge')
-      for (const x of [-0.7, 0.7]) for (const z of [-0.28, 0.28]) table.box(0.06, 0.9, 0.06, x, 0.45, z, 'paper', 'edge')
-      table.box(1.4, 0.04, 0.5, 0, 0.3, 0, 'paper', 'detail')
-      table.finish()
-      this.root.add(table)
+      this.root.add(workbench(`Workbench · ${BUILDS[build].label}`), wallText('INK SHIELD', [-0.34, 2.06, -0.47], 0.16))
     } else {
       // A chalk square on the floor where the machine will stand.
       const chalk = new Draft(`Build outline · ${BUILDS[build].label}`)
@@ -230,7 +307,14 @@ export class BuildSite {
       this.slots.set(id, { ghost, solid })
     })
     this.point = this.root.position.clone().setY(spot.stand.y + (bench ? 1 : 0.6))
+    this.glow = createRarityBeam(0xe8b64a, bench ? 3 : 2.4)
+    this.glow.visible = false
+    this.root.add(this.glow)
   }
+
+  /** Glow while the team holds one of this build's parts, so the spot is easy to find. */
+  setGlow(on: boolean) { this.glow.visible = on && !this.complete }
+  get glowing() { return this.glow.visible }
 
   get complete() { return BUILDS[this.build].parts.every(id => this.placed.has(id)) }
   missing() { return BUILDS[this.build].parts.filter(id => !this.placed.has(id)) }
@@ -258,6 +342,10 @@ export class BuildSite {
   }
 
   update(dt: number) {
+    if (this.glow.visible) {
+      this.glowTime += dt
+      this.glow.scale.set(1, 0.9 + 0.1 * Math.sin(this.glowTime * 3), 1)
+    }
     if (this.pop <= 0) return
     this.pop = Math.max(0, this.pop - dt)
     const k = 0.8 * (1 + Math.sin((1 - this.pop / 0.35) * Math.PI) * 0.35)
