@@ -50,8 +50,10 @@ export const ZOMBIE_AWARDS: readonly AwardDef[] = [
   { id: 'survivor', title: 'Survivor', stat: 'downs', better: 'low', team: true, detail: v => v === 0 ? 'never went down' : `down only ${n(v)} time${v === 1 ? '' : 's'}` },
 ]
 
-/** Given to a player who won nothing, so every player has at least one. */
-export const STILL_STANDING = (kills: number): Award => ({ id: 'standing', title: 'In it together', detail: `${n(kills)} kills for the team` })
+/** Given to a player who won nothing, so every player has at least one. Solo there is no team to share it with. */
+export const STILL_STANDING = (kills: number, solo = false): Award => solo
+  ? { id: 'standing', title: 'Still standing', detail: `${n(kills)} kill${kills === 1 ? '' : 's'} this game` }
+  : { id: 'standing', title: 'In it together', detail: `${n(kills)} kills for the team` }
 
 /**
  * Every player's best one or two awards. An award goes to whoever has the best number for it (tied players
@@ -80,7 +82,7 @@ export function awardsFor(stats: readonly AwardStats[], defs: readonly AwardDef[
   })
   return players.map(p => {
     const list = (won.get(p.player) ?? []).sort((a, b) => b.strength - a.strength || a.order - b.order).slice(0, Math.max(1, perPlayer))
-    return { player: p.player, name: p.name, color: p.color, awards: list.length ? list.map(w => w.award) : [STILL_STANDING(p.values.kills ?? 0)] }
+    return { player: p.player, name: p.name, color: p.color, awards: list.length ? list.map(w => w.award) : [STILL_STANDING(p.values.kills ?? 0, players.length < 2)] }
   })
 }
 

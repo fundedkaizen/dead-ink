@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { Capsule } from 'three/addons/math/Capsule.js'
 import type { MissionRuntime } from './runtime'
+import type { Difficulty } from './campaign/types'
 import { CoopLink, CoopLobby, PLAYER_COLORS, PLAYER_CSS, PartnerAvatar, PartnerTag, StandBar, savedName, saveName, toVector, vec, type CoopStatus, type PlayerState } from './shared/coop'
 import { WorldMarker } from './zombies/markers'
 import { REVIVE_ICON, ReviveSyringe } from './zombies/last-stand'
@@ -573,6 +574,18 @@ export class RescueCoop {
 
   // ---------------------------------------------------------------- messages
 
+  /**
+   * A guest loads the host's mission. Loading resets the menu to its home page; a guest who was waiting on the
+   * Co-op page is put back there, where Jump in comes up (otherwise the host's Start took the page away).
+   */
+  private follow(id: string, difficulty: Difficulty, seed: number, then: () => void) {
+    const onLobby = document.querySelector<HTMLElement>('.menu-card')?.dataset.page === 'coop'
+    return this.r.loadMission(id, difficulty, seed).then(() => {
+      then()
+      if (onLobby && !this.r.player.playing) document.querySelector<HTMLElement>('[data-menu-open="coop"]')?.click()
+    })
+  }
+
   private message(m: RescueIncoming) {
     const r = this.r, from = m.from ?? 0
     switch (m.t) {
@@ -580,7 +593,7 @@ export class RescueCoop {
       case 'sync':
         // The host is on another campaign mission (or seed): load it first, then take its world.
         if (m.mn && (r.state.run?.mission !== m.mn.id || r.state.run?.difficulty !== m.mn.d || r.state.run?.seed !== m.mn.s)) {
-          void r.loadMission(m.mn.id, m.mn.d, m.mn.s).then(() => { this.mirror(m.m); this.applyDoors(m.d, true); this.applyPickups(m.pickups); this.placeGuest(true) })
+          void this.follow(m.mn.id, m.mn.d, m.mn.s, () => { this.mirror(m.m); this.applyDoors(m.d, true); this.applyPickups(m.pickups); this.placeGuest(true) })
           break
         }
         this.mirror(m.m)
@@ -628,7 +641,7 @@ export class RescueCoop {
         if (this.link.role === 'host') this.link.send(m, { skip: from })
         break
       case 'mission':
-        if (r.state.run?.mission !== m.id || r.state.run?.difficulty !== m.d || r.state.run?.seed !== m.s) void r.loadMission(m.id, m.d, m.s).then(() => this.placeGuest(true))
+        if (r.state.run?.mission !== m.id || r.state.run?.difficulty !== m.d || r.state.run?.seed !== m.s) void this.follow(m.id, m.d, m.s, () => this.placeGuest(true))
         break
       case 'start':
         this.lobby?.started()

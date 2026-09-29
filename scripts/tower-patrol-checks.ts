@@ -17,8 +17,11 @@ const v = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z)
 const scene = new THREE.Scene(), compound = createCompound(), mission = createMissionWorld()
 prepareCompound(compound); scene.add(compound, mission.root); scene.updateMatrixWorld(true)
 const world = new CollisionWorld(scene)
+// Path planning spends a per-frame time budget. On the wall clock a busy machine finishes a plan a frame later, and
+// the replay after a checkpoint restore then walks a different path than the first run: count the budget instead.
+let clockMs = 0
 const director = new EnemyDirector({ scene, world, specs: mission.enemies.filter(e => e.role === 'sniper'),
-  doors: [], emit() {}, damagePlayer() {}, dropWeapon() {} })
+  doors: [], emit() {}, damagePlayer() {}, dropWeapon() {}, clock: () => (clockMs += 0.02) })
 const player: PlayerSense = { feet: v(-200, 0, -200), eye: v(-200, 1.65, -200), velocity: v(), alive: true, radioEnabled: false }
 const dt = 1 / 60, failures: string[] = []
 function check(name: string, run: () => void) {

@@ -1285,7 +1285,11 @@ export class ZombiesRuntime {
     return { id: this.coop.id, p: vec(body.position), yaw: Math.round(e.y * 100) / 100, pitch: Math.round(e.x * 100) / 100, w: this.weapons.current?.name ?? null,
       mv: Math.hypot(body.velocity.x, body.velocity.z) > 0.6 ? 1 : 0, dn: this.down, pts: this.state.points, kills: this.state.kills, name: this.playerName,
       rv: this.reviving > 0 ? Math.round(this.reviving / this.reviveTime() * 100) / 100 : 0, rt: this.reviving > 0 ? this.revivingId : undefined,
-      air: this.player.body.grounded ? undefined : 1, ps: this.menuOpenInGame() ? 1 : undefined }
+      air: this.player.body.grounded ? undefined : 1,
+      // 1: paused, in the menu mid-game; 0: playing (a guest's lobby shows Join as soon as the host plays). A guest
+      // still in the lobby has not joined yet, so it pauses nobody (else the host's first frame followed that
+      // 'pause' and the guest, waiting for the host to play, never saw Join).
+      ps: this.menuOpenInGame() && this.player.hasStarted ? 1 : this.isActive() ? 0 : undefined }
   }
 
   /** The host tells a guest (or all of them) how the world stands: open gates, the power, the box's place. */
@@ -1405,9 +1409,10 @@ export class ZombiesRuntime {
     this.audio.play({ kind: 'player-fall' })
     this.zombieHud.announce('You are down', 2.5)
     this.hud.notify('Crawl and keep shooting: a teammate can pick you up.', 4, true)
-    this.coop.send({ t: 'down', dn: 1 })
-    // The host may end the game any moment now: let it have this player's numbers for the awards.
+    // The host may end the game the moment it hears of this down: let it have this player's numbers (this down
+    // counted) first, or the awards go out with the last second's and call this player a Survivor.
     if (this.isGuest) this.coop.send({ t: 'stats', v: this.awardValues() })
+    this.coop.send({ t: 'down', dn: 1 })
   }
 
   /** Out comes the best pistol you carry (the Ink Ray first, as the Ray Gun in Call of Duty), or a spare one. */

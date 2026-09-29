@@ -48,6 +48,8 @@ export class FirstPersonController {
   private lastLook = 0
   private dragging = false
   private started = false
+  /** Whether this player has begun playing on this page (the title's Start / Begin has been pressed). */
+  get hasStarted() { return this.started }
   private walkRotation = new THREE.Quaternion()
   private pressed = new Set<string>()
   private abort = new AbortController()
