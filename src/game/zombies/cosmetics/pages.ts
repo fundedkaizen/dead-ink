@@ -24,6 +24,26 @@ const CARD_GLYPH = '<svg viewBox="0 0 48 48" aria-hidden="true"><rect x="5" y="1
 
 // ---------------------------------------------------------------- Shop
 
+/**
+ * The shop's stall, drawn in ink over the offers: a striped awning on two posts with its scalloped edge, a
+ * hanging sign, a counter with planks, and a few things on it (a jar of ink, a stack of cases, a bell).
+ */
+const STALL = `<svg class="shop-stall" viewBox="0 0 360 120" aria-hidden="true">
+  <g fill="none" stroke="#111" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M18 34h324l-10 22H28z" fill="#fff"/>
+    ${Array.from({ length: 9 }, (_, i) => `<path d="M${18 + i * 36} 34h18l-${i === 0 ? 0 : 1} 22h-17z" fill="#111" stroke="none"/>`).join('')}
+    <path d="M28 56${Array.from({ length: 9 }, () => ` q16.5 14 33 0`).join('')}" fill="#fff"/>
+    <path d="M40 60v58M320 60v58"/>
+    <path d="M150 8h60v20h-60z" fill="#fff"/><path d="M160 8l-6-6M200 8l6-6"/>
+    <path d="M18 96h324v10H18z" fill="#fff"/><path d="M40 101h280" stroke-width="1.2"/>
+    <path d="M70 96v-20h26v20" fill="#fff"/><path d="M70 82h26M76 76v-6h14v6" stroke-width="1.6"/>
+    <path d="M250 96v-14h40v14M254 82v-10h32v10M258 72v-8h24v8" fill="#fff" stroke-width="2"/>
+    <path d="M300 96a10 10 0 0 1 20 0z" fill="#fff"/><path d="M310 86v-5"/><circle cx="310" cy="79" r="2" fill="#111"/>
+    <path d="M78 86c3-4 7-4 10 0" stroke-width="1.4"/>
+  </g>
+  <text x="180" y="23" text-anchor="middle" font-family="Georgia, serif" font-weight="700" font-size="13" fill="#111">INK &amp; CO.</text>
+</svg>`
+
 class Shop {
   private body: HTMLElement | null = null
   private status = ''
@@ -48,8 +68,10 @@ class Shop {
   private card(offer: Offer, profile: Profile) {
     const { item, price } = offer, owned = profile.owned.includes(item.id), info = RARITY_INFO[item.rarity]
     const short = profile.ink < price
-    return `<article class="shop-offer${offer.featured ? ' featured' : ''}" style="--rarity:${info.css}">
+    return `<article class="shop-offer${offer.featured ? ' featured' : ''}${owned ? ' owned' : ''}" style="--rarity:${info.css}">
       ${offer.featured ? '<em class="shop-flag">Featured · 25% off</em>' : offer.permanent ? '<em class="shop-flag shelf">Only in the Shop</em>' : ''}
+      <span class="shop-tag" aria-hidden="true"><i></i>${offer.featured ? `<s>${number(Math.round(price / (1 - 0.25) / 50) * 50)}</s>` : ''}${number(price)}</span>
+      ${owned ? '<span class="shop-stamp" aria-hidden="true">Owned</span>' : ''}
       <div class="shop-art">${cosmeticIcon(item)}</div>
       <b>${escape(item.name)}</b>
       <small><span style="color:${info.css}">${info.label}</span> ${item.kind === 'gloves' ? 'gloves' : item.kind}</small>
@@ -64,6 +86,7 @@ class Shop {
     if (!body) return
     const profile = loadProfile(), hours = Math.floor(msUntilRefresh() / 3_600_000), minutes = Math.floor(msUntilRefresh() / 60_000) % 60
     body.innerHTML = `
+      ${STALL}
       <div class="armory-bank"><span class="armory-ink">${INK_DROP}<strong>${number(profile.ink)}</strong> Ink</span>
         <small>Harder difficulties pay more Ink: ${Object.entries(DIFFICULTY).map(([key, d]) => `${d.label} ×${({ casual: 0.75, normal: 1, hardcore: 1.35, realistic: 1.75 } as Record<string, number>)[key]}`).join(', ')}${profile.prestige ? `, and your prestige adds ${Math.round((prestigeMultiplier(profile.prestige) - 1) * 100)}%` : ''}.</small></div>
       <section class="shop-section" aria-labelledby="shop-today">

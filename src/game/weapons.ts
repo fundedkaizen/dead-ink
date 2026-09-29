@@ -203,6 +203,9 @@ export class FirstPersonWeapons {
   private handShapes: THREE.Mesh[] = []
   private cuffs: THREE.Mesh[] = []
   private gloves: GloveId | null = null
+  private strapGeometry = new THREE.CylinderGeometry(0.0435, 0.0435, 0.012, 20, 1, true)
+  private buckleGeometry = new THREE.BoxGeometry(0.016, 0.014, 0.004)
+  private strapMaterial = new THREE.MeshBasicMaterial({ color: 0x1c1c1c, toneMapped: false, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 })
 
   constructor(private context: WeaponContext) {
     this.root.name = 'First-person stickman arms'
@@ -425,6 +428,13 @@ export class FirstPersonWeapons {
         const contour = createPenSilhouette(geometry, 2.4)
         contour.name = 'Glove cuff contour'
         cuff.add(contour)
+        // The wrist strap: a band round the cuff with its buckle and tongue on the outside of the wrist.
+        const strap = new THREE.Mesh(this.strapGeometry, this.strapMaterial)
+        strap.add(createPenSilhouette(this.strapGeometry, 2))
+        const buckle = new THREE.Mesh(this.buckleGeometry, this.strapMaterial)
+        buckle.position.set(0, 0, 0.044)
+        buckle.add(createPenSilhouette(this.buckleGeometry, 2))
+        cuff.add(strap, buckle)
         cuff.name = i ? 'Left glove cuff' : 'Right glove cuff'
         this.root.add(cuff)
         this.cuffs.push(cuff)
@@ -1017,6 +1027,9 @@ export class FirstPersonWeapons {
         const interval = weaponRules(current).interval * this.fireScale
         const t = THREE.MathUtils.clamp((interval - this.cooldown) / (interval * LEVER_THROW), 0, 1)
         lever.rotation.x -= 0.95 * Math.sin(Math.PI * t) * (motion ? 1 : 0)
+        // The hammer rests cocked; the shot drops it forward and the lever throw rocks it back to full cock.
+        const hammer = this.model.userData.parts.hammer
+        if (hammer && current.name === 'lever' && motion) hammer.rotation.x += 0.55 * (1 - THREE.MathUtils.smoothstep(t, 0.15, 0.5))
       }
       // The Magnum's cylinder swings out, spins, and snaps back in on a reload; it turns a chamber a shot.
       const cylinder = this.model.userData.parts.cylinder

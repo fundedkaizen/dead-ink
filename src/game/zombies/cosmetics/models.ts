@@ -646,7 +646,8 @@ export function gloveMaterial(id: GloveId) {
   const cached = gloveMaterials.get(id)
   if (cached) return cached
   const material = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 })
-  material.defines = { GLOVE: GLOVE_CODE[id] }
+  // Dark gloves are stitched in pale thread, the rest in dark.
+  material.defines = { GLOVE: GLOVE_CODE[id], ...(id === 'tactical' || id === 'bones' || id === 'brute' || id === 'midas' ? { GLOVE_PALE_THREAD: 1 } : {}) }
   material.onBeforeCompile = shader => {
     shader.uniforms.gloveTime = gloveTime
     shader.uniforms.gloveGold = { value: new THREE.Color(RARITY_INFO.legendary.color) }
@@ -736,9 +737,28 @@ export function gloveMaterial(id: GloveId) {
             float stitch = step(0.5, fract(atan(g.z, g.x) * 6.0)) * (1.0 - smoothstep(0.02, 0.05, abs(length(g.xz) - 0.9)));
             return mix(c, vec3(0.88, 0.15, 0.56), stitch * 0.8);
           #endif
+        }
+        // What every glove has, whatever its pattern: a padded knuckle panel across the back, stitched round
+        // its edge, and a seam of running stitches where the back meets the palm.
+        vec3 gloveMake(vec3 c, vec3 g) {
+          #ifdef GLOVE_PALE_THREAD
+            vec3 thread = vec3(0.86);
+          #else
+            vec3 thread = vec3(0.06);
+          #endif
+          float seamDash = step(0.45, fract(atan(g.z, g.x) * 7.0));
+          float seam = (1.0 - smoothstep(0.025, 0.06, abs(g.y - 0.05))) * seamDash;
+          float inPanel = step(abs(g.x), 0.62) * step(0.08, g.z) * step(g.z, 0.62) * step(0.3, g.y);
+          float margin = min(min(0.62 - abs(g.x), g.z - 0.08), 0.62 - g.z);
+          float border = inPanel * (1.0 - step(0.07, margin)) * step(0.02, margin);
+          float panelDash = step(0.5, fract((abs(g.x) + g.z) * 12.0));
+          // Raised: lit on its top edge, shaded below.
+          c = mix(c, c * 0.8 + vec3(0.04), inPanel * 0.85);
+          c = mix(c, thread, max(seam, border * panelDash) * 0.9);
+          return c;
         }`)
       .replace('#include <color_fragment>', `#include <color_fragment>
-        diffuseColor.rgb = glovePattern(vGlove);`)
+        diffuseColor.rgb = gloveMake(glovePattern(vGlove), vGlove);`)
   }
   material.customProgramCacheKey = () => `dead-ink-glove:${id}`
   if (id === 'heartstring') material.onBeforeRender = () => { gloveTime.value = reducedMotion() ? 0.7 : performance.now() / 1000 % 1000 }
