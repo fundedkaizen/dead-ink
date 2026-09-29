@@ -1285,7 +1285,11 @@ export class ZombiesRuntime {
     return { id: this.coop.id, p: vec(body.position), yaw: Math.round(e.y * 100) / 100, pitch: Math.round(e.x * 100) / 100, w: this.weapons.current?.name ?? null,
       mv: Math.hypot(body.velocity.x, body.velocity.z) > 0.6 ? 1 : 0, dn: this.down, pts: this.state.points, kills: this.state.kills, name: this.playerName,
       rv: this.reviving > 0 ? Math.round(this.reviving / this.reviveTime() * 100) / 100 : 0, rt: this.reviving > 0 ? this.revivingId : undefined,
-      air: this.player.body.grounded ? undefined : 1, ps: this.menuOpenInGame() ? 1 : undefined }
+      air: this.player.body.grounded ? undefined : 1,
+      // 1: paused, in the menu mid-game; 0: playing (a guest's lobby shows Join as soon as the host plays). A guest
+      // still in the lobby has not joined yet, so it pauses nobody (else the host's first frame followed that
+      // 'pause' and the guest, waiting for the host to play, never saw Join).
+      ps: this.menuOpenInGame() && this.player.hasStarted ? 1 : this.isActive() ? 0 : undefined }
   }
 
   /** The host tells a guest (or all of them) how the world stands: open gates, the power, the box's place. */
