@@ -6,6 +6,23 @@ import type { CameraAnchor, MapModule, PanelKind } from './types'
 import { createHelicopter as createDetailedHelicopter, type HelicopterRig } from './helicopter'
 import { ammoStack, cameraPole, captivity, cardReader, fieldRadio, fuseBox, kennel, keycardBox, keyPanel, landingZone, laptopCrate, medicalPost, padlock, sniperNest } from './detail'
 import { MISSIONS } from './missions'
+import { createBoat, type BoatRig } from './boat'
+
+/** Where a boat ties up: two iron bollards and a coiled line on the quay's edge. */
+function mooring(at: readonly number[], heading: number) {
+  const d = new Draft('Mooring', at[0], at[2], heading)
+  d.position.y = at[1]
+  for (const z of [-1.6, 1.6]) {
+    d.cylinder(0.14, 0.4, 0.4, 0.2, z, 'paper', 0.12)
+    d.cylinder(0.2, 0.06, 0.4, 0.43, z, 'paper')
+    d.ring(0.14, 0.02, 0.4, z, 'detail', 16)
+  }
+  for (let i = 0; i < 3; i++) d.ring(0.2 - i * 0.04, 0.02 + i * 0.012, -0.3, 0, 'detail', 16)
+  d.line([[0.4, 0.3, -1.6], [0.9, 0.05, -1.2], [1.3, 0.0, -0.4]], 'detail')
+  const object = d.finish()
+  object.userData.noCollision = true
+  return object
+}
 
 const missionsOn = (map: MapModule) => MISSIONS.filter(mission => mission.map === map.id)
 
@@ -23,6 +40,8 @@ export type MapProps = {
   vehicles: Map<string, THREE.Group>
   /** The helicopters' rigs, by extraction id (their rotors, doors, rope and lights). */
   helicopters: Map<string, HelicopterRig>
+  /** The boats' rigs, by extraction id. */
+  boats: Map<string, BoatRig>
   /** The landing zones' windsocks (they stream in the rotor wash). */
   windsocks: Map<string, THREE.Group>
   chairs: Map<string, THREE.Object3D>
@@ -88,6 +107,7 @@ export function buildMapProps(map: MapModule, doors: readonly THREE.Group[], exi
   const stations: Station[] = [], cameras: CameraObject[] = [], vehicles = new Map<string, THREE.Group>(), chairs = new Map<string, THREE.Object3D>()
   const helicopters = new Map<string, HelicopterRig>()
   const windsocks = new Map<string, THREE.Group>()
+  const boats = new Map<string, BoatRig>()
   for (const cell of Object.values(map.cells)) {
     if (cell.chair) {
       const seat = captivity(cell.station ? 3.9 : 3)
@@ -130,6 +150,16 @@ export function buildMapProps(map: MapModule, doors: readonly THREE.Group[], exi
       vehicles.set(extraction.id, helicopter)
       helicopters.set(extraction.id, rig)
       stations.push({ id: `board:${extraction.id}`, kind: 'jeep', object: helicopter, label: 'Board the helicopter',
+        point: new THREE.Vector3(...extraction.board).setY(extraction.board[1] + 1.1) })
+    }
+    if (extraction.kind === 'boat') {
+      const rig = createBoat()
+      rig.root.position.set(...extraction.park); rig.root.rotation.y = extraction.heading
+      rig.root.visible = false
+      root.add(rig.root, mooring(extraction.board, extraction.heading))
+      vehicles.set(extraction.id, rig.root)
+      boats.set(extraction.id, rig)
+      stations.push({ id: `board:${extraction.id}`, kind: 'jeep', object: rig.root, label: 'Board the boat',
         point: new THREE.Vector3(...extraction.board).setY(extraction.board[1] + 1.1) })
     }
     if (extraction.call) {
@@ -183,5 +213,5 @@ export function buildMapProps(map: MapModule, doors: readonly THREE.Group[], exi
     nest.userData.noCollision = true
     root.add(nest); nests.set(guard.id, nest)
   }
-  return { root, stations, cameras, vehicles, helicopters, windsocks, chairs, doorHardware, kennels, nests }
+  return { root, stations, cameras, vehicles, helicopters, boats, windsocks, chairs, doorHardware, kennels, nests }
 }

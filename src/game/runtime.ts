@@ -582,7 +582,7 @@ export class MissionRuntime {
     this.escort.jeepOffset.copy(position).sub(new THREE.Vector3(...origin))
     this.escort.jeepRotation.copy(this.escape.rotation)
     const vehicle = this.campaign && this.state.run && this.campaign.extraction.kind !== 'jeep' ? this.campaign.props.vehicles.get(this.campaign.extraction.id) : undefined
-    if (vehicle) { vehicle.position.copy(position); vehicle.quaternion.copy(this.escape.rotation) }
+    if (vehicle) { vehicle.position.copy(position); vehicle.quaternion.copy(this.escape.rotation); vehicle.visible = true }
     else this.world.rescue?.jeep.position.copy(position)
     const jeep = vehicle ? undefined : this.world.rescue?.jeep
     if (jeep) {

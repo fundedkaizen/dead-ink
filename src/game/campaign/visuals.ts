@@ -3,6 +3,7 @@ import type { MissionRuntime } from '../runtime'
 import { ENEMY_COMBAT } from '../balance'
 import { PLAYER_COLORS } from '../shared/coop'
 import { RotorSound, RotorWash, poseHelicopter, seatPassengers } from './helicopter'
+import { EngineSound, Wake, poseBoat, type BoatRig } from './boat'
 
 /** Seconds of the helicopter's clock it spends flying in, and hovering down onto the pad. */
 const APPROACH = 16, HOVER = 4
@@ -66,12 +67,15 @@ export class CampaignVisuals {
   private arrived = false
   private wash: RotorWash
   private sound = new RotorSound()
+  private wake: Wake
+  private engine = new EngineSound()
 
   constructor(private r: MissionRuntime, scene: THREE.Scene) {
     this.root.name = 'Campaign sight lines'
     this.root.userData.noCollision = true
     scene.add(this.root)
     this.wash = new RotorWash(scene)
+    this.wake = new Wake(scene)
     this.glintMaterial = new THREE.SpriteMaterial({ map: glintTexture(), transparent: true, depthWrite: false, sizeAttenuation: false, toneMapped: false })
   }
 
@@ -182,7 +186,9 @@ export class CampaignVisuals {
   private updateVehicle(dt: number) {
     const r = this.r, campaign = r.campaign, run = r.state.run
     const rig = campaign?.props.helicopters.get(campaign.mission.extraction)
-    if (!campaign || !run || !rig) { this.sound.update(0, 999, false); this.wash.update(dt, null, 0); return }
+    const boat = campaign?.props.boats.get(campaign.mission.extraction)
+    if (campaign && run && boat) { this.updateBoat(dt, boat); return }
+    if (!campaign || !run || !rig) { this.sound.update(0, 999, false); this.wash.update(dt, null, 0); this.wake.update(dt, null, 0, 0); this.engine.update(0, 999, false); return }
     if (r.escape.active) return
     const extraction = campaign.extraction, park = new THREE.Vector3(...extraction.park)
     const heading = extraction.heading
@@ -247,9 +253,61 @@ export class CampaignVisuals {
     sock.rotation.z = -0.9 * (1 - Math.min(1, blow * 1.5)) + Math.sin(this.clock * (6 + blow * 20)) * 0.05 * (0.3 + blow)
   }
 
+  /**
+   * The boat, from the run: it comes in from out on the water over the last APPROACH seconds of its clock,
+   * slowing to tie up at the slipway, idles there, and (in the escape) opens up and heads out.
+   */
+  private updateBoat(dt: number, boat: BoatRig) {
+    const r = this.r, campaign = r.campaign!, run = r.state.run!, extraction = campaign.extraction
+    const park = new THREE.Vector3(...extraction.park), heading = extraction.heading
+    const forward = new THREE.Vector3(Math.sin(heading), 0, Math.cos(heading))
+    if (r.escape.active) {
+      poseBoat(boat, 1, this.clock, dt)
+      this.wake.update(dt, boat.root, r.escape.speed, park.y)
+      this.engine.update(1, boat.root.position.distanceTo(r.view.position), true)
+      return
+    }
+    let visible = false, throttle = 0.15, speed = 0
+    const position = park.clone()
+    let yaw = heading
+    if (run.arrived) visible = true
+    else if (run.called && run.eta <= APPROACH) {
+      visible = true
+      // In along a gentle curve from the open water behind its moorings, slowing as it comes alongside.
+      const s = 1 - run.eta / APPROACH, e = 1 - (1 - s) ** 2
+      const start = park.clone().addScaledVector(forward, -70).add(new THREE.Vector3(forward.z * 25, 0, -forward.x * 25))
+      const mid = park.clone().addScaledVector(forward, -22)
+      const a = start.clone().lerp(mid, e), b = mid.clone().lerp(park, e)
+      position.copy(a.lerp(b, e))
+      const ahead = mid.clone().lerp(park, Math.min(1, e + 0.03))
+      yaw = Math.atan2(ahead.x - position.x, ahead.z - position.z)
+      if (ahead.distanceTo(position) < 0.05) yaw = heading
+      throttle = 1 - s * 0.8
+      speed = (1 - s) * 7
+    }
+    boat.root.visible = visible
+    if (!visible) { this.wake.update(dt, null, 0, park.y); this.engine.update(0, 999, false); return }
+    boat.root.position.copy(position)
+    boat.root.rotation.y = yaw
+    poseBoat(boat, throttle, this.clock, dt)
+    this.wake.update(dt, boat.root, speed, park.y)
+    this.engine.update(boat.throttle, position.distanceTo(r.view.position), true)
+  }
+
   /** During the escape: the rotors race, the nose dips as it pulls away, the team sits in the doorway. */
   escape(dt: number) {
     const r = this.r, campaign = r.campaign
+    const boat = campaign?.props.boats.get(campaign.mission.extraction)
+    if (boat) {
+      if (!boat.passengers.visible) {
+        const ids = [r.coop?.link.id ?? 0, ...(r.coop?.paired ? [...r.coop.mates.keys()] : [])]
+        seatPassengers({ passengers: boat.passengers } as never, ids.map(id => PLAYER_COLORS[id] ?? PLAYER_COLORS[0]))
+        boat.passengers.children.forEach((child, i) => child.position.set(i % 2 ? -0.4 : 0.4, 0.2, 1.3 - Math.floor(i / 2) * 0.6))
+        boat.passengers.visible = true
+      }
+      this.updateBoat(dt, boat)
+      return
+    }
     const rig = campaign?.props.helicopters.get(campaign.mission.extraction)
     if (!rig || !campaign) return
     if (!rig.passengers.visible) {
@@ -266,12 +324,13 @@ export class CampaignVisuals {
 
   reset() {
     this.arrived = false; this.landing = 0
-    this.wash.clear(); this.sound.update(0, 999, false)
+    this.wash.clear(); this.sound.update(0, 999, false); this.wake.clear(); this.engine.update(0, 999, false)
+    for (const boat of this.r.campaign?.props.boats.values() ?? []) boat.passengers.visible = false
     for (const rig of this.r.campaign?.props.helicopters.values() ?? []) { rig.passengers.visible = false; rig.rpm = 0 }
   }
 
   dispose() {
-    this.wash.dispose(); this.sound.dispose()
+    this.wash.dispose(); this.sound.dispose(); this.wake.dispose(); this.engine.dispose()
     this.root.removeFromParent()
     for (const cone of [...this.guardCones, ...this.cameraCones.values()]) { cone.fillMaterial.dispose(); cone.edgeMaterial.dispose() }
     for (const geometry of [this.guardFan, this.guardEdge, this.cameraFan, this.cameraEdge]) geometry.dispose()

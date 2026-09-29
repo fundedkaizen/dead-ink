@@ -77,6 +77,8 @@ export class CampaignSession {
   get run() { return this.r.state.run }
   get rules() { return rulesFor(this.run?.difficulty ?? 'normal') }
   get extraction(): ExtractionAnchor { return this.map.extractions[this.mission.extraction] }
+  /** The way out, as the prompts name it. */
+  get vehicle() { return this.extraction.kind }
 
   /** The mission and difficulty to begin with: the saved choice, or ?mission= and ?difficulty= on the address. */
   initialChoice() {
@@ -211,8 +213,7 @@ export class CampaignSession {
     const tiers = rulesFor(run.difficulty).tiers
     for (const [id, kennel] of this.props.kennels) { const dog = this.map.dogs[id]; kennel.visible = this.mission.dogs.includes(id) && (!dog?.tier || tiers.includes(dog.tier)) }
     for (const [id, nest] of this.props.nests) { const guard = this.map.guards[id]; nest.visible = this.mission.guards.includes(id) && (!guard?.tier || tiers.includes(guard.tier)) }
-    // Helicopters: campaign/visuals.ts flies them in from the run.
-    for (const [id, vehicle] of this.props.vehicles) if (!this.props.helicopters.has(id)) vehicle.visible = id === this.mission.extraction && run.arrived
+    // Helicopters and boats: campaign/visuals.ts brings them in from the run.
     const jeep = this.r.world.rescue?.jeep
     if (jeep) jeep.visible = this.extraction.kind === 'jeep' || this.r.escape.active
     this.r.player.world.refresh()
@@ -260,12 +261,12 @@ export class CampaignSession {
       case 'keycard': return 'Take the keycard'
       case 'twokey': return 'Turn the key'
       case 'ammo': return 'Take ammunition'
-      case 'heli': return run.called ? null : 'Call the helicopter'
+      case 'heli': return run.called ? null : `Call the ${this.vehicle}`
       case 'jeep': {
         if (station.id === 'rescue-jeep') return undefined
-        if (!run.arrived) return run.called ? 'The helicopter is on its way' : 'Call the helicopter on the radio first'
+        if (!run.arrived) return run.called ? `The ${this.vehicle} is on its way` : `Call the ${this.vehicle} on the radio first`
         if (loadedCount(state) < this.aliveHostages()) return `Get ${name} aboard first`
-        return this.r.coop?.paired ? this.r.coop.jeepLabel().replace('jeep', 'helicopter') : 'Board the helicopter'
+        return this.r.coop?.paired ? this.r.coop.jeepLabel().replace('jeep', this.vehicle) : `Board the ${this.vehicle}`
       }
       default: return undefined
     }
@@ -313,14 +314,14 @@ export class CampaignSession {
       case 'twokey': return this.turnKey(station.id)
       case 'heli': {
         if (run.called) return { changed: false, message: '' }
-        if (state.hostages.some(hostage => hostage.status === 'captive')) return { changed: false, message: `Free ${name} first: the helicopter will not wait long.` }
+        if (state.hostages.some(hostage => hostage.status === 'captive')) return { changed: false, message: `Free ${name} first: the ${this.vehicle} will not wait long.` }
         run.called = true; run.used.push(station.id)
         this.lzNoise = 2
-        return { changed: true, message: `Helicopter inbound: about ${Math.round(run.eta)} seconds. Hold the landing zone; the clock only runs while one of you is on it.` }
+        return { changed: true, message: `The ${this.vehicle} is coming: about ${Math.round(run.eta)} seconds. Hold the ${this.extraction.kind === 'boat' ? 'slipway' : 'landing zone'}; the clock only runs while one of you is on it.` }
       }
       case 'jeep': {
         if (station.id === 'rescue-jeep') return null
-        if (!run.arrived) return { changed: false, message: run.called ? 'Hold on: the helicopter has not landed yet.' : 'Call it on the radio first.' }
+        if (!run.arrived) return { changed: false, message: run.called ? `Hold on: the ${this.vehicle} is not here yet.` : 'Call it on the radio first.' }
         if (loadedCount(state) < this.aliveHostages()) return { changed: false, message: `Get ${name} aboard first: bring him close and he climbs in.` }
         state.gateOpen = true
         state.jeep = 'escaping'; state.escapeProgress = 0
@@ -671,7 +672,7 @@ export class CampaignSession {
         this.lzNoise = 12
         r.ai.hear({ kind: 'rotor', position: new THREE.Vector3(...extraction.park), radius: 48 })
       }
-      if (run.eta <= 0) { run.arrived = true; this.announce('The helicopter is down. Get everyone aboard.'); r.syncWorld() }
+      if (run.eta <= 0) { run.arrived = true; this.announce(`The ${this.vehicle} is here. Get everyone aboard.`); r.syncWorld() }
     }
     // Hostages bleeding out.
     run.hostages.forEach((vitals, index) => {

@@ -154,7 +154,7 @@ export function previewSvg(mission: MissionDef, map: MapModule) {
   const spawns = mission.spawns.map(id => map.spawns[id]).filter(Boolean).map(s => `<path d="M${x(s.position[0])} ${(+z(s.position[2]) - 5).toFixed(1)}l4 7h-8z" fill="#111"/>`).join('')
   const cells = mission.cells.map(id => map.cells[id]).filter(Boolean).map(c => `<rect x="${(+x(c.hostage[0]) - 3).toFixed(1)}" y="${(+z(c.hostage[2]) - 3).toFixed(1)}" width="6" height="6" fill="none" stroke="#2878d0" stroke-width="1.4"/>`).join('')
   const out = map.extractions[mission.extraction]
-  const exit = out ? `<g transform="translate(${x(out.park[0])},${z(out.park[2])})"><circle r="6" fill="#fff" stroke="#111" stroke-width="1.2"/><path d="M-3 0h6M0 -3v6" stroke="#111" stroke-width="1.6"/></g><text x="${(+x(out.park[0]) + 8).toFixed(1)}" y="${(+z(out.park[2]) + 3).toFixed(1)}">${out.kind === 'jeep' ? 'Jeep' : 'Helicopter'}</text>` : ''
+  const exit = out ? `<g transform="translate(${x(out.park[0])},${z(out.park[2])})"><circle r="6" fill="#fff" stroke="#111" stroke-width="1.2"/><path d="M-3 0h6M0 -3v6" stroke="#111" stroke-width="1.6"/></g><text x="${(+x(out.park[0]) + 8).toFixed(1)}" y="${(+z(out.park[2]) + 3).toFixed(1)}">${out.kind === 'jeep' ? 'Jeep' : out.kind === 'boat' ? 'Boat' : 'Helicopter'}</text>` : ''
   const panels = mission.panels.map(id => map.panels[id]).filter(p => p && ['power', 'intel', 'twokey'].includes(p.kind)).map(p => `<circle cx="${x(p.position[0])}" cy="${z(p.position[2])}" r="2.4" fill="#111"/>`).join('')
   return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Map of ${mission.name}: north is up">${buildings}${cells}${panels}${spawns}${exit}</svg>`
 }

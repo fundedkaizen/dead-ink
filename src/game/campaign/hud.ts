@@ -79,7 +79,8 @@ export class CampaignHud {
     const mission = campaign.mission
     // Objectives.
     const stage = currentStage(mission, run)
-    const eta = run.called && !run.arrived ? `<p class="campaign-eta">Helicopter: ${Math.ceil(run.eta)} s${this.inZone() ? '' : ' · <b>get on the landing zone, the clock is paused</b>'}</p>` : ''
+    const noun = campaign.extraction.kind === 'boat' ? 'Boat' : 'Helicopter'
+    const eta = run.called && !run.arrived ? `<p class="campaign-eta">${noun}: ${Math.ceil(run.eta)} s${this.inZone() ? '' : ` · <b>get on the ${noun === 'Boat' ? 'slipway' : 'landing zone'}, the clock is paused</b>`}</p>` : ''
     const objectives = `<p class="campaign-stage">${mission.name} · stage ${Math.min(run.stage + 1, mission.stages.length)} of ${mission.stages.length}</p>
       <h3>${stage.title}</h3><ul>${stage.objectives.map(o => `<li class="${run.done.includes(o.id) ? 'done' : ''}${o.optional ? ' optional' : ''}">${o.text}${o.optional ? ' <i>(optional)</i>' : ''}</li>`).join('')}</ul>${eta}`
     if (objectives !== this.lastObjectives) { this.objectives.innerHTML = objectives; this.lastObjectives = objectives }
