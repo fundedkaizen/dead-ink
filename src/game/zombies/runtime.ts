@@ -1409,9 +1409,10 @@ export class ZombiesRuntime {
     this.audio.play({ kind: 'player-fall' })
     this.zombieHud.announce('You are down', 2.5)
     this.hud.notify('Crawl and keep shooting: a teammate can pick you up.', 4, true)
-    this.coop.send({ t: 'down', dn: 1 })
-    // The host may end the game any moment now: let it have this player's numbers for the awards.
+    // The host may end the game the moment it hears of this down: let it have this player's numbers (this down
+    // counted) first, or the awards go out with the last second's and call this player a Survivor.
     if (this.isGuest) this.coop.send({ t: 'stats', v: this.awardValues() })
+    this.coop.send({ t: 'down', dn: 1 })
   }
 
   /** Out comes the best pistol you carry (the Ink Ray first, as the Ray Gun in Call of Duty), or a spare one. */
