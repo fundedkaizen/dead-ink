@@ -13,7 +13,7 @@ const spawns: SpawnAnchor[] = [
   { id: 'fuel-belt', label: 'The fuel tanks, west', position: [-86, 0.05, -44], lookAt: [-70, 1.7, -30] },
   { id: 'southwest-corner', label: 'The southwest corner, behind the stores', position: [-88, 0.05, 68], lookAt: [-70, 1.7, 60] },
   { id: 'south-field', label: 'The south field, below the barracks', position: [0, 0.05, 47], lookAt: [10, 1.7, 30] },
-  { id: 'rail-siding', label: 'The rail siding, under the wagons', position: [96, 0.05, -34], lookAt: [80, 1.7, -30] },
+  { id: 'rail-siding', label: 'The rail siding, under the wagons', position: [90, 0.05, -35], lookAt: [80, 1.7, -30] },
 ]
 
 /** The detention block's four cells: their locks sit on the cell doors (world.ts, cell-lock.ts). */
