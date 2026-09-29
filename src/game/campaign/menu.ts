@@ -8,11 +8,17 @@ import { STEALTH_BLURBS } from './stealth'
 import { rulesFor } from './difficulty'
 
 /**
- * The campaign on the pause menu: a Missions page (every mission in order, locked or open, its stars and best
- * time on each difficulty, a small map of it and its briefing, and Play), the current mission under the title,
- * and the summary when a mission is won (time, stars, how quietly, the awards, Ink and XP, Next mission).
+ * The campaign on the pause menu: a Missions page (every mission in order, locked or open, its stars on the chosen
+ * difficulty, Start mission under the chosen one, a small map of it, its briefing and its best on each difficulty),
+ * the current mission under the title, and the summary when a mission is won (time, stars, how quietly, the awards,
+ * Ink and XP, Next mission).
  */
-const star = (on: boolean) => `<span class="${on ? '' : 'off'}">★</span>`
+const star = (on: boolean, meaning?: string) => `<span class="${on ? '' : 'off'}"${meaning ? ` title="${on ? 'Earned' : 'Not yet'}: ${meaning}"` : ''}>★</span>`
+/** What each of a mission's three stars asks for, for their tooltips. */
+const starMeanings = (mission: MissionDef, difficulty: Difficulty) =>
+  [`finish under ${formatTime(mission.par[difficulty])}`, 'never raise the alarm', `${mission.hostageName} never hurt`]
+const starRow = (stars: readonly boolean[], mission: MissionDef, difficulty: Difficulty) =>
+  stars.map((on, i) => star(on, starMeanings(mission, difficulty)[i])).join('')
 const escape = (text: string) => text.replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' })[c]!)
 
 export function campaignMenuCopy(r: MissionRuntime, copy: MenuCopy): MenuCopy {
@@ -28,16 +34,20 @@ export function campaignMenuCopy(r: MissionRuntime, copy: MenuCopy): MenuCopy {
     const mission = MISSIONS.find(m => m.id === chosen) ?? MISSIONS[0]
     const guest = !!r.coop?.isGuest && !!r.coop.paired
     const list = MISSIONS.map(m => {
-      const open = store.isUnlocked(m.id)
-      const stars = DIFFICULTIES.map(d => store.best(m.id, d)?.stars ?? [false, false, false]).flat()
-      return `<li><button type="button" class="campaign-mission" data-mission="${m.id}" aria-pressed="${m.id === mission.id}" ${open ? '' : 'disabled'}>
+      const open = store.isUnlocked(m.id), picked = m.id === mission.id
+      const best = store.best(m.id, difficulty)
+      const stars = best?.stars ?? [false, false, false]
+      // The chosen open mission carries its own big Start button (a guest's follows the host's choice).
+      const start = !picked || !open ? '' : guest ? '<p class="campaign-start-note">The host picks the mission; yours follows theirs.</p>'
+        : `<button type="button" class="menu-primary campaign-start" data-play>Start mission · ${DIFFICULTY_LABELS[difficulty]}</button>`
+      return `<li><button type="button" class="campaign-mission" data-mission="${m.id}" aria-pressed="${picked}" ${open ? '' : 'disabled'}>
         <span class="number">${m.number}</span>
-        <span><strong>${escape(m.name)}</strong><small>${open ? `${escape(m.estimate)} · ${campaign().store.best(m.id, difficulty) ? `best ${formatTime(campaign().store.best(m.id, difficulty)!.time)} on ${DIFFICULTY_LABELS[difficulty]}` : 'not finished yet'}` : `Locked · finish mission ${m.number - 1} to open it`}</small></span>
-        <span class="stars" aria-label="${stars.filter(Boolean).length} of 9 stars">${stars.map(star).join('')}</span></button></li>`
+        <span><strong>${escape(m.name)}</strong><small>${open ? `${escape(m.estimate)} · ${best ? `best ${formatTime(best.time)} on ${DIFFICULTY_LABELS[difficulty]}` : 'not finished yet'}` : `Locked · finish mission ${m.number - 1} to open it`}</small></span>
+        <span class="stars" aria-label="${stars.filter(Boolean).length} of 3 stars on ${DIFFICULTY_LABELS[difficulty]}">${starRow(stars, m, difficulty)}</span></button>${start}</li>`
     }).join('')
     const bests = DIFFICULTIES.map(d => {
       const best = store.best(mission.id, d)
-      return `<div><dt>${DIFFICULTY_LABELS[d]}</dt><dd>${best ? `${formatTime(best.time)} ${best.stars.map(star).join('')}` : '—'}</dd></div>`
+      return `<div><dt>${DIFFICULTY_LABELS[d]}</dt><dd>${best ? `${formatTime(best.time)} <span class="stars">${starRow(best.stars, mission, d)}</span>` : '—'}</dd></div>`
     }).join('')
     page.innerHTML = `<div class="campaign-page">
       <div class="campaign-difficulty" role="group" aria-label="Difficulty">${DIFFICULTIES.map(d => `<button type="button" data-difficulty="${d}" aria-pressed="${d === difficulty}">${DIFFICULTY_LABELS[d]}</button>`).join('')}</div>
@@ -47,8 +57,8 @@ export function campaignMenuCopy(r: MissionRuntime, copy: MenuCopy): MenuCopy {
         <div>${previewSvg(mission, mapFor(mission))}<p class="campaign-legend"><span>▲ Way in</span><span>□ Where he may be held</span><span>✚ Way out</span><span>● Objectives</span></p></div>
         <div><p><b>${mission.number}. ${escape(mission.name)}</b> · ${escape(mission.estimate)}</p><p>${escape(mission.briefing)}</p>
           <p>Stars: finish under ${formatTime(mission.par[difficulty])} · never raise the alarm · the hostage never hurt.</p>
+          <p class="campaign-bests-title">Best on each difficulty</p>
           <dl class="campaign-bests">${bests}</dl>
-          <div class="mission-actions">${guest ? '<p>The host picks the mission; yours follows theirs.</p>' : `<button type="button" class="menu-primary" data-play ${store.isUnlocked(mission.id) ? '' : 'disabled'}>Play ${escape(mission.name)} · ${DIFFICULTY_LABELS[difficulty]}</button>`}</div>
         </div>
       </div></div>`
   }
@@ -62,7 +72,7 @@ export function campaignMenuCopy(r: MissionRuntime, copy: MenuCopy): MenuCopy {
       const s = c.summary
       const next = c.next()
       html = `<div class="campaign-home campaign-summary">
-        <p class="stars" aria-label="${s.stars.filter(Boolean).length} of 3 stars">${s.stars.map(star).join('')}</p>
+        <p class="stars" aria-label="${s.stars.filter(Boolean).length} of 3 stars">${starRow(s.stars, s.mission, s.difficulty)}</p>
         <p class="campaign-now"><b>${escape(s.mission.name)}</b> on ${DIFFICULTY_LABELS[s.difficulty]} · <b>${s.rating}</b>: ${STEALTH_BLURBS[s.rating]}</p>
         <p class="campaign-now">${s.best ? 'A new best time. ' : ''}+${s.ink} Ink · +${s.xp} XP${s.unlocked ? ` · <b>${escape(MISSIONS.find(m => m.id === s.unlocked)?.name ?? '')}</b> is open` : ''}</p>
         ${s.awards.length ? `<ul>${s.awards.map(a => `<li>${escape(a)}</li>`).join('')}</ul>` : ''}
@@ -96,17 +106,21 @@ export function campaignMenuCopy(r: MissionRuntime, copy: MenuCopy): MenuCopy {
     if (title) title.textContent = `Mission ${c.mission.number}: ${c.mission.name}`
   }
 
-  const play = async (id: string, d: Difficulty) => {
-    if (r.coop?.isGuest && r.coop.paired) return
+  /** Load mission `id` on `d`; `start`: then play it (Start mission), otherwise wait on the home page (Next mission). */
+  const play = async (id: string, d: Difficulty, start = false) => {
+    if ((r.coop?.isGuest && r.coop.paired) || !campaign().store.isUnlocked(id)) return
     campaign().store.select(id, d)
     // Already loaded and not yet begun: nothing to reload.
     const fresh = campaign().mission.id === id && campaign().run?.difficulty === d && r.state.phase === 'active' && r.state.elapsed < 1
-    if (!fresh) await r.loadMission(id, d)
+    if (!fresh && !await r.loadMission(id, d)) return
     chosen = id; difficulty = d
     renderPage()
     lastHome = ''
     // Back to the home page, where Begin mission starts it.
     document.querySelector<HTMLElement>('[data-menu-page="campaign"] [data-menu-back]')?.click()
+    // Start mission plays at once while the click still counts as the player's (the pointer lock needs that);
+    // after a long load Begin mission waits, focused, on the home page.
+    if (start && (fresh || navigator.userActivation?.isActive)) document.querySelector<HTMLButtonElement>('#walk-start')?.click()
   }
 
   const pageDef = {
@@ -115,11 +129,16 @@ export function campaignMenuCopy(r: MissionRuntime, copy: MenuCopy): MenuCopy {
       page = body
       body.addEventListener('click', event => {
         const target = event.target as HTMLElement
-        const pick = target.closest<HTMLElement>('[data-mission]')
-        if (pick && !(pick as HTMLButtonElement).disabled) { chosen = pick.dataset.mission!; renderPage(); return }
-        const level = target.closest<HTMLElement>('[data-difficulty]')
+        // Only this page's own buttons: <body> carries data-mission too (the hostage mode's flag).
+        const within = (selector: string) => { const hit = target.closest<HTMLElement>(selector); return hit && body.contains(hit) ? hit : null }
+        const pick = within('[data-mission]')
+        if (pick && !(pick as HTMLButtonElement).disabled) {
+          chosen = pick.dataset.mission!; renderPage()
+          body.querySelector<HTMLElement>('[data-play]')?.focus({ preventScroll: true }); return
+        }
+        const level = within('[data-difficulty]')
         if (level) { difficulty = level.dataset.difficulty as Difficulty; renderPage(); return }
-        if (target.closest('[data-play]') && chosen) void play(chosen, difficulty)
+        if (within('[data-play]') && chosen) void play(chosen, difficulty, true)
       })
     },
     show: () => { chosen = campaign().mission.id; difficulty = campaign().run?.difficulty ?? campaign().store.load().difficulty; renderPage() },

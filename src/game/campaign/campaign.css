@@ -72,14 +72,21 @@ body[data-mission="true"] .walk-card[data-page="campaign"] { width: min(820px, 1
 .campaign-mission small { color: var(--ink-muted); font-size: 12px; }
 .campaign-mission .stars { font-size: 16px; letter-spacing: 1px; white-space: nowrap; color: var(--ink); }
 .campaign-mission .stars .off { color: #cfcfcf; }
+.campaign-mission .stars span, .campaign-bests .stars span { cursor: help; }
+/* Start mission sits right under the chosen card. */
+body[data-mission="true"] .walk-card .campaign-start { display: block; width: 100%; min-height: 54px; margin-top: 8px; font-size: 17px; }
+.campaign-start-note { margin: 8px 0 0; font-size: 13px; color: var(--ink-muted); }
 .campaign-detail { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 18px; align-items: start; }
 .campaign-detail svg { width: 100%; height: auto; display: block; border: 1px solid var(--ink-rule); border-radius: 3px; background: #fff; }
 .campaign-detail svg text { font: 7px var(--notes); fill: var(--ink-deep); }
 body[data-mission="true"] .walk-card .campaign-detail p { margin: 0 0 10px; font-size: 13px; }
-.campaign-bests { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 10px 0 0; }
-.campaign-bests div { padding: 6px 8px; border-top: 1px solid var(--ink-rule); }
+.campaign-bests { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: 4px 0 0; }
+.campaign-bests div { padding: 4px 6px; border-top: 1px solid var(--ink-rule); }
 .campaign-bests dt { font-size: 11px; color: var(--ink-muted); }
-.campaign-bests dd { margin: 2px 0 0; font: 600 15px var(--notes); }
+.campaign-bests dd { margin: 2px 0 0; font: 600 13px var(--notes); white-space: nowrap; }
+.campaign-bests .stars { letter-spacing: 1px; }
+.campaign-bests .stars .off { color: #cfcfcf; }
+body[data-mission="true"] .walk-card .campaign-detail .campaign-bests-title { margin: 12px 0 0; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-muted); }
 .campaign-legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 11px; color: var(--ink-muted); margin-top: 6px; }
 .campaign-home { display: grid; gap: 6px; margin-top: 10px; }
 .campaign-home .campaign-now { font-size: 13px; color: var(--ink-muted); }
@@ -90,8 +97,8 @@ body[data-mission="true"] .walk-card .campaign-summary .stars { font-size: 26px;
 .campaign-summary ul { margin: 0; padding-left: 18px; font-size: 13px; }
 @media (max-width: 640px) {
   .campaign-detail { grid-template-columns: 1fr; }
-  .campaign-mission { grid-template-columns: 26px 1fr; }
-  .campaign-mission .stars { grid-column: 2; }
+  .campaign-mission { grid-template-columns: 26px 1fr auto; gap: 10px; }
+  .campaign-mission .stars { font-size: 14px; }
 }
 /* The campaign's home slot (the mission in play, the win summary) shows on every home page, not only the title. */
 .menu-card[data-title="false"] .menu-home-extra:has(.campaign-home) { display: block; }
