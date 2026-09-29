@@ -157,7 +157,7 @@ export class CampaignVisuals {
     const snipers = r.ai.enemies.filter(enemy => enemy.spec.role === 'sniper')
     while (this.glints.length < snipers.length) {
       const sprite = new THREE.Sprite(this.glintMaterial)
-      sprite.scale.setScalar(0.045); sprite.renderOrder = 4
+      sprite.scale.setScalar(0.075); sprite.renderOrder = 4
       this.root.add(sprite); this.glints.push(sprite)
     }
     this.glints.forEach((sprite, index) => {
