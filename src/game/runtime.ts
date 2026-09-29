@@ -427,7 +427,8 @@ export class MissionRuntime {
     if (this.coop?.isGuest) { this.coop.guestShot(shot, surface, distance); return }
     this.ai.nearMiss(shot,distance)
     this.impactPoint = null
-    const body = this.ai.aimDistance(shot.origin, shot.direction, distance)
+    // The campaign's cameras and dogs can take a round before any guard or wall.
+    const body = this.campaign ? this.ai.aimDistance(shot.origin, shot.direction, distance) : distance
     const camera = this.visuals?.cameraHit(shot.origin, shot.direction, distance, body)
     if (camera) this.campaign?.hostAction(`camera:${camera}`, 0)
     const dog = this.dogs?.hit(shot, Math.min(distance, body))
