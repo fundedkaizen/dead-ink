@@ -16,7 +16,7 @@ const OFFER_WEIGHTS: Record<Rarity, number> = { common: 30, uncommon: 26, rare: 
 export const FEATURED_OFF = 0.25
 export const DAILY_OFFERS = 6
 /** Items only the Shop sells, always on its shelf. */
-export const PERMANENT_OFFERS = ['camo:love-letter', 'gloves:origami'] as const
+export const PERMANENT_OFFERS = ['camo:love-letter'] as const
 
 /** Today's shop day, "2026-09-29" (UTC). */
 export const shopDay = (date = new Date()) => date.toISOString().slice(0, 10)
@@ -54,7 +54,7 @@ export function dailyOffers(day: string): Offer[] {
   const offers: Offer[] = []
   const featured = take(item => item.rarity === 'epic' || item.rarity === 'legendary' || item.rarity === 'mythic')
   if (featured) offers.push({ item: featured, price: Math.round(SHOP_PRICES[featured.rarity] * (1 - FEATURED_OFF) / 50) * 50, featured: true, permanent: false })
-  const kinds = ['gloves', 'camo', 'charm', 'watch', 'knife'] as const
+  const kinds = ['camo', 'charm', 'watch', 'knife'] as const
   for (let i = 0; offers.length < DAILY_OFFERS && i < 20; i++) {
     const kind = kinds[i % kinds.length]
     const item = take(entry => entry.kind === kind) ?? take(() => true)

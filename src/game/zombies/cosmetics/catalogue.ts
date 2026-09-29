@@ -93,16 +93,6 @@ export const CATALOGUE: readonly CosmeticItem[] = [
   item('knife', 'karambit', 'Karambit', 'epic', 'Curved claw blade with a finger ring'),
   item('knife', 'butterfly', 'Butterfly', 'legendary', 'Two handles that flip open'),
   item('knife', 'heartline', 'Heartline', 'mythic', 'A karambit whose edge glows pink'),
-  item('gloves', 'work', 'Work Gloves', 'common', 'Canvas work gloves, hatched with wear'),
-  item('gloves', 'tactical', 'Night Ops', 'common', 'Black tactical gloves with padded knuckles'),
-  item('gloves', 'rubber', 'Scrubbers', 'uncommon', 'Green rubber gloves, rolled at the cuff'),
-  item('gloves', 'wraps', 'Knuckle Wraps', 'uncommon', 'Hands wrapped in strips of paper tape'),
-  sourced('gloves', 'origami', 'Origami', 'rare', 'Folded from a blue page of the notebook', 'shop'),
-  item('gloves', 'boxing', 'Blue Corner', 'rare', 'Laced leather in the blue corner\'s colour'),
-  item('gloves', 'bones', 'Bone Hands', 'epic', 'Black gloves with every bone drawn on in white'),
-  sourced('gloves', 'brute', 'Brute Knuckles', 'epic', 'Violet knuckles torn from the Brute\'s own hands', 'challenge'),
-  item('gloves', 'midas', 'Midas Touch', 'legendary', 'Solid gold from the wrist to the fingertips'),
-  item('gloves', 'heartstring', 'Heartstring', 'mythic', 'Rose-gold gloves stitched with pink hearts that glow'),
 ]
 
 /** Owned from the first game, so the Armory is never empty and the knife always has a skin. */

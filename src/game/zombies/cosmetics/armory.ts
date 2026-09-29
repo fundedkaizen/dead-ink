@@ -18,7 +18,7 @@ import { CASE, caseOdds, equippedCosmetics, loadProfile, onProfileChange, openCa
 
 type Tab = CosmeticKind | 'challenges'
 const KINDS: { kind: Tab; label: string }[] = [
-  { kind: 'watch', label: 'Watches' }, { kind: 'charm', label: 'Charms' }, { kind: 'camo', label: 'Camos' }, { kind: 'knife', label: 'Knives' }, { kind: 'gloves', label: 'Gloves' },
+  { kind: 'watch', label: 'Watches' }, { kind: 'charm', label: 'Charms' }, { kind: 'camo', label: 'Camos' }, { kind: 'knife', label: 'Knives' },
   { kind: 'challenges', label: 'Challenges' },
 ]
 const GUNS: { name: WeaponName; label: string }[] = [
@@ -201,7 +201,6 @@ class Armory {
       ? 'A camo covers one gun type. Challenge camos are earned per gun. Pack-a-Punched guns wear the Pack-a-Punch camo.'
       : this.kind === 'challenges' ? `Each gun's tiers unlock a camo for that gun, in order. Tier 4 on all ${CHALLENGE_WEAPONS.length} guns unlocks Diamond.`
       : this.kind === 'knife' ? 'Your knife slashes with V and shows off when you stand still.'
-      : this.kind === 'gloves' ? 'Gloves go on both hands. Some come from cases, some from the Shop, Career levels and challenges.'
       : 'Click something you own to wear it; click again to take it off.'
     const grid = this.body.querySelector<HTMLElement>('.armory-grid')!, challenges = this.body.querySelector<HTMLElement>('.armory-challenges')!
     grid.hidden = this.kind === 'challenges'

@@ -27,7 +27,7 @@ test('A day has six offers, the same all day, a new set the next; the first is f
   for (const offer of offers) assert(pool.includes(offer.item.id), `${offer.item.id} is a case item`)
   // Over a month every kind turns up, and most offers are affordable ones.
   const month = Array.from({ length: 30 }, (_, i) => dailyOffers(shopDay(new Date(Date.UTC(2026, 9, i + 1))))).flat()
-  for (const kind of ['watch', 'charm', 'camo', 'knife', 'gloves']) assert(month.some(o => o.item.kind === kind), `${kind} on offer this month`)
+  for (const kind of ['watch', 'charm', 'camo', 'knife']) assert(month.some(o => o.item.kind === kind), `${kind} on offer this month`)
   assert(month.filter(o => !o.featured && (o.item.rarity === 'common' || o.item.rarity === 'uncommon' || o.item.rarity === 'rare')).length > month.length * 0.45)
   assert(msUntilRefresh(day) === (8 * 60 + 30) * 60 * 1000)
 })
@@ -56,9 +56,9 @@ test('Buying spends the Ink and the item is yours; short of Ink, owned or not on
   const notToday = casePool().find(item => !dailyOffers(shopDay(day)).some(o => o.item.id === item.id))!
   assert.deepEqual(buyOffer(notToday.id, day), { ok: false, reason: 'not-offered' })
   assert.deepEqual(buyOffer('camo:diamond', day), { ok: false, reason: 'not-offered' }, 'challenge camos are never for sale')
-  assert(buyOffer('gloves:origami', day).ok, 'the permanent shelf sells any day')
+  assert(buyOffer('camo:love-letter', day).ok, 'the permanent shelf sells any day')
   resetProfileCache()
-  assert(loadProfile().owned.includes('gloves:origami'), 'saved')
+  assert(loadProfile().owned.includes('camo:love-letter'), 'saved')
 })
 
 test('Harder games pay more Ink, and so does every prestige', () => {

@@ -47,9 +47,9 @@ test('Ranks: eleven names of five levels, numbered I to V', () => {
   assert(prestigeBadge(10).includes('Prestige 10'))
 })
 
-test('Unlocks: starting pistols, charms, camos, gloves and calling cards, in level order', () => {
+test('Unlocks: starting pistols, watches, charms, camos, knives and calling cards, in level order', () => {
   const kinds = new Set(LEVEL_UNLOCKS.map(u => u.kind === 'item' ? u.item.split(':')[0] : u.kind))
-  for (const kind of ['pistol', 'charm', 'camo', 'gloves', 'title']) assert(kinds.has(kind), `levels unlock a ${kind}`)
+  for (const kind of ['pistol', 'watch', 'charm', 'camo', 'knife', 'title']) assert(kinds.has(kind), `levels unlock a ${kind}`)
   assert.deepEqual(LEVEL_UNLOCKS.map(u => u.level), [...LEVEL_UNLOCKS.map(u => u.level)].sort((a, b) => a - b))
   assert.deepEqual(unlocksBetween(9, 10).map(u => u.kind), ['pistol'])
   assert.equal(nextUnlock(1)?.level, 2)
@@ -74,7 +74,7 @@ test('XP crosses levels: the toast listeners hear it, the unlocked items are own
   assert.equal(grant.after, 7)
   assert.equal(grant.levelUps, 6)
   assert.deepEqual(heard, [7])
-  assert(loadProfile().owned.includes('gloves:work'), 'level 4 gloves')
+  assert(loadProfile().owned.includes('watch:tactical'), 'level 4 watch')
   assert.equal(loadProfile().ink, ink + CASE.duplicateRefund, 'the level 6 charm was already owned: refunded')
   assert.equal(loadProfile().peakLevel, 7)
   resetProfileCache()
@@ -89,7 +89,7 @@ test('XP stops at level 55 until a prestige; prestige resets the level, keeps un
   assert.equal(loadProfile().xp, MAX_XP, 'no XP past level 55')
   assert.equal(levelOf(loadProfile().xp).level, 55)
   const owned = [...loadProfile().owned], ink = loadProfile().ink
-  assert(owned.includes('gloves:midas'))
+  assert(owned.includes('camo:obsidian'))
   assert(prestigeNow())
   const after = loadProfile()
   assert.equal(after.prestige, 1)

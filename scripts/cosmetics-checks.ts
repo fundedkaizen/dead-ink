@@ -452,8 +452,8 @@ test('The case reel ticks and wins in sound, at the saved effects volume, silent
 
 test('Every kind has one Mythic in the case, at about one case in 250, and the odds line shows it', () => {
   const mythics = casePool().filter(item => item.rarity === 'mythic')
-  assert.deepEqual(mythics.map(item => item.kind).sort(), ['camo', 'charm', 'gloves', 'knife', 'watch'])
-  assert.equal(CATALOGUE.filter(item => item.rarity === 'mythic').length, 5)
+  assert.deepEqual(mythics.map(item => item.kind).sort(), ['camo', 'charm', 'knife', 'watch'])
+  assert.equal(CATALOGUE.filter(item => item.rarity === 'mythic').length, 4)
   assert.equal(CASE_WEIGHTS.mythic, 0.4)
   const odds = caseOdds()
   assert.deepEqual(odds.map(o => o.rarity), [...RARITIES], 'every rarity, Mythic last')

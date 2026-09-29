@@ -37,14 +37,14 @@ export const WEAPON_TIERS: readonly WeaponTier[] = [
 ]
 
 export type AccountMetric = 'bestRound' | 'bruteKills' | 'storms' | 'kills' | 'headshots' | 'editions'
-/** `reward`: a cosmetic the challenge unlocks as well as its Ink (gloves:brute). */
+/** `reward`: a cosmetic the challenge unlocks as well as its Ink. */
 export type AccountChallenge = { id: string; metric: AccountMetric; goal: number; ink: number; title: string; label: string; reward?: string }
 export const ACCOUNT_CHALLENGES: readonly AccountChallenge[] = [
   { id: 'round-10', metric: 'bestRound', goal: 10, ink: 250, title: 'Double Digits', label: 'Reach round 10' },
   { id: 'round-20', metric: 'bestRound', goal: 20, ink: 750, title: 'Deep Water', label: 'Reach round 20' },
   { id: 'round-30', metric: 'bestRound', goal: 30, ink: 2000, title: 'The Long Night', label: 'Reach round 30' },
   { id: 'brute-10', metric: 'bruteKills', goal: 10, ink: 500, title: 'Brute Force', label: 'Kill the Brute 10 times' },
-  { id: 'brute-25', metric: 'bruteKills', goal: 25, ink: 750, title: 'Brute Knuckles', label: 'Kill the Brute 25 times', reward: 'gloves:brute' },
+  { id: 'brute-25', metric: 'bruteKills', goal: 25, ink: 750, title: 'Brute Breaker', label: 'Kill the Brute 25 times' },
   { id: 'storm-5', metric: 'storms', goal: 5, ink: 500, title: 'Storm Chaser', label: 'Survive 5 Ink Storms' },
   { id: 'headshots-1000', metric: 'headshots', goal: 1000, ink: 1000, title: 'Headhunter', label: '1,000 headshot kills' },
   { id: 'kills-5000', metric: 'kills', goal: 5000, ink: 1500, title: 'Marathon', label: '5,000 kills' },
