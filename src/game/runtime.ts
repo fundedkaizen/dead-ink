@@ -355,6 +355,7 @@ export class MissionRuntime {
     if (this.coop?.isGuest) return this.coop.requestUse(station)
     const result = this.applyStation(station, 0)
     this.hud.notify(result.message,7)
+    if (this.state.run && result.message) this.campaignHud?.say(result.message, 6)
     if (!result.changed) return false
     this.weapons.cancel()
     this.stationEffects(station, 0, result.message)

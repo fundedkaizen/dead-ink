@@ -54,7 +54,8 @@ export type CameraAnchor = { id: string; position: Vec3; yaw: number; arc: numbe
 
 /** Panels the missions use as objectives: a fuse box, a laptop with the intel, a keycard on a desk. */
 export type PanelKind = 'power' | 'intel' | 'keycard' | 'alarm-panel' | 'twokey' | 'radio' | 'supply' | 'ammo'
-export type PanelAnchor = { id: string; kind: PanelKind; label: string; position: Vec3; facing: number; pair?: string }
+/** `area`: where it is, in words (the intel names a keycard's hiding place by it). */
+export type PanelAnchor = { id: string; kind: PanelKind; label: string; position: Vec3; facing: number; pair?: string; area?: string }
 
 /** Two players only: one gives a boost at `from`, the other climbs to `to` (over a wall, onto a roof). */
 export type BoostAnchor = { id: string; label: string; from: Vec3; to: Vec3 }

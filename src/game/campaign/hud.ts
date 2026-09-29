@@ -126,6 +126,8 @@ export class CampaignHud {
       case 'reach': { const zone = open.zone ? map.zones[open.zone] : undefined; return zone ? new THREE.Vector3(zone.x, 1.5, zone.z) : null }
       case 'use': {
         const feet = r.player.body.position
+        // A keycard is to be searched for: its marker shows only once the intel has told you where it is.
+        if ((open.panels ?? []).every(id => map.panels[id]?.kind === 'keycard') && !run.revealed) return null
         const stations = r.world.stations.filter(station => (open.panels ?? []).includes(station.id) && station.object.visible !== false)
         stations.sort((a, b) => a.point.distanceTo(feet) - b.point.distanceTo(feet))
         return stations[0]?.point.clone() ?? null

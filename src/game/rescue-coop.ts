@@ -616,7 +616,7 @@ export class RescueCoop {
       case 'snd':
         r.emit({ kind: m.k, position: m.p ? toVector(m.p) : undefined, radius: m.r, text: m.x, voice: m.v, speaker: m.s, weapon: m.w }, false)
         break
-      case 'note': r.hud.notify(m.x, m.s ?? 5); break
+      case 'note': r.hud.notify(m.x, m.s ?? 5); if (r.state.run) r.campaignHud?.say(m.x, m.s ?? 5); break
       case 'drop': r.weapons.addPickup(m.item); break
       case 'taken': r.weapons.removePickup(m.id); break
       case 'heal':

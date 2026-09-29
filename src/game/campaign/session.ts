@@ -308,7 +308,10 @@ export class CampaignSession {
         if (run.used.includes(station.id)) return { changed: false, message: '' }
         run.used.push(station.id); run.revealed = true
         const areas = [...new Set(run.cells.map(cell => this.map.cells[cell].area))]
-        return { changed: true, message: `Found it: ${name} ${this.mission.hostages > 1 ? 'are' : 'is'} held in ${areas.join(' and ')}. Marked on your screen.` }
+        // It also says where any keycard the team still lacks is kept.
+        const cards = Object.entries(run.cards).filter(([card]) => !run.held.includes(card)).map(([, spot]) => this.map.panels[spot]?.area).filter(Boolean)
+        const card = cards.length ? ` The keycard is kept in ${cards.join(' and ')}.` : ''
+        return { changed: true, message: `Found it: ${name} ${this.mission.hostages > 1 ? 'are' : 'is'} held in ${areas.join(' and ')}. Marked on your screen.${card}` }
       }
       case 'keycard': {
         if (run.used.includes(station.id)) return { changed: false, message: '' }
@@ -381,7 +384,7 @@ export class CampaignSession {
         const card = this.mission.keycards.find(entry => entry.id === locked.card)
         const has = !!locked.card && run.held.includes(locked.card)
         targets.push({ object: door, point, kind: 'mission', descending: false, label: has ? `Swipe ${card?.label ?? 'the keycard'}` : `Locked · needs ${card?.label ?? 'a keycard'}${breach}`,
-          use: () => { if (!has) { r.hud.notify(`Locked. Find ${card?.label ?? 'the keycard'}, or breach it (B) if you have a charge.`, 4); return false }
+          use: () => { if (!has) { this.say(`Locked. Find ${card?.label ?? 'the keycard'}, or breach it (B) if you have a charge.`, 4); return false }
             this.act(`door:${index}:card`); return true } })
       } else {
         const slow = locked.lock === 'twokey'
@@ -396,7 +399,7 @@ export class CampaignSession {
       const point = door.localToWorld(new THREE.Vector3(0, 1.2, 0))
       if (point.distanceTo(eye) > 2.6) continue
       targets.push({ object: door, point, kind: 'mission', descending: false, label: `Locked down by the alarm${this.charges > 0 ? ' · B: breach' : ''}`,
-        use: () => { r.hud.notify('The alarm locked it. Silence the alarm at a panel, or breach it (B).', 4); return false } })
+        use: () => { this.say('The alarm locked it. Silence the alarm at a panel, or breach it (B).', 4); return false } })
     }
     // Takedowns from behind.
     const forward = r.view.getWorldDirection(new THREE.Vector3()).setY(0).normalize()
@@ -431,7 +434,7 @@ export class CampaignSession {
         use: () => { this.climb(id); return true } })
       else if (giver === undefined) targets.push({ object: r.world.root, point: from.clone().setY(from.y + 0.8), kind: 'mission', descending: false,
         label: r.coop?.paired ? `Give a boost · ${boost.label.toLowerCase()}` : 'Boost spot · needs two of you',
-        use: () => { if (!r.coop?.paired) { r.hud.notify('A boost needs a teammate: one lifts, the other climbs. Invite a friend from Co-op.', 4); return false }
+        use: () => { if (!r.coop?.paired) { this.say('A boost needs a teammate: one lifts, the other climbs. Invite a friend from Co-op.', 4); return false }
           this.boosting = id; r.player.movementLocked = true; r.cancelInput(); this.act(`boost:${id}:give`); return true } })
     }
     return targets
@@ -486,7 +489,7 @@ export class CampaignSession {
     r.player.body.teleport(to)
     r.player.actions.syncCamera(r.view)
     r.emit({ kind: 'ladder', position: to.clone(), radius: NOISE.walk }, true)
-    r.hud.notify(`Over. ${boost.label}.`, 3)
+    this.say(`Over. ${boost.label}.`, 3)
     this.act(`boost:${id}:done`)
   }
 
@@ -502,7 +505,7 @@ export class CampaignSession {
     if (!door) return false
     this.charges--
     this.act(`door:${r.player.actions.doors.indexOf(door)}:breach`)
-    r.hud.notify(`Charge set: ${BREACH_FUSE} seconds. Stand back.`, 3)
+    this.say(`Charge set: ${BREACH_FUSE} seconds. Stand back.`, 3)
     return true
   }
 
@@ -517,10 +520,10 @@ export class CampaignSession {
       const d = feet.distanceTo(new THREE.Vector3(...hostage.position))
       if (d < distance) { distance = d; best = index }
     })
-    if (best < 0) { r.hud.notify('No freed hostage near you.', 2); return false }
+    if (best < 0) { this.say('No freed hostage near you.', 2); return false }
     const waiting = run.hostages[best].waiting
     this.act(`hostage:${best}:${waiting ? 'follow' : 'wait'}`)
-    r.hud.notify(waiting ? `${this.hostageName(best)}: "Right behind you."` : `${this.hostageName(best)}: "I'll stay here. Don't be long."`, 3)
+    this.say(waiting ? `${this.hostageName(best)}: "Right behind you."` : `${this.hostageName(best)}: "I'll stay here. Don't be long."`, 3)
     return true
   }
 
@@ -536,7 +539,7 @@ export class CampaignSession {
     const r = this.r, run = this.run, state = r.state
     if (!run || state.phase !== 'active') return
     const [kind, a, b, c] = id.split(':')
-    const note = (text: string) => { if (from) r.coop?.link.send({ t: 'note', x: text, s: 4 }, { to: from }); else r.hud.notify(text, 4) }
+    const note = (text: string) => { if (from) r.coop?.link.send({ t: 'note', x: text, s: 4 }, { to: from }); else this.say(text, 4) }
     if (kind === 'door') {
       const door = r.player.actions.doors[Number(a)]
       if (!door) return
@@ -555,7 +558,7 @@ export class CampaignSession {
         if (ready.length >= 2) {
           for (const [player, entry] of ready) this.takedown(entry.guard, entry.direction, player)
           this.syncs.clear()
-          r.coop?.link.send({ t: 'note', x: 'Synced takedown.', s: 3 }); r.hud.notify('Synced takedown.', 3)
+          r.coop?.link.send({ t: 'note', x: 'Synced takedown.', s: 3 }); this.say('Synced takedown.', 3)
         } else note('Ready. Your partner has three seconds to take theirs (F on their guard).')
       } else this.takedown(Number(a), new THREE.Vector3(x, 0, z), from)
     } else if (kind === 'hostage') {
@@ -589,7 +592,7 @@ export class CampaignSession {
     if (!this.boosting) return
     this.boosting = null
     this.r.player.movementLocked = false
-    this.r.hud.notify('Your teammate is over. You can move again.', 3)
+    this.say('Your teammate is over. You can move again.', 3)
   }
 
   private takedown(index: number, direction: THREE.Vector3, by: number) {
@@ -612,7 +615,7 @@ export class CampaignSession {
       const moved = r.player.body.position.distanceTo(hold.from) > 0.6
       if (!r.player.useHeld || moved || r.state.phase !== 'active') {
         this.hold = null
-        if (moved || !r.player.useHeld) r.hud.notify('Stopped.', 1.2)
+        if (moved || !r.player.useHeld) this.say('Stopped.', 1.2)
       } else {
         hold.elapsed += dt
         r.interactionTime = Math.max(r.interactionTime, 0.2)
@@ -697,8 +700,14 @@ export class CampaignSession {
     }
   }
 
+  /** A line the player must see (the mission HUD's captions are for screen readers unless marked visible). */
+  say(text: string, seconds = 4) {
+    this.r.hud.notify(text, seconds)
+    this.r.campaignHud?.say(text, seconds)
+  }
+
   private announce(text: string) {
-    this.r.hud.notify(text, 5)
+    this.say(text, 5)
     if (this.r.coop?.hosting) this.r.coop.link.send({ t: 'note', x: text, s: 5 })
   }
 
@@ -758,12 +767,12 @@ export class CampaignSession {
   /** Ammunition, taken on the spot (each crate refills you once a minute). */
   ammo(station: Station) {
     const r = this.r, last = this.ammoTaken.get(station.id)
-    if (last !== undefined && r.state.elapsed - last < 60) { r.hud.notify('Empty for now. It refills in a minute.', 3); return false }
+    if (last !== undefined && r.state.elapsed - last < 60) { this.say('Empty for now. It refills in a minute.', 3); return false }
     const snapshot = r.weapons.snapshot()
     snapshot.slots = snapshot.slots.map(item => item ? { ...item, reserve: Math.max(item.reserve, fullReserve(item)) } : null)
     r.weapons.restore(snapshot)
     this.ammoTaken.set(station.id, r.state.elapsed)
-    r.hud.notify('Ammunition topped up.', 3)
+    this.say('Ammunition topped up.', 3)
     return true
   }
 

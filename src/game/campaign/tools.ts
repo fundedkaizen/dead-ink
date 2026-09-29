@@ -73,13 +73,13 @@ export class CampaignTools {
     if (!campaign?.run || event.repeat) return false
     this.held.add(event.code)
     switch (event.code) {
-      case 'KeyC': this.crouched = !this.crouched; r.hud.notify(this.crouched ? 'Crouched: slower, quieter, harder to see.' : 'Standing.', 1.4); return true
+      case 'KeyC': this.crouched = !this.crouched; r.campaign?.say(this.crouched ? 'Crouched: slower, quieter, harder to see.' : 'Standing.', 1.4); return true
       case 'KeyQ': case 'KeyE':
         if (r.aimingNow) return false
         this.leanWanted = event.code === 'KeyQ' ? -1 : 1
         return true
       case 'KeyT': return this.throwStone()
-      case 'KeyB': if (!campaign.breach()) r.hud.notify(campaign.charges > 0 ? 'Stand at a locked door to set a charge.' : 'No breach charges left.', 2.5); return true
+      case 'KeyB': if (!campaign.breach()) r.campaign?.say(campaign.charges > 0 ? 'Stand at a locked door to set a charge.' : 'No breach charges left.', 2.5); return true
       case 'KeyH': campaign.command(); return true
       case 'KeyX': this.toggleDrone(); return true
       default: return false
@@ -88,13 +88,13 @@ export class CampaignTools {
 
   private throwStone() {
     const r = this.r, campaign = r.campaign!
-    if (!campaign.takeStone()) { r.hud.notify('No stones left.', 2); return true }
+    if (!campaign.takeStone()) { r.campaign?.say('No stones left.', 2); return true }
     const direction = r.view.getWorldDirection(new THREE.Vector3())
     const mesh = new THREE.Mesh(this.stoneGeometry, this.stoneMaterial)
     mesh.position.copy(r.view.position).addScaledVector(direction, 0.4)
     this.scene.add(mesh)
     this.stones.push({ mesh, velocity: direction.multiplyScalar(15).add(new THREE.Vector3(0, 3.2, 0)), age: 0 })
-    r.hud.notify(`Stone thrown. ${campaign.stones} left.`, 1.6)
+    r.campaign?.say(`Stone thrown. ${campaign.stones} left.`, 1.6)
     return true
   }
 
@@ -102,7 +102,7 @@ export class CampaignTools {
     const r = this.r
     if (this.flying) { this.land(); return }
     if (!r.campaign?.mission.tools.drone) return
-    if (this.cooldown > 0) { r.hud.notify(`The drone is recharging: ${Math.ceil(this.cooldown)} s.`, 2); return }
+    if (this.cooldown > 0) { r.campaign?.say(`The drone is recharging: ${Math.ceil(this.cooldown)} s.`, 2); return }
     this.drone = DRONE.seconds
     this.droneBefore.copy(r.player.body.position)
     this.dronePosition.copy(r.view.position)
@@ -110,7 +110,7 @@ export class CampaignTools {
     r.weapons.setHidden(true)
     r.player.movementLocked = true
     r.cancelInput()
-    r.hud.notify('Scout drone up: WASD to fly, X to land. Every guard it sees is marked for the team.', 4)
+    r.campaign?.say('Scout drone up: WASD to fly, X to land. Every guard it sees is marked for the team.', 4)
   }
 
   private land() {
@@ -121,7 +121,7 @@ export class CampaignTools {
     this.droneModel.visible = false
     r.weapons.setHidden(false)
     if (!r.campaign?.boosting) r.player.movementLocked = false
-    r.hud.notify('Drone down.', 1.5)
+    r.campaign?.say('Drone down.', 1.5)
   }
 
   /** Each playing frame, before the guards look: crouch and lean ease in, and move the view (removeCamera undoes it). */
