@@ -1,17 +1,19 @@
-import { updateProfile } from '../zombies/cosmetics/profile'
+import { grantReward as payInk, grantXp as payXp } from '../zombies/cosmetics/profile'
 import type { RunStats, StealthRating } from './stealth'
 
 /**
- * What a finished rescue pays, through the profile Dead Ink keeps (Ink). Local stand-ins until the shared
- * progression lands (the zombies side's grantReward, grantXp and awardsFor): the Ink goes into the same
- * profile; XP has nowhere to go yet and is only reported on the summary.
+ * What a finished rescue pays, through the shared progression: Ink into the same wallet as Dead Ink's Shop and
+ * cases, and XP towards the same Career levels and prestige (with its level-up toast).
  */
-export function grantReward(ink: number, _reason: string) {
+export function grantReward(ink: number, reason: string) {
   if (!(ink > 0)) return
-  updateProfile(profile => ({ ...profile, ink: profile.ink + Math.floor(ink) }))
+  payInk(Math.floor(ink), reason)
 }
 
-export function grantXp(_amount: number, _reason: string) { /* no XP store yet */ }
+export function grantXp(amount: number, reason: string) {
+  if (!(amount > 0)) return
+  payXp(Math.floor(amount), reason)
+}
 
 export type RescueAwardStats = RunStats & { mode: 'rescue'; mission: string; difficulty: string; rating: StealthRating }
 
