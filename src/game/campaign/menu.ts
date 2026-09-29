@@ -39,7 +39,6 @@ export function campaignMenuCopy(r: MissionRuntime, copy: MenuCopy): MenuCopy {
       const best = store.best(mission.id, d)
       return `<div><dt>${DIFFICULTY_LABELS[d]}</dt><dd>${best ? `${formatTime(best.time)} ${best.stars.map(star).join('')}` : '—'}</dd></div>`
     }).join('')
-    const loaded = campaign().mission.id === mission.id && campaign().run?.difficulty === difficulty
     page.innerHTML = `<div class="campaign-page">
       <div class="campaign-difficulty" role="group" aria-label="Difficulty">${DIFFICULTIES.map(d => `<button type="button" data-difficulty="${d}" aria-pressed="${d === difficulty}">${DIFFICULTY_LABELS[d]}</button>`).join('')}</div>
       <p class="campaign-legend">${difficultyNote(difficulty)}</p>
@@ -49,7 +48,7 @@ export function campaignMenuCopy(r: MissionRuntime, copy: MenuCopy): MenuCopy {
         <div><p><b>${mission.number}. ${escape(mission.name)}</b> · ${escape(mission.estimate)}</p><p>${escape(mission.briefing)}</p>
           <p>Stars: finish under ${formatTime(mission.par[difficulty])} · never raise the alarm · the hostage never hurt.</p>
           <dl class="campaign-bests">${bests}</dl>
-          <div class="mission-actions">${guest ? '<p>The host picks the mission; yours follows theirs.</p>' : `<button type="button" class="menu-primary" data-play ${store.isUnlocked(mission.id) ? '' : 'disabled'}>${loaded && r.state.phase === 'active' && r.state.elapsed < 1 ? 'Ready: back to start' : `Play ${escape(mission.name)} · ${DIFFICULTY_LABELS[difficulty]}`}</button>`}</div>
+          <div class="mission-actions">${guest ? '<p>The host picks the mission; yours follows theirs.</p>' : `<button type="button" class="menu-primary" data-play ${store.isUnlocked(mission.id) ? '' : 'disabled'}>Play ${escape(mission.name)} · ${DIFFICULTY_LABELS[difficulty]}</button>`}</div>
         </div>
       </div></div>`
   }
@@ -82,7 +81,9 @@ export function campaignMenuCopy(r: MissionRuntime, copy: MenuCopy): MenuCopy {
   const play = async (id: string, d: Difficulty) => {
     if (r.coop?.isGuest && r.coop.paired) return
     campaign().store.select(id, d)
-    await r.loadMission(id, d)
+    // Already loaded and not yet begun: nothing to reload.
+    const fresh = campaign().mission.id === id && campaign().run?.difficulty === d && r.state.phase === 'active' && r.state.elapsed < 1
+    if (!fresh) await r.loadMission(id, d)
     chosen = id; difficulty = d
     renderPage()
     lastHome = ''
@@ -154,7 +155,9 @@ export function previewSvg(mission: MissionDef, map: MapModule) {
   const spawns = mission.spawns.map(id => map.spawns[id]).filter(Boolean).map(s => `<path d="M${x(s.position[0])} ${(+z(s.position[2]) - 5).toFixed(1)}l4 7h-8z" fill="#111"/>`).join('')
   const cells = mission.cells.map(id => map.cells[id]).filter(Boolean).map(c => `<rect x="${(+x(c.hostage[0]) - 3).toFixed(1)}" y="${(+z(c.hostage[2]) - 3).toFixed(1)}" width="6" height="6" fill="none" stroke="#2878d0" stroke-width="1.4"/>`).join('')
   const out = map.extractions[mission.extraction]
-  const exit = out ? `<g transform="translate(${x(out.park[0])},${z(out.park[2])})"><circle r="6" fill="#fff" stroke="#111" stroke-width="1.2"/><path d="M-3 0h6M0 -3v6" stroke="#111" stroke-width="1.6"/></g><text x="${(+x(out.park[0]) + 8).toFixed(1)}" y="${(+z(out.park[2]) + 3).toFixed(1)}">${out.kind === 'jeep' ? 'Jeep' : out.kind === 'boat' ? 'Boat' : 'Helicopter'}</text>` : ''
+  // The way out's label sits on whichever side of its mark has room.
+  const flip = out ? +x(out.park[0]) > width - 60 : false
+  const exit = out ? `<g transform="translate(${x(out.park[0])},${z(out.park[2])})"><circle r="6" fill="#fff" stroke="#111" stroke-width="1.2"/><path d="M-3 0h6M0 -3v6" stroke="#111" stroke-width="1.6"/></g><text text-anchor="${flip ? 'end' : 'start'}" x="${(+x(out.park[0]) + (flip ? -8 : 8)).toFixed(1)}" y="${(+z(out.park[2]) + 3).toFixed(1)}">${out.kind === 'jeep' ? 'Jeep' : out.kind === 'boat' ? 'Boat' : 'Helicopter'}</text>` : ''
   const panels = mission.panels.map(id => map.panels[id]).filter(p => p && ['power', 'intel', 'twokey'].includes(p.kind)).map(p => `<circle cx="${x(p.position[0])}" cy="${z(p.position[2])}" r="2.4" fill="#111"/>`).join('')
   return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Map of ${mission.name}: north is up">${buildings}${cells}${panels}${spawns}${exit}</svg>`
 }
