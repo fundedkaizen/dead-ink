@@ -10,4 +10,12 @@
 .level-toast-text b { font-size: 22px; font-family: Georgia, 'Times New Roman', serif; }
 .level-toast-text span { font-size: 14px; font-weight: 700; }
 .level-toast-text em { font-style: normal; font-size: 12px; margin-top: 3px; border-top: 1.5px dashed #111; padding-top: 3px; }
+/* A phone: compact, and under the round, its objective and the mini map rather than over them. */
+@media (max-width: 640px) {
+  .level-toast { top: 122px; gap: 8px; padding: 4px 12px 4px 8px; max-width: calc(100vw - 48px); }
+  .level-toast-badge svg:first-child { width: 38px; height: 38px; }
+  .level-toast-text b { font-size: 17px; }
+  .level-toast-text span { font-size: 12px; }
+  .level-toast-text em { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+}
 body[data-reduced-motion='true'] .level-toast { transition: opacity 0.2s; transform: translate(-50%, 0); }

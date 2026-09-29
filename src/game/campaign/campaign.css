@@ -41,8 +41,8 @@
 .world-marker.campaign-hostage-marker.down svg { animation: campaign-down 0.8s ease-in-out infinite alternate; }
 @keyframes campaign-down { from { opacity: 0.45; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .world-marker.campaign-hostage-marker.down svg { animation: none; } }
-/* Above the shared ping button (bottom right) and clear of the weapon readout. */
-.campaign-touch { position: absolute; right: 14px; bottom: 196px; display: none; gap: 8px; flex-direction: column; pointer-events: auto; }
+/* Above the shared ping button (bottom right, 48 px tall at 196 px up) and clear of the weapon readout. */
+.campaign-touch { position: absolute; right: 14px; bottom: 256px; display: none; gap: 8px; flex-direction: column; pointer-events: auto; }
 .campaign-touch button { min-width: 96px; min-height: 44px; padding: 8px 12px; font: 600 13px var(--notes); color: var(--ink); background: #ffffffe6; border: 1.5px solid var(--ink); border-radius: 4px 6px 3px 5px; }
 @media (pointer: coarse) { .campaign-touch { display: flex; } }
 @media (max-width: 640px) {

@@ -39,7 +39,8 @@ export function reportFromState(state: MenuState): GameReport {
 
 /** "New best!" stamps: every high score this game set (first place), and any other top-ten places. */
 function recordsHtml(report: GameReport) {
-  const placed = report.records ?? []
+  // A new best round already wears the New record stamp by the round reached: not twice.
+  const placed = (report.records ?? []).filter(p => !(report.newRecord && p.category === 'bestRound' && p.rank === 1))
   if (!placed.length) return ''
   const label = (id: string) => RECORD_CATEGORIES.find(c => c.id === id)?.label ?? id
   const firsts = placed.filter(p => p.rank === 1), others = placed.filter(p => p.rank > 1)
