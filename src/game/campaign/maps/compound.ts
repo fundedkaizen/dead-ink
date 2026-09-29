@@ -48,7 +48,7 @@ const helicopter = (id: string, label: string, x: number, z: number, heading: nu
   seats: [0.3, -0.35].map((along): Vec3 => [x + Math.cos(heading) * 0.78 + Math.sin(heading) * along, 0.74, z - Math.sin(heading) * 0.78 + Math.cos(heading) * along]),
   park: [x, 0, z], heading,
   route: [[x, 0, z], [x, 6, z], [x + Math.sin(heading) * 30, 22, z + Math.cos(heading) * 30], [x + Math.sin(heading) * 90, 45, z + Math.cos(heading) * 90]],
-  camera: { target: [x, 3, z], offset: [-14, 8, 18] },
+  camera: { target: [x, 3, z], offset: [-10, 5, 13] },
   zone: { x, z, r: 11 }, call: { position: call, facing: 0 }, eta: 75,
 })
 const extractions: ExtractionAnchor[] = [

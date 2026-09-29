@@ -592,7 +592,8 @@ export class MissionRuntime {
         wheel.rotation.z = -this.state.escapeProgress / jeep.userData.wheelRadius
       }
     }
-    this.escapeDust.update(cinematicStep, position, this.escape.rotation, this.escape.speed)
+    // Road dust is the jeep's; a helicopter kicks up its rotor wash and a boat its wake (campaign/visuals.ts).
+    this.escapeDust.update(cinematicStep, position, this.escape.rotation, vehicle ? 0 : this.escape.speed)
     // Keep the player aboard for world state, while the camera stays outside.
     this.player.body.teleport(new THREE.Vector3(-0.35, -0.12, -0.46).applyQuaternion(this.escape.rotation).add(position))
     if (playing) {
