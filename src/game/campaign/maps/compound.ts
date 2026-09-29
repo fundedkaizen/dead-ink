@@ -153,7 +153,7 @@ const guards: GuardAnchor[] = [
   g('court-patrol', 'Loading court patrol', [[14, 0, 10], [42, 0, 10], [42, 0, 20], [14, 0, 20]], 'ak'),
   g('court-night', 'Loading court night patrol', [[42, 0, 20], [14, 0, 20]], 'smg', { tier: 'hard' }),
   g('yard-lz', 'North-yard watch', [[-40, 0, -24], [-32, 0, -16]], 'ak', { tier: 'hard' }),
-  g('south-night', 'South field patrol', [[0, 0, 40], [60, 0, 40]], 'ak', { tier: 'nightmare' }),
+  g('south-night', 'South field patrol', [[30, 0, 40], [60, 0, 40]], 'ak', { tier: 'nightmare' }),
   g('west-night', 'West yard night patrol', [[-56, 0, -24], [-56, 0, 8], [-44, 0, 8], [-44, 0, -24]], 'smg', { tier: 'nightmare' }),
   // More of the barracks response for Hard and Nightmare alarms (the world has four).
   ...([[141.5, FLOOR, 2.2, 'hard'], [144.5, FLOOR, 4.1, 'hard'], [141.5, FLOOR, 4.1, 'nightmare'], [144.5, FLOOR, 2.2, 'nightmare']] as const).map(([x, y, z, tier], i) =>
