@@ -959,10 +959,11 @@ export class EnemyDirector {
   }
 
   private advancePlans() {
-    const started = performance.now(), deadline = started + 3
+    const now = this.context.clock ?? (() => performance.now())
+    const started = now(), deadline = started + 3
     const pending = [...this.plans.entries()]
     let index = 0
-    while (pending.length && performance.now() < deadline) {
+    while (pending.length && now() < deadline) {
       index %= pending.length
       const [enemy, plan] = pending[index]
       if (this.plans.get(enemy) !== plan) { pending.splice(index, 1); continue }
@@ -976,7 +977,7 @@ export class EnemyDirector {
         pending.splice(index, 1)
       } else index++
     }
-    this.navigationFrameMs = performance.now() - started
+    this.navigationFrameMs = now() - started
     this.navigationMaxFrameMs = Math.max(this.navigationMaxFrameMs, this.navigationFrameMs)
   }
 
