@@ -36,46 +36,15 @@ export const THUMB = { base: new THREE.Vector3(0.028, 0.02, 0.006), lengths: [0.
 /** The palm: an ellipsoid a little flatter than a mitten. */
 export const PALM = { centre: new THREE.Vector3(0, 0.038, 0.001), radii: new THREE.Vector3(0.036, 0.042, 0.0145) } as const
 
-const smooth = (a: number, b: number, v: number) => { const t = Math.min(1, Math.max(0, (v - a) / (b - a))); return t * t * (3 - 2 * t) }
-/** The back of the hand's thickness from the wrist (0) to the knuckles (1), as a share of PALM.radii.z. */
-const backDepth = (along: number) => 0.52 + 0.16 * along
-/** The width at `along`: narrow where the wrist goes into the sleeve, full from mid-palm to the knuckles. */
-const taperAt = (along: number) => 0.72 + 0.28 * smooth(0, 0.45, along)
-
 /**
- * The palm's shape from a point on a unit sphere: a rounded slab rather than an egg (squarer across and along),
- * the fleshy palm side rounder than the flat back, narrowing into the wrist, with a ridge of knuckles across the
- * back where the fingers start.
+ * The palm's shape from a point on a unit sphere: a rounded slab rather than an egg (squarer across and along,
+ * flatter over the back), a little narrower at the wrist than at the knuckles.
  */
 export function palmShape(unit: THREE.Vector3, out = new THREE.Vector3()) {
   const shape = (v: number, e: number) => Math.sign(v) * Math.abs(v) ** e
-  const back = unit.z < 0
-  const x = shape(unit.x, 0.55), y = shape(unit.y, 0.6), z = shape(unit.z, back ? 0.28 : 0.8)
-  const along = (y + 1) / 2
-  const px = PALM.centre.x + x * PALM.radii.x * taperAt(along), py = PALM.centre.y + y * PALM.radii.y
-  // The heel of the hand thins where it goes into the wrist.
-  const heel = 0.7 + 0.3 * smooth(0, 0.3, along)
-  let pz = PALM.centre.z + z * PALM.radii.z * heel
-  if (back) {
-    // Flatter and thinner over the back, thinnest at the wrist; each knuckle raises a bump at the top.
-    let knuckles = 0
-    for (const finger of FINGERS) knuckles += Math.exp(-(((px - finger.base.x) / 0.0055) ** 2))
-    const ridge = smooth(0.7, 0.93, along) * (1 - 0.6 * smooth(0.97, 1, along))
-    pz = PALM.centre.z + z * PALM.radii.z * heel * backDepth(along) - Math.abs(z) * 0.006 * ridge * Math.min(1, knuckles)
-  }
-  return out.set(px, py, pz)
-}
-
-/**
- * A point on the back of the hand `across` its width (-1 to 1, of the width there) and `along` it (0 wrist, 1
- * knuckles), lifted `lift` metres off the skin: for the tendons and knuckle lines drawn on it.
- */
-function backPoint(across: number, along: number, lift = 0.0007) {
-  const unitY = Math.sign(along * 2 - 1) * Math.abs(along * 2 - 1) ** (1 / 0.6)
-  const unitX = Math.sign(across) * Math.abs(across) ** (1 / 0.55)
-  const unit = new THREE.Vector3(unitX, unitY, -Math.sqrt(Math.max(0, 1 - unitX * unitX - unitY * unitY)))
-  if (unit.lengthSq() > 1) unit.normalize()
-  return palmShape(unit).add(new THREE.Vector3(0, 0, -lift))
+  const x = shape(unit.x, 0.55), y = shape(unit.y, 0.6), z = shape(unit.z, 0.8)
+  const taper = 0.84 + 0.16 * (y + 1) / 2
+  return out.set(PALM.centre.x + x * PALM.radii.x * taper, PALM.centre.y + y * PALM.radii.y, PALM.centre.z + z * PALM.radii.z)
 }
 
 /** Rings round each finger tube: along each segment (joints included), and round the tube. */
@@ -165,9 +134,8 @@ export class InkHand {
   constructor(name: string, material: THREE.Material, mirror = false) {
     this.root.name = name
     if (mirror) this.root.scale.x = -1
-    // The palm: a UV sphere squashed into the palm's shape, fixed; then five tubes, re-posed. Fine enough across
-    // the back for its knuckles to stand up.
-    const palm = new THREE.SphereGeometry(1, 28, 16)
+    // The palm: a UV sphere squashed into the palm's ellipsoid, fixed; then five tubes, re-posed.
+    const palm = new THREE.SphereGeometry(1, 14, 10)
     const palmPos = palm.getAttribute('position') as THREE.BufferAttribute, palmIndex = palm.getIndex()!
     const unit = new THREE.Vector3(), shaped = new THREE.Vector3()
     for (let i = 0; i < palmPos.count; i++) palmPos.setXYZ(i, ...palmShape(unit.fromBufferAttribute(palmPos, i), shaped).toArray())
@@ -198,10 +166,8 @@ export class InkHand {
     silhouette.name = `${name} contour`
     silhouette.frustumCulled = false
     this.mesh.add(silhouette)
-    // Fine ink: a crease across the back of every joint and the outline of each nail (5 x (3 creases + 4 nail edges)),
-    // then, fixed, the tendons over the back of the hand and the line of each knuckle.
-    this.linePositions = new Float32Array((5 * 7 + BACK_LINES) * 2 * 3)
-    writeBackInk(this.linePositions, 5 * 7)
+    // Fine ink: a crease across the back of every joint and the outline of each nail (5 x (3 creases + 4 nail edges)).
+    this.linePositions = new Float32Array(5 * 7 * 2 * 3)
     this.lineGeometry.setAttribute('position', new THREE.BufferAttribute(this.linePositions, 3))
     this.lines = new THREE.LineSegments(this.lineGeometry, lineInk)
     this.lines.name = `${name} creases and nails`
@@ -309,24 +275,6 @@ export class InkHand {
   dispose() {
     this.root.removeFromParent()
     this.geometry.dispose(); this.lineGeometry.dispose()
-  }
-}
-/** The back of the hand's ink: three tendons of three strokes, and a two-stroke arc over each of the four knuckles. */
-const TENDONS = [0, 1, 2], BACK_LINES = TENDONS.length * 3 + 4 * 2
-function writeBackInk(q: Float32Array, from: number) {
-  let line = from
-  const put = (a: THREE.Vector3, b: THREE.Vector3) => { a.toArray(q, line * 6); b.toArray(q, line * 6 + 3); line++ }
-  const across = (x: number, along: number) => x / (PALM.radii.x * taperAt(along))
-  // Each tendon fans out from near the middle of the wrist to its knuckle, showing only over the upper back.
-  for (const f of TENDONS) {
-    const x = FINGERS[f].base.x
-    const points = [0.5, 0.63, 0.75, 0.86].map(along => backPoint(across(x * (0.45 + 0.55 * (along - 0.2) / 0.66), along), along))
-    for (let i = 0; i < 3; i++) put(points[i], points[i + 1])
-  }
-  for (const finger of FINGERS) {
-    const x = finger.base.x, along = 0.9
-    const a = backPoint(across(x - 0.0048, along), along), b = backPoint(across(x, along + 0.015), along + 0.015), c = backPoint(across(x + 0.0048, along), along)
-    put(a, b); put(b, c)
   }
 }
 const lineInk = new THREE.LineBasicMaterial({ color: penPalette.ink, toneMapped: false })
