@@ -365,7 +365,11 @@ export class MissionRuntime {
 
   /** A station's effect on the mission (the host's, for itself or guest `by`): the campaign's rules, then the classic ones. */
   applyStation(station: Station, by: number) {
-    return this.campaign?.use(station, by) ?? useStation(this.state, station.kind, station.id)
+    const result = this.campaign?.use(station, by) ?? useStation(this.state, station.kind, station.id)
+    // The campaign's objectives count every station used (the camera computers, the gate).
+    const run = this.state.run
+    if (result.changed && run && !run.used.includes(station.id)) run.used.push(station.id)
+    return result
   }
 
   /** What a station that changed the mission brings, whoever used it (co-op: `by`, a guest through the host). */

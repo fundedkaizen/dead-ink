@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { shotRadius } from './campaign/stealth'
+import { suppressorModel } from './campaign/detail'
 import { applyPenMaterial, createPenSilhouette, penPalette } from '../render/ballpoint'
 import { disposeGun, type Gun } from '../lab/weapons/models'
 import type { WeaponContext, WeaponFrame, WeaponItem, WeaponName, WeaponSnapshot } from './types'
@@ -335,6 +336,9 @@ export class FirstPersonWeapons {
         this.partRotation.set(part, part.rotation.clone())
       }
       this.flash.position.copy(this.model.userData.muzzle).z += 0.035
+      // The rescue campaign's suppressed pistol: a can on the muzzle, and a small, dim flash at its end.
+      this.flash.scale.setScalar(this.current.suppressed ? 0.45 : 1)
+      if (this.current.suppressed) { this.model.add(suppressorModel(this.model.userData.muzzle)); this.flash.position.z += 0.17 }
       this.dress()
       if (outgoing) this.model.visible = false
       // The Deadline: a second Magnum in the left hand, the right hand's mirror image.

@@ -667,3 +667,15 @@ export function dogGear(root: THREE.Object3D) {
   const geometry = mergeGeometries([colour(collar, 0xd0302a), colour(gearPiece(new THREE.SphereGeometry(0.025, 8, 6), [0, 0.66, 0.4]), 0xc9c6bd)])!
   root.add(new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false })))
 }
+
+/** A suppressor for the campaign's pistol: a knurled can with end caps and a thread collar, on the muzzle. */
+export function suppressorModel(muzzle: THREE.Vector3) {
+  const d = new Draft('Suppressor')
+  d.solid(new THREE.CylinderGeometry(0.0125, 0.0125, 0.012, 12), [muzzle.x, muzzle.y, muzzle.z + 0.006], 'paper', 'detail', [Math.PI / 2, 0, 0], true)
+  d.solid(new THREE.CylinderGeometry(0.019, 0.019, 0.16, 16), [muzzle.x, muzzle.y, muzzle.z + 0.09], 'paper', 'edge', [Math.PI / 2, 0, 0], true)
+  for (const z of [0.02, 0.165]) d.line(Array.from({ length: 16 }, (_, i): Point => [muzzle.x + Math.cos(i / 16 * Math.PI * 2) * 0.0195, muzzle.y + Math.sin(i / 16 * Math.PI * 2) * 0.0195, muzzle.z + z]), 'detail', true)
+  for (let i = 0; i < 6; i++) d.line([[muzzle.x - 0.0195, muzzle.y + 0.004 - i * 0.002, muzzle.z + 0.05 + i * 0.012], [muzzle.x - 0.0195, muzzle.y - 0.004 - i * 0.002, muzzle.z + 0.056 + i * 0.012]], 'mesh')
+  const can = d.finish()
+  can.userData.noCollision = true
+  return can
+}

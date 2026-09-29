@@ -9,14 +9,14 @@ import type { EnemyActor } from '../src/game/actors'
 import { CollisionWorld } from '../src/player/collision'
 import type { PlayerSense, SoundEvent } from '../src/game/types'
 import { CampaignStore, CAMPAIGN_KEY, sanitizeProgress, formatTime } from '../src/game/campaign/progress'
-import { MISSIONS, MISSION_IDS, mapFor, missionById } from '../src/game/campaign/missions'
+import { MAPS, MISSIONS, MISSION_IDS, mapFor, missionById } from '../src/game/campaign/missions'
 import { DIFFICULTY, missionReward, rulesFor } from '../src/game/campaign/difficulty'
 import { createRun, resolveGuards, updateObjectives, currentStage, objectiveLine, hurtHostage, bleedHostage, reviveHostage, HOSTAGE_BLEED_SECONDS } from '../src/game/campaign/run'
 import { NOISE, detectionRate, footstepRadius, shotRadius, starsFor, stealthRating, SUSPECT_AT, type RunStats } from '../src/game/campaign/stealth'
 import { exportSave, importSave } from '../src/game/save-transfer'
 import { FollowEscort } from '../src/game/campaign/escort'
 import type { HostageActor } from '../src/game/hostage-actor'
-import { DIFFICULTIES } from '../src/game/campaign/types'
+import { DIFFICULTIES, type MapModule, type MissionDef } from '../src/game/campaign/types'
 import { initialMission } from '../src/game/mission'
 
 let passed = 0
@@ -332,6 +332,44 @@ test('the hostage goes down at no health, bleeds out unless revived, and a reviv
   assert(bleedHostage(vitals, HOSTAGE_BLEED_SECONDS + 1), 'bled out: the mission fails')
   assert.equal(vitals.down, 2)
   assert(!reviveHostage(vitals), 'the dead stay dead')
+})
+
+test('a new map plugs in as a module: its anchors drive the same runs, guards and objectives, with no logic changes', () => {
+  // A stand-in for the location maps to come (Balluta Bay, Valletta, Mdina, Marsaxlokk): a harbour with a boat out.
+  const harbour: MapModule = {
+    id: 'test-harbour', name: 'A test harbour', place: 'Nowhere in particular',
+    spawns: { quay: { id: 'quay', label: 'The quay', position: [0, 0, 0], lookAt: [0, 1.6, 10] } },
+    cells: { store: { id: 'store', label: 'The net store', area: 'the net store', hostage: [10, 0, 10], facing: 0, lock: { position: [10, 0, 10.8], facing: Math.PI }, zone: { x: 10, z: 10, r: 4 }, chair: true },
+      tower: { id: 'tower', label: 'The watchtower', area: 'the old tower', hostage: [30, 0, 5], facing: 0, lock: { position: [30, 0, 5.8], facing: Math.PI }, zone: { x: 30, z: 5, r: 4 }, chair: true } },
+    extractions: { boat: { id: 'boat', kind: 'boat', label: 'A boat at the slipway', board: [0, 0, 40], seats: [[0, 0.5, 42]], route: [[0, 0, 42], [0, 0, 90]], camera: { target: [0, 1, 42], offset: [8, 5, -6] },
+      zone: { x: 0, z: 40, r: 8 }, call: { position: [3, 0, 38], facing: 0 }, eta: 60, park: [0, 0, 42], heading: 0 } },
+    cameras: {}, panels: { fuse: { id: 'fuse', kind: 'power', label: 'Cut the power', position: [5, 0, 5], facing: 0 } }, boosts: {},
+    zones: { village: { id: 'village', label: 'The village', x: 15, z: 10, r: 20 } },
+    guards: { quay: { id: 'quay', name: 'Quay watch', position: [5, 0, 20], patrol: [[5, 0, 20], [15, 0, 20]], weapon: 'ak' },
+      extra: { id: 'extra', name: 'Night watch', position: [20, 0, 20], patrol: [[20, 0, 20]], weapon: 'smg', tier: 'hard' } },
+    dogs: {}, preview: { buildings: [[10, 10, 6, 4]], bounds: { minX: -10, maxX: 40, minZ: -5, maxZ: 50 } },
+  }
+  MAPS[harbour.id] = harbour
+  const mission: MissionDef = { id: 'harbour-test', number: 99, name: 'Harbour', briefing: '', estimate: '', map: harbour.id, spawns: ['quay'], cells: ['store', 'tower'], hostages: 1, hostageName: 'Test',
+    extraction: 'boat', cameras: [], panels: ['fuse'], lockedDoors: [], keycards: [], boosts: [], guards: ['quay', 'extra'], dogs: [], alarmLocks: [],
+    stages: [{ id: 'in', title: 'In', objectives: [{ id: 'in', kind: 'reach', zone: 'village', text: 'Reach the village' }] },
+      { id: 'free', title: 'Free', objectives: [{ id: 'find', kind: 'find', text: 'Find' }, { id: 'free', kind: 'free', text: 'Free' }] },
+      { id: 'out', title: 'Out', objectives: [{ id: 'call', kind: 'call', text: 'Call the boat' }, { id: 'defend', kind: 'defend', text: 'Hold' }, { id: 'escort', kind: 'escort', text: 'Aboard' }] }],
+    par: { normal: 600, hard: 700, nightmare: 800 }, tools: { pebbles: 1, charges: 0, drone: false } }
+  assert.equal(mapFor(mission), harbour)
+  const run = createRun(mission, harbour, 'normal', 9)
+  assert(['store', 'tower'].includes(run.cells[0]))
+  assert.deepEqual(resolveGuards(mission, harbour, run, []).map(g => g.id), ['quay'])
+  assert.deepEqual(resolveGuards(mission, harbour, createRun(mission, harbour, 'hard', 9), []).map(g => g.id), ['quay', 'extra'])
+  const cell = harbour.cells[run.cells[0]]
+  updateObjectives(mission, harbour, run, { players: [[15, 0, 10]], hostages: [{ freed: false, loaded: false, position: cell.hostage }], complete: false })
+  assert.equal(run.stage, 1)
+  updateObjectives(mission, harbour, run, { players: [cell.hostage], hostages: [{ freed: true, loaded: false, position: cell.hostage }], complete: false })
+  assert.equal(run.stage, 2)
+  run.called = true; run.arrived = true
+  updateObjectives(mission, harbour, run, { players: [[0, 0, 40]], hostages: [{ freed: true, loaded: false, position: [0, 0, 40] }], complete: false })
+  assert.equal(run.stage, 3, 'the boat run completes like the helicopter one')
+  delete MAPS[harbour.id]
 })
 
 console.log(`${passed} rescue campaign checks passed`)

@@ -10,6 +10,7 @@ import { MISSIONS, MISSION_IDS, mapFor, missionById } from './missions'
 import { CampaignStore, type Stars } from './progress'
 import { buildMapProps, type MapProps } from './props'
 import { FollowEscort } from './escort'
+import { bootMap } from './boot'
 import { guardGear } from './detail'
 import { awardsFor, grantReward, grantXp } from './rewards'
 import { bleedHostage, createRun, currentStage, hurtHostage, insideZone, resolveGuards, reviveHostage, updateObjectives } from './run'
@@ -39,7 +40,8 @@ type Charge = { door: string; fuse: number }
 export class CampaignSession {
   readonly store = new CampaignStore(MISSION_IDS)
   mission: MissionDef = MISSIONS[0]
-  map: MapModule = mapFor(MISSIONS[0])
+  /** The map this page was built with (a mission on another map reloads the page: load()). */
+  map: MapModule = bootMap()
   props: MapProps
   loading = false
   /** Set when a mission ends in success: what the summary shows. */
@@ -94,6 +96,13 @@ export class CampaignSession {
   async load(id: string, difficulty: Difficulty, seed = Math.floor(Math.random() * 2 ** 31), first = false) {
     const r = this.r
     const mission = missionById(id) ?? MISSIONS[0]
+    if (mapFor(mission).id !== this.map.id && typeof location !== 'undefined') {
+      // Another map's geometry: load the page onto it (co-op guests follow through the host's invite link).
+      const url = new URL(location.href)
+      url.searchParams.set('mission', mission.id); url.searchParams.set('difficulty', difficulty)
+      location.href = url.toString()
+      return mission
+    }
     this.loading = true
     this.mission = mission
     this.map = mapFor(mission)

@@ -9,6 +9,7 @@ import { GamepadInput } from './player/gamepad'
 import { padBindings } from './player/pad-bindings'
 import { VRWalkthrough } from './vr/walkthrough'
 import { createMissionWorld, prepareCompound } from './game/world'
+import { bootMap } from './game/campaign/boot'
 import { MissionRuntime } from './game/runtime'
 import { ZombiesRuntime } from './game/zombies/runtime'
 import { getSettings, pixelRatioFor, subscribeSettings } from './game/settings'
@@ -33,9 +34,12 @@ scene.name = 'Black ballpoint compound'
 // Most of the scene stands still: only the matrices of what moved are recomputed each frame.
 skipStillMatrices(scene)
 scene.background = new THREE.Color(palette.paper)
-const compound = createCompound()
-const missionWorld = new URLSearchParams(location.search).get('explore') === '1' ? null : createMissionWorld(compound)
-if (missionWorld) prepareCompound(compound)
+// The hostage mission's map: the compound, or a location map with its own geometry (campaign/boot.ts).
+const explore = new URLSearchParams(location.search).get('explore') === '1'
+const locationMap = explore || new URLSearchParams(location.search).get('mode') === 'zombies' ? null : bootMap().build?.() ?? null
+const compound = locationMap?.scenery ?? createCompound()
+const missionWorld = explore ? null : locationMap?.world ?? createMissionWorld(compound)
+if (missionWorld && !locationMap) prepareCompound(compound)
 scene.add(compound)
 if (missionWorld) scene.add(missionWorld.root)
 
