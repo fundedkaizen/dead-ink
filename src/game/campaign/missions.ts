@@ -11,16 +11,19 @@ export const MAPS: Record<string, MapModule> = { compound: COMPOUND_MAP }
 export const MISSIONS: MissionDef[] = [
   {
     id: 'safe-return', number: 1, name: 'Safe Return', estimate: '20 to 30 minutes', map: 'compound',
-    briefing: 'Tomas Vell, a rail engineer, is held somewhere under the detention block in the east annex. Get in past the mess hall, blind the cameras, find his cell and drive him out through the east gate.',
+    briefing: 'Tomas Vell, a rail engineer, is held somewhere under the detention block in the east annex. Get in past the mess hall, blind the cameras, find the detention keycard, find his cell and drive him out through the east gate.',
     spawns: ['north-road'], cells: ['detention-1', 'detention-2', 'detention-3', 'detention-4'], hostages: 1, hostageName: 'Tomas',
     extraction: 'east-jeep',
     cameras: ['detention-camera', 'jeep-camera', 'security-camera', 'mess-hall-exit-camera', 'rail-pole-camera'],
-    panels: ['ammo-yard', 'ammo-annex'], lockedDoors: [], keycards: [], boosts: ['rail-fence', 'annex-fence'],
+    panels: ['ammo-yard', 'ammo-annex', 'card-mess', 'card-crew'],
+    lockedDoors: [{ door: 'Detention entrance', lock: 'keycard', card: 'detention-card', label: 'the detention block' }],
+    keycards: [{ id: 'detention-card', label: 'the detention keycard', at: ['card-mess', 'card-crew'] }], boosts: ['rail-fence', 'annex-fence'],
     guards: ['world', 'reserve-extra-1', 'reserve-extra-2', 'reserve-extra-3', 'reserve-extra-4', 'annex-rail-watch', 'detention-yard', 'mess-yard-2', 'rail-yard-2', 'annex-night-1', 'annex-night-2', 'yard-night', 'warehouse-night'],
     dogs: [], alarmLocks: [],
     stages: [
       { id: 'in', title: 'Get inside', objectives: [{ id: 'reach-inside', kind: 'reach', zone: 'inside', text: 'Get into the compound: through the mess hall, or round by the west service gate' }] },
       { id: 'blind', title: 'Blind the cameras', objectives: [{ id: 'cameras', kind: 'use', panels: ['signals-office-computer', 'security-computer'], text: 'Shut the cameras down: the office terminal (60 s) or the security cabin (for good)' }] },
+      { id: 'card', title: 'The detention keycard', objectives: [{ id: 'card', kind: 'use', panels: ['card-mess', 'card-crew'], text: 'Find the detention keycard: in the mess hall, or the crew house in the annex (or bring a breach charge)' }] },
       { id: 'find', title: 'Find Tomas', objectives: [{ id: 'reach-annex', kind: 'reach', zone: 'detention', text: 'Reach the detention block in the east annex' }, { id: 'find', kind: 'find', text: 'Search the cells below the detention block' }] },
       { id: 'free', title: 'Free Tomas', objectives: [{ id: 'free', kind: 'free', text: 'Unlock his cell' }] },
       { id: 'escort', title: 'Get him out', objectives: [{ id: 'escort', kind: 'escort', text: 'Bring Tomas to the jeep by the east gate' }] },

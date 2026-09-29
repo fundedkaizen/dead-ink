@@ -105,7 +105,8 @@ export class EnemyNavigation {
   private operableLeaves() {
     let changed = false
     for (let i = 0; i < this.doors.length; i++) {
-      const operable = !this.doors[i].userData.open && !this.doors[i].userData.missionLocked
+      // A door locked against the player but not the guards (the rescue campaign's: `guardKey`) is theirs to open.
+      const operable = !this.doors[i].userData.open && (!this.doors[i].userData.missionLocked || !!this.doors[i].userData.guardKey)
       if (operable !== this.operable[i]) { this.operable[i] = operable; changed = true }
     }
     if (changed) this.ignored = this.doors.filter((_, i) => this.operable[i]).flatMap(door => door.children.filter(child => child.userData.doorHinge))
@@ -225,7 +226,7 @@ export class EnemyNavigation {
   prepareDoor(position: THREE.Vector3, next: THREE.Vector3) {
     // Every zombie step asks this, so it allocates nothing until a door is actually near.
     for (const entry of this.doorPositions) {
-      if (entry.door.userData.missionLocked) continue
+      if (entry.door.userData.missionLocked && !entry.door.userData.guardKey) continue
       const ax = position.x - entry.position.x, az = position.z - entry.position.z
       if (ax * ax + az * az > 2.2 * 2.2) continue
       const closest = doorSegment.set(position, next).closestPointToPoint(entry.position, true, doorClosest)

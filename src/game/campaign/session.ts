@@ -172,7 +172,8 @@ export class CampaignSession {
       if (!door) continue
       const open = run.unlocked.includes(locked.door)
       door.userData.missionLocked = !open
-      if (!open && door.userData.open) setDoorOpen(door, false, true)
+      // The guards carry keys: they still come and go through it (and a door a guard leaves open is a chance).
+      door.userData.guardKey = true
     }
     for (const name of this.mission.alarmLocks) {
       const door = this.doors.get(name)
