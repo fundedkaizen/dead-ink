@@ -11,6 +11,8 @@ import type { EquippedCosmetics, GloveId, KnifeId } from './zombies/cosmetics/ca
 import { CHARM_ANCHORS, CHARM_LENGTH, KNIFE_BUILDERS, animateCosmetics, applyCamo, buildCharm, buildWatch, gloveMaterial, removeCamo } from './zombies/cosmetics/models'
 import { applyDragonSkin, removeDragonSkin } from './zombies/mythic'
 import { Offhand, firingHand, isAkimbo, type Kick } from './akimbo'
+import { InkHand, mixPose, type HandPose } from './hands'
+import { gripPlan, placeHand, type GripPlan } from './grips'
 export { WEAPON_RULES } from './balance'
 
 const up = new THREE.Vector3(0, 1, 0)
@@ -75,6 +77,12 @@ export const CHARGE_TIME = 1.1
 const charges = (item: WeaponItem | null) => item?.special === 'inkCannon'
 /** The lever rifle's lever swings down and back after every shot, over this share of its interval. */
 const LEVER_THROW = 0.75
+/** The support hand opened, to take hold of something while reloading. */
+const OPEN_SUPPORT: HandPose = {
+  fingers: [{ curl: [0.25, 0.3, 0.2], spread: 0.12 }, { curl: [0.25, 0.3, 0.2], spread: 0.03 }, { curl: [0.25, 0.3, 0.2], spread: -0.06 }, { curl: [0.28, 0.32, 0.22], spread: -0.14 }],
+  thumb: { yaw: 0.45, lift: 0.4, curl: [0.1, 0.12, 0.08] },
+}
+const delta = (dt: number) => Math.max(0, Math.min(Number.isFinite(dt) ? dt : 0, 0.1))
 /** An upgraded shotgun loads this many shells per reload cycle, as in Call of Duty. */
 const PACKED_SHELLS = 4
 const upgraded = (item: WeaponItem) => item.packed === true || ((item as { packLevel?: number }).packLevel ?? 0) >= 1
@@ -129,7 +137,6 @@ export class FirstPersonWeapons {
   private upperArmGeometry = new THREE.CylinderGeometry(0.055, 0.075, 1, 24)
   private forearmGeometry = new THREE.CylinderGeometry(0.035, 0.057, 1, 24)
   private jointGeometry = new THREE.SphereGeometry(0.057, 20, 16)
-  private palmGeometry = new THREE.SphereGeometry(1, 20, 16)
   private flashGeometry = this.makeFlashGeometry()
   private flashMaterial = applyPenMaterial(new THREE.MeshBasicMaterial({ color: penPalette.ink, transparent: true, opacity: 0.95, side: THREE.DoubleSide, toneMapped: false }), { density: 0.47, scale: 90, seed: 829 })
   private flash = new THREE.Mesh(this.flashGeometry, this.flashMaterial)
@@ -201,6 +208,17 @@ export class FirstPersonWeapons {
   private offhand: Offhand | null = null
   /** Every mitten shape of both hands (their material is the gloves'), and the two cuffs round the wrists. */
   private handShapes: THREE.Mesh[] = []
+  /** The hands themselves (hands.ts): jointed fingers wrapped round each gun as its grip plan says (grips.ts). */
+  private firingHand: InkHand
+  private supportHand: InkHand
+  private plan: GripPlan | null = null
+  /** The lever rifle's lever turned from rest (in the mount's frame), which the firing hand rides; null at rest. */
+  private leverDelta: THREE.Matrix4 | null = null
+  /** The index finger's pull on the trigger (0 resting, 1 pulled), and the poses last drawn (redrawn only on change). */
+  private triggerPull = 0
+  private shownFiring = ''
+  private shownSupport = ''
+  private scratchPose: HandPose | null = null
   private cuffs: THREE.Mesh[] = []
   private gloves: GloveId | null = null
   private strapGeometry = new THREE.CylinderGeometry(0.0435, 0.0435, 0.012, 20, 1, true)
@@ -217,10 +235,15 @@ export class FirstPersonWeapons {
     this.knifeHand.add(this.knifeSpin)
     this.knifeHand.visible = false
     this.flash.visible = false
-    this.makeHand(this.rightHand, true)
+    this.rightHand.name = 'Right connected mitten grip'
+    this.firingHand = new InkHand('Right hand', this.armMaterial)
+    this.rightHand.add(this.firingHand.root)
     this.leftHand.name = 'Left reload and support hand'
     this.leftHand.add(this.supportFingers)
-    this.makeHand(this.supportFingers, false)
+    this.supportFingers.name = 'Left connected support mitten'
+    this.supportHand = new InkHand('Left hand', this.armMaterial, true)
+    this.supportFingers.add(this.supportHand.root)
+    this.handShapes.push(this.firingHand.mesh, this.supportHand.mesh)
     this.arms = [
       this.makeArm(new THREE.Vector3(0.24, -0.34, -0.1), new THREE.Vector3(0.75, -1, 0.4)),
       this.makeArm(new THREE.Vector3(-0.2, -0.34, -0.16), new THREE.Vector3(-0.7, -1, 0.3)),
@@ -273,25 +296,6 @@ export class FirstPersonWeapons {
     return new THREE.ShapeGeometry(star)
   }
 
-  private mitten(parent: THREE.Group, position: [number, number, number], scale: [number, number, number]) {
-    const shape = this.armShape(this.palmGeometry)
-    this.handShapes.push(shape)
-    shape.position.set(...position)
-    shape.scale.set(scale[0] * 1.12, scale[1] * 1.06, scale[2] * 1.08)
-    parent.add(shape)
-  }
-
-  private makeHand(hand: THREE.Group, firing: boolean) {
-    hand.name = firing ? 'Right connected mitten grip' : 'Left connected support mitten'
-    if (firing) {
-      this.mitten(hand, [-0.023, -0.012, -0.010], [0.033, 0.043, 0.036])
-      this.mitten(hand, [-0.002, 0.012, 0.018], [0.020, 0.022, 0.034])
-    } else {
-      this.mitten(hand, [0, -0.022, 0], [0.042, 0.025, 0.045])
-      this.mitten(hand, [-0.030, -0.001, 0.010], [0.017, 0.029, 0.031])
-    }
-  }
-
   private segment(mesh: THREE.Mesh, start: THREE.Vector3, end: THREE.Vector3) {
     const direction = end.clone().sub(start)
     mesh.position.copy(start).add(end).multiplyScalar(0.5)
@@ -342,6 +346,11 @@ export class FirstPersonWeapons {
         this.partRotation.set(part, part.rotation.clone())
       }
       this.flash.position.copy(this.model.userData.muzzle).z += 0.035
+      // The grip (before dressing, so a charm is not taken for part of the gun): hands placed and wrapped round it.
+      this.plan = gripPlan(this.model as never, this.current)
+      placeHand(this.firingHand, this.plan.firing)
+      placeHand(this.supportHand, this.plan.support.clone().setPosition(0, 0, 0))
+      this.shownFiring = this.shownSupport = ''
       this.dress()
       if (outgoing) this.model.visible = false
       // The Deadline: a second Magnum in the left hand, the right hand's mirror image.
@@ -420,7 +429,8 @@ export class FirstPersonWeapons {
     if (id === this.gloves) return
     this.gloves = id
     const material = id ? gloveMaterial(id) : this.armMaterial
-    for (const shape of this.handShapes) shape.material = material
+    const handMaterial = id ? gloveMaterial(id, 'hand') : this.armMaterial
+    for (const shape of this.handShapes) shape.material = handMaterial
     if (id && !this.cuffs.length) {
       const geometry = new THREE.CylinderGeometry(0.04, 0.042, 0.036, 20, 1, true)
       for (let i = 0; i < 2; i++) {
@@ -1030,7 +1040,18 @@ export class FirstPersonWeapons {
         // The hammer rests cocked; the shot drops it forward and the lever throw rocks it back to full cock.
         const hammer = this.model.userData.parts.hammer
         if (hammer && current.name === 'lever' && motion) hammer.rotation.x += 0.55 * (1 - THREE.MathUtils.smoothstep(t, 0.15, 0.5))
+      } else if (lever && this.reloading && motion) {
+        // Loaded, the hand works the lever once to chamber a round.
+        lever.rotation.x -= 0.95 * Math.sin(Math.PI * THREE.MathUtils.clamp((progress - 0.84) / 0.13, 0, 1))
       }
+      // The firing hand is through the lever's loop: it rides the lever as it swings.
+      this.leverDelta = null
+      if (lever && lever.rotation.x !== this.partRotation.get(lever)!.x) {
+        lever.updateMatrix(); this.model.updateMatrix()
+        const rest = new THREE.Matrix4().compose(this.partRest.get(lever)!, new THREE.Quaternion().setFromEuler(this.partRotation.get(lever)!), lever.scale)
+        this.leverDelta = this.model.matrix.clone().multiply(lever.matrix).multiply(rest.invert()).multiply(this.model.matrix.clone().invert())
+      }
+      if (lever && this.plan) placeHand(this.firingHand, this.leverDelta ? this.leverDelta.clone().multiply(this.plan.firing) : this.plan.firing)
       // The Magnum's cylinder swings out, spins, and snaps back in on a reload; it turns a chamber a shot.
       const cylinder = this.model.userData.parts.cylinder
       if (cylinder) {
@@ -1059,7 +1080,9 @@ export class FirstPersonWeapons {
     }
     this.root.updateWorldMatrix(true, true)
     const shoulders = this.arms.map((arm, index) => arm.shoulder.clone().add(hit?.shoulders[index] ?? new THREE.Vector3()))
-    const wrist = this.root.worldToLocal(this.mount.localToWorld(GRIP_WRIST.clone()))
+    const gripWrist = (this.plan?.wrist ?? GRIP_WRIST).clone()
+    if (this.leverDelta) gripWrist.applyMatrix4(this.leverDelta)
+    const wrist = this.root.worldToLocal(this.mount.localToWorld(gripWrist))
     const reachableWrist = wrist.clone().sub(shoulders[0]).clampLength(0.021, 0.699).add(shoulders[0])
     // Move the whole grip if a combined reload/recoil/hit reaches the IK limit.
     // The firing hand stays attached and neither arm is stretched to fake impact.
@@ -1073,15 +1096,14 @@ export class FirstPersonWeapons {
     if (this.offhand) this.offhand.mount.visible = !!offhand
     // A pistol's free hand comes up into view to show the watch while the gun is inspected.
     const showWrist = pistol && inspect > 0.02 && !offhand
-    this.leftHand.visible = !knife && !offhand && (!pistol || showWrist || this.reloadElapsed !== null && this.reloadElapsed >= 0)
+    // Every gun is held in both hands now (a pistol in a cup grip), except while the knife or a throw has the hand.
+    this.leftHand.visible = !knife && !offhand
     const leftArm = this.arms[1]
     leftArm.upper.visible = leftArm.fore.visible = leftArm.elbow.visible = this.leftHand.visible || !!offhand
-    const support = held?.userData.support?.clone() ?? new THREE.Vector3(0, 0.035, 0.145)
-    // Place the palm against the fore-end rather than intersecting the receiver.
-    if (held?.userData.support) support.y += 0.026
+    // The support hand's wrist, where its grip plan puts it (it rides with the pump).
+    const support = (this.plan?.supportWrist ?? held?.userData.support ?? new THREE.Vector3(0, 0.035, 0.145)).clone()
     if (pump) support.z += pump.position.z - this.partRest.get(pump)!.z
-    // Pistols stay in the right hand; the reload hand enters and leaves below view.
-    const left = pistol || knife ? new THREE.Vector3(-0.28, -0.7, -0.12)
+    const left = knife ? new THREE.Vector3(-0.28, -0.7, -0.12)
       : this.root.worldToLocal(this.mount.localToWorld(support))
     // High enough that the watch behind the hand clears the bottom of a 16:9 screen, left of the hotbar.
     if (showWrist) left.lerp(new THREE.Vector3(-0.15, -0.14, -0.33), inspect)
@@ -1131,6 +1153,7 @@ export class FirstPersonWeapons {
     this.placeArm(this.arms[1], left, shoulders[1])
     this.placeWatch(left)
     this.placeCuffs([reachableWrist, left])
+    this.poseFingers(delta(dt), progress)
     this.swingCharm(dt)
     if (this.cosmetics) animateCosmetics(this.frame.reducedMotion ? 1 : performance.now() / 1000 % 1000, [this.watch, this.charm?.model, this.knifeModel])
   }
@@ -1282,6 +1305,33 @@ export class FirstPersonWeapons {
       m.position.y += 0.06 * Math.sin(Math.PI * toss)
       const turn = smooth(s, 0.9, 1.5)
       m.rotation.y += 0.5 * Math.sin(Math.PI * turn)
+    }
+  }
+
+  /**
+   * The fingers: the firing hand's index finger comes onto the trigger as it fires and eases back after; the
+   * support hand keeps its grip, and opens to take a magazine, a shell or a warhead while reloading. A hand is
+   * only redrawn when its pose changes.
+   */
+  private poseFingers(dt: number, progress: number) {
+    const plan = this.plan
+    if (!plan) return
+    const firing = this.held && this.current && (WEAPON_RULES[this.current.name].automatic || !!BURST_FIRE[this.current.name])
+    const target = firing || this.flashTime > 0 || (this.charge !== null) ? 1 : 0
+    this.triggerPull += (target - this.triggerPull) * Math.min(1, dt * (target ? 40 : 12))
+    const pull = Math.round(this.triggerPull * 20) / 20
+    const firingKey = `${pull}`
+    if (firingKey !== this.shownFiring) {
+      this.shownFiring = firingKey
+      this.scratchPose = mixPose(plan.idle, plan.pull, pull, this.scratchPose ?? undefined)
+      this.firingHand.setPose(this.scratchPose)
+    }
+    // Reloading: the fingers open as the hand leaves the grip and close again on what it takes.
+    const reach = this.reloading ? smooth(progress, 0.02, 0.12) * (1 - smooth(progress, 0.2, 0.3)) + smooth(progress, 0.6, 0.66) * (1 - smooth(progress, 0.72, 0.8)) : 0
+    const supportKey = `${Math.round(reach * 10) / 10}`
+    if (supportKey !== this.shownSupport) {
+      this.shownSupport = supportKey
+      this.supportHand.setPose(mixPose(plan.supportPose, OPEN_SUPPORT, Math.round(reach * 10) / 10))
     }
   }
 
@@ -1580,7 +1630,7 @@ export class FirstPersonWeapons {
     for (const { model } of this.loose.values()) disposeGun(model)
     this.loose.clear()
     this.root.removeFromParent()
-    for (const geometry of [this.upperArmGeometry, this.forearmGeometry, this.jointGeometry, this.palmGeometry, this.flashGeometry]) geometry.dispose()
+    for (const geometry of [this.upperArmGeometry, this.forearmGeometry, this.jointGeometry, this.flashGeometry]) geometry.dispose()
     this.armMaterial.dispose()
     this.flashMaterial.dispose()
   }

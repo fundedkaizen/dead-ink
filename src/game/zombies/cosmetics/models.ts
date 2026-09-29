@@ -639,23 +639,34 @@ export function removeCamo(model: THREE.Object3D) {
  * palm faces -Y, the fingers +Z. Colour only where rarity earns it.
  */
 const GLOVE_CODE: Record<GloveId, number> = { work: 0, tactical: 1, rubber: 2, wraps: 3, origami: 4, boxing: 5, bones: 6, brute: 7, midas: 8, heartstring: 9 }
-const gloveMaterials = new Map<GloveId, THREE.MeshBasicMaterial>()
+const gloveMaterials = new Map<string, THREE.MeshBasicMaterial>()
 const gloveTime = { value: 0 }
 
-export function gloveMaterial(id: GloveId) {
-  const cached = gloveMaterials.get(id)
+/**
+ * `part` 'hand': the jointed first-person hand (hands.ts), which carries its own glove coordinates (across the
+ * hand, out of its back, along it); 'cuff': anything else, patterned from its own shape.
+ */
+export function gloveMaterial(id: GloveId, part: 'hand' | 'cuff' = 'cuff') {
+  const cached = gloveMaterials.get(`${id}:${part}`)
   if (cached) return cached
   const material = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 })
   // Dark gloves are stitched in pale thread, the rest in dark.
-  material.defines = { GLOVE: GLOVE_CODE[id], ...(id === 'tactical' || id === 'bones' || id === 'brute' || id === 'midas' ? { GLOVE_PALE_THREAD: 1 } : {}) }
+  material.defines = { GLOVE: GLOVE_CODE[id], ...(id === 'tactical' || id === 'bones' || id === 'brute' || id === 'midas' ? { GLOVE_PALE_THREAD: 1 } : {}), ...(part === 'hand' ? { GLOVE_COORD: 1 } : {}) }
   material.onBeforeCompile = shader => {
     shader.uniforms.gloveTime = gloveTime
     shader.uniforms.gloveGold = { value: new THREE.Color(RARITY_INFO.legendary.color) }
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>
-        varying vec3 vGlove;`)
+        varying vec3 vGlove;
+        #ifdef GLOVE_COORD
+          attribute vec3 gloveCoord;
+        #endif`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
-        vGlove = position;`)
+        #ifdef GLOVE_COORD
+          vGlove = gloveCoord;
+        #else
+          vGlove = position;
+        #endif`)
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>
         varying vec3 vGlove;
@@ -760,9 +771,9 @@ export function gloveMaterial(id: GloveId) {
       .replace('#include <color_fragment>', `#include <color_fragment>
         diffuseColor.rgb = gloveMake(glovePattern(vGlove), vGlove);`)
   }
-  material.customProgramCacheKey = () => `dead-ink-glove:${id}`
+  material.customProgramCacheKey = () => `dead-ink-glove:${id}:${part}`
   if (id === 'heartstring') material.onBeforeRender = () => { gloveTime.value = reducedMotion() ? 0.7 : performance.now() / 1000 % 1000 }
-  gloveMaterials.set(id, material)
+  gloveMaterials.set(`${id}:${part}`, material)
   return material
 }
 
