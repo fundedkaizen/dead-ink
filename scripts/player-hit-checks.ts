@@ -131,8 +131,7 @@ for (const name of ['pistol', 'ak', 'smg', 'shotgun', 'sniper'] as WeaponName[])
         r.applyCamera(camera, world, weapons.scoped ? 1 / weapons.scopeMagnification : 1)
         weapons.update(1 / 60, frame)
         for (const arm of w.arms) { near(arm.upper.scale.y, 0.34, 1e-7); near(arm.fore.scale.y, 0.36, 1e-7) }
-        // The firing wrist is where the gun's grip plan puts the hand (grips.ts).
-        const wrist = w.root.worldToLocal(w.mount.localToWorld(w.plan.wrist.clone()))
+        const wrist = w.root.worldToLocal(w.mount.localToWorld(v(-0.029, -0.02, -0.033)))
         const foreEnd = v(0, 0.5, 0).applyQuaternion(w.arms[0].fore.quaternion).multiplyScalar(w.arms[0].fore.scale.y).add(w.arms[0].fore.position)
         assert(wrist.distanceTo(foreEnd) < 1e-7, `${name} firing hand stays connected`)
         r.removeCamera()

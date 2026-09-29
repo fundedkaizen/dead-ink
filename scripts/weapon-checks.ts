@@ -165,7 +165,7 @@ test('Pickup accepts the action selector facing edge and rejects targets beyond 
   weapons.dispose()
 })
 
-test('First-person pistols are held in both hands, the free hand cupping the grip, and reloaded with it', () => {
+test('First-person pistols use one hand while aiming and firing, with a left hand only for reloads', () => {
   const { weapons, scene, shots, step } = setup()
   const rig = scene.getObjectByName('First-person stickman arms')!
   const leftHand = rig.getObjectByName('Left reload and support hand')!
@@ -175,26 +175,26 @@ test('First-person pistols are held in both hands, the free hand cupping the gri
     for (const part of [leftHand, ...limbs.slice(2), elbows[1]]) assert.equal(part.visible, visible)
     for (const part of [...limbs.slice(0, 2), elbows[0]]) assert(part.visible, 'Firing arm stays visible')
   }
-  expectSupport(true)
+  expectSupport(false)
   for (const reducedMotion of [false, true]) {
     step(0.4, { moving: 1, aiming: true, reducedMotion })
-    expectSupport(true)
+    expectSupport(false)
     weapons.trigger(true); step(1 / 60); weapons.trigger(false)
-    expectSupport(true)
+    expectSupport(false)
   }
   assert.equal(shots.length, 2)
   assert(weapons.reload()); step(0.4)
   expectSupport(true)
   step(2)
   assert(!weapons.reloading)
-  expectSupport(true)
+  expectSupport(false)
   const saved = weapons.snapshot()
   saved.slots[1] = { id: 'support-rifle', name: 'ak', magazine: 4, reserve: 9 }
   weapons.restore(saved)
   assert(weapons.switchSlot(1)); step(0.3)
   expectSupport(true)
   assert(weapons.switchSlot(0)); step(0.3)
-  expectSupport(true)
+  expectSupport(false)
   weapons.dispose()
 })
 
