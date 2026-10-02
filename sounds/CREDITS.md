@@ -35,3 +35,7 @@ The extracted PCM WAVs (1.75 MB) are no longer served; `manifest.json` still des
 Measured with `decodeAudioData` in Chrome 147 and Safari 26.3 against the WAVs (cross-correlation of the decoded head): AAC `.m4a` starts 0 samples late in both; MP3 starts 13–26 ms late in Safari and Ogg Opus loses the first 6.5 ms in Chrome, so neither is used. Firefox was not measured. Do not re-encode with ffmpeg's native `aac` encoder: at the same bitrates it measured 4 dB SNR on the gravel footsteps against 13 dB for `aac_at`.
 
 The earlier CC0 `.m4a` recordings stay as fallbacks but are only downloaded for kinds whose IGI samples fail to load. The unused `ladder_0/1.m4a` were deleted.
+
+## Reload recordings (2026-10-02)
+
+- `reload/<group>-<out|in|rack>.m4a` for pistol, smg, rifle, lmg and sniper: cut from SoundDino's royalty-free, no-attribution weapon reload recordings (https://sounddino.com/en/effects/weapon-reload/): "Tactful clear reload", "Automatic fast recharge", "Professional quick reload weapons", "Heavy reloading of powerful heavy weapons", "Reloading a rifle while hunting". Each cut at its magazine-out, magazine-in and rack transients, faded and normalized.
