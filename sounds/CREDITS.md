@@ -39,3 +39,8 @@ The earlier CC0 `.m4a` recordings stay as fallbacks but are only downloaded for 
 ## Reload recordings (2026-10-02)
 
 - `reload/<group>-<out|in|rack>.m4a` for pistol, smg, rifle, lmg and sniper: cut from SoundDino's royalty-free, no-attribution weapon reload recordings (https://sounddino.com/en/effects/weapon-reload/): "Tactful clear reload", "Automatic fast recharge", "Professional quick reload weapons", "Heavy reloading of powerful heavy weapons", "Reloading a rifle while hunting". Each cut at its magazine-out, magazine-in and rack transients, faded and normalized.
+
+## Call of Duty sounds (2026-10-03)
+
+- `cod/mw2/`: Call of Duty: Modern Warfare 2 (2009) weapon sounds, exported from the owner's Steam copy with IW4L (crates/sound_export).
+- `cod/zm/`, `cod/bo3/`, `cod/dempsey/`: Call of Duty: Black Ops III zombies sounds and Dempsey's lines (The Giant), unpacked from the owner's Steam copy (D:\HYDRA\cod-anims\sab.py, pack_cod_sounds.py, bo3_extra.py). Personal, non-commercial project.
